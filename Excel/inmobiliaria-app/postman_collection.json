@@ -1,0 +1,576 @@
+{
+  "info": {
+    "name": "Inmobiliaria API - Fase 1.5",
+    "description": "Colección de endpoints para el Sistema de Gestión Inmobiliaria. Incluye Email/Password + Google OAuth",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/api"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "groupId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/register",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"test@example.com\",\n  \"password\": \"Password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data) {",
+                  "    pm.collectionVariables.set('accessToken', jsonData.data.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', jsonData.data.refreshToken);",
+                  "    if (jsonData.data.groups && jsonData.data.groups.length > 0) {",
+                  "        pm.collectionVariables.set('groupId', jsonData.data.groups[0].id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/login",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@hh.com\",\n  \"password\": \"Password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/refresh",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/logout",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {      "name": "Verify Email",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"your-verification-token-here\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/verify-email",
+          "host": ["{{BASE_URL}}"],
+          "path": ["auth", "verify-email"]
+        }
+      }
+    },
+    {
+      "name": "Resend Verification Email",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"user@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/resend-verification",
+          "host": ["{{BASE_URL}}"],
+          "path": ["auth", "resend-verification"]
+        }
+      }
+    },
+    {
+      "name": "Forgot Password",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"user@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/forgot-password",
+          "host": ["{{BASE_URL}}"],
+          "path": ["auth", "forgot-password"]
+        }
+      }
+    },
+    {
+      "name": "Reset Password",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"your-reset-token-here\",\n  \"password\": \"newPassword123\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/reset-password",
+          "host": ["{{BASE_URL}}"],
+          "path": ["auth", "reset-password"]
+        }
+      }
+    },
+    {      "name": "Groups",
+      "item": [
+        {
+          "name": "List My Groups",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/groups",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Create Group",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.id) {",
+                  "    pm.collectionVariables.set('groupId', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/groups",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nueva Inmobiliaria\",\n  \"description\": \"Descripción de la inmobiliaria\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Group",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Update Group",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nombre Actualizado\",\n  \"punitoryRate\": 0.008\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Group",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "item": [
+        {
+          "name": "List Members",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/groups/{{groupId}}/members",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        },
+        {          "name": "Get Categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/categories",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "categories"]
+            }
+          }
+        },
+        {
+          "name": "Create Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VARIOS\",\n  \"color\": \"blue\",\n  \"description\": \"Propiedades varias\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/categories",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "categories"]
+            }
+          }
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VARIOS UPDATED\",\n  \"color\": \"green\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/categories/{{categoryId}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "categories", "{{categoryId}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/categories/{{categoryId}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "categories", "{{categoryId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Properties",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/properties?search=&categoryId=&isActive=true",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "properties"],
+              "query": [
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "categoryId",
+                  "value": ""
+                },
+                {
+                  "key": "isActive",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Property by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/properties/{{propertyId}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "properties", "{{propertyId}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Property",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"Av. Corrientes 1234\",\n  \"code\": \"4B\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"squareMeters\": 45,\n  \"rooms\": 2,\n  \"bathrooms\": 1,\n  \"floor\": \"4\",\n  \"apartment\": \"B\",\n  \"observations\": \"Departamento con balcón\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/properties",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "properties"]
+            }
+          }
+        },
+        {
+          "name": "Update Property",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"Av. Corrientes 1234 - Updated\",\n  \"squareMeters\": 50\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/properties/{{propertyId}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "properties", "{{propertyId}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Property",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/groups/{{groupId}}/properties/{{propertyId}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["groups", "{{groupId}}", "properties", "{{propertyId}}"]
+            }
+          }
+        },
+        {          "name": "Invite User",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/groups/{{groupId}}/invite",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nuevo@usuario.com\",\n  \"role\": \"OPERATOR\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Pending Invites",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/groups/{{groupId}}/invites",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        }
+      ]
+    }
+  ]
+}

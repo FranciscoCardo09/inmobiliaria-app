@@ -1,0 +1,185 @@
+// Prisma Schema - Sistema Gestion Inmobiliaria
+// Fase 1.6: Email Verification + Password Reset
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Para desarrollo local usa SQLite, para produccion usa PostgreSQL
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  passwordHash     String?   @map("password_hash")
+  name             String
+  globalRole       String    @default("USER") @map("global_role")
+  isActive         Boolean   @default(true) @map("is_active")
+  isEmailVerified  Boolean   @default(false) @map("is_email_verified")
+  lastLoginAt      DateTime? @map("last_login_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Google OAuth
+  googleId         String?   @unique @map("google_id")
+  avatar           String?
+
+  // Relations
+  groups                  UserGroup[]
+  sentInvites             GroupInvite[] @relation("InviteSender")
+  refreshTokens           RefreshToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+
+  @@map("users")
+}
+
+model Group {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  punitoryRate  Float    @default(0.006) @map("punitory_rate")
+  currency      String   @default("ARS")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  members       UserGroup[]
+  invites       GroupInvite[]
+  categories    Category[]
+  properties    Property[]
+
+  @@map("groups")
+}
+
+model UserGroup {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  groupId   String   @map("group_id")
+  role      String   @default("VIEWER")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@map("user_groups")
+}
+
+model GroupInvite {
+  id          String    @id @default(uuid())
+  groupId     String    @map("group_id")
+  email       String
+  role        String    @default("VIEWER")
+  token       String    @unique
+  status      String    @default("PENDING")
+  invitedById String    @map("invited_by_id")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  acceptedAt  DateTime? @map("accepted_at")
+
+  // Relations
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitedBy   User      @relation("InviteSender", fields: [invitedById], references: [id])
+
+  @@map("group_invites")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// Email Verification Token
+model EmailVerificationToken {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+// Password Reset Token
+model PasswordResetToken {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  usedAt      DateTime? @map("used_at")
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+// ============================================
+// FASE 2: Property Management Models
+// ============================================
+
+// Category - Categorías de propiedades por grupo
+model Category {
+  id          String   @id @default(uuid())
+  groupId     String   @map("group_id")
+  name        String   // VARIOS, MATIENZO, LOCAL
+  color       String?  // blue, green, orange
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  properties  Property[]
+
+  @@unique([groupId, name])
+  @@map("categories")
+}
+
+// Property - Propiedades inmobiliarias
+model Property {
+  id              String   @id @default(uuid())
+  groupId         String   @map("group_id")
+  categoryId      String?  @map("category_id")
+  address         String   // Dirección completa
+  code            String?  // Código interno (ej: "4B", "LC")
+  squareMeters    Float?   @map("square_meters") // m²
+  rooms           Int?     // Habitaciones
+  bathrooms       Int?     // Baños
+  floor           String?  // Piso/Planta
+  apartment       String?  // Departamento
+  observations    String?  // Notas adicionales
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  category        Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@map("properties")
+}
