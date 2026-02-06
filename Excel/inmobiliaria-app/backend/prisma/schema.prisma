@@ -1,5 +1,5 @@
 // Prisma Schema - Sistema Gestion Inmobiliaria
-// Fase 1.6: Email Verification + Password Reset
+// Fase 3: Inquilinos + Contratos
 
 generator client {
   provider = "prisma-client-js"
@@ -53,10 +53,15 @@ model Group {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  members       UserGroup[]
-  invites       GroupInvite[]
-  categories    Category[]
-  properties    Property[]
+  members           UserGroup[]
+  invites           GroupInvite[]
+  categories        Category[]
+  owners            Owner[]
+  properties        Property[]
+  tenants           Tenant[]
+  contracts         Contract[]
+  adjustmentIndices AdjustmentIndex[]
+  payments          Payment[]
 
   @@map("groups")
 }
@@ -160,11 +165,31 @@ model Category {
   @@map("categories")
 }
 
+// Owner - Dueños de propiedades
+model Owner {
+  id          String   @id @default(uuid())
+  groupId     String   @map("group_id")
+  name        String
+  dni         String
+  phone       String
+  email       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  properties  Property[]
+
+  @@unique([groupId, dni])
+  @@map("owners")
+}
+
 // Property - Propiedades inmobiliarias
 model Property {
   id              String   @id @default(uuid())
   groupId         String   @map("group_id")
   categoryId      String?  @map("category_id")
+  ownerId         String?  @map("owner_id")
   address         String   // Dirección completa
   code            String?  // Código interno (ej: "4B", "LC")
   squareMeters    Float?   @map("square_meters") // m²
@@ -180,6 +205,127 @@ model Property {
   // Relations
   group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
   category        Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  owner           Owner?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  contracts       Contract[]
 
   @@map("properties")
+}
+
+// ============================================
+// FASE 3: Tenants & Contracts
+// ============================================
+
+// AdjustmentIndex - Índices de ajuste de alquiler
+model AdjustmentIndex {
+  id              String   @id @default(uuid())
+  groupId         String   @map("group_id")
+  name            String   // ej: "IPC Trimestral", "Índice Mensual"
+  frequencyMonths Int      @map("frequency_months") // cada cuántos meses (1, 3, 4, 6, 12)
+  currentValue    Float    @default(0) @map("current_value") // Porcentaje actual (ej: 15.5 = 15.5% de aumento)
+  lastUpdated     DateTime? @map("last_updated") // Última vez que se actualizó el valor
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contracts       Contract[]
+
+  @@unique([groupId, name])
+  @@map("adjustment_indices")
+}
+
+// Tenant - Inquilinos (sin garante - el garante se movió a Owner)
+model Tenant {
+  id              String   @id @default(uuid())
+  groupId         String   @map("group_id")
+  name            String   // Nombre completo
+  dni             String   // DNI / CUIT
+  phone           String?  // Teléfono
+  email           String?  // Email contacto
+  observations    String?  // Notas
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contracts       Contract[]
+
+  @@unique([groupId, dni])
+  @@map("tenants")
+}
+
+// Contract - Contratos de alquiler
+model Contract {
+  id                  String   @id @default(uuid())
+  groupId             String   @map("group_id")
+  tenantId            String   @map("tenant_id")
+  propertyId          String   @map("property_id")
+  startDate           DateTime @map("start_date")          // Fecha inicio
+  startMonth          Int      @default(1) @map("start_month") // Mes de inicio del contrato (para calcular ajustes)
+  durationMonths      Int      @map("duration_months")     // Duración total en meses
+  currentMonth        Int      @default(1) @map("current_month") // Mes actual (1..durationMonths)
+  baseRent            Float    @map("base_rent")           // Monto alquiler mensual base
+  active              Boolean  @default(true)               // true = activo, false = finalizado
+
+  // Ajustes periódicos
+  adjustmentIndexId   String?  @map("adjustment_index_id")
+  nextAdjustmentMonth Int?     @map("next_adjustment_month") // Mes del contrato del próximo ajuste
+
+  // Punitorios
+  punitoryStartDay    Int      @default(10) @map("punitory_start_day") // Día desde donde cuentan punitorios
+  punitoryPercent     Float    @default(0.006) @map("punitory_percent") // % diario (0.006 = 0.6%)
+
+  observations        String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group               Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property            Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  adjustmentIndex     AdjustmentIndex? @relation(fields: [adjustmentIndexId], references: [id], onDelete: SetNull)
+  payments            Payment[]
+
+  @@map("contracts")
+}
+
+// ============================================
+// FASE 4: Pagos
+// ============================================
+
+model Payment {
+  id             String           @id @default(uuid())
+  groupId        String           @map("group_id")
+  contractId     String           @map("contract_id")
+  monthNumber    Int              @map("month_number")
+  paymentDate    DateTime?        @map("payment_date")
+  totalDue       Float            @map("total_due")
+  amountPaid     Float            @default(0) @map("amount_paid")
+  balance        Float            @default(0)
+  status         String           @default("PENDING")
+  observations   String?
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  group          Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contract       Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  concepts       PaymentConcept[]
+
+  @@unique([contractId, monthNumber])
+  @@map("payments")
+}
+
+model PaymentConcept {
+  id             String   @id @default(uuid())
+  paymentId      String   @map("payment_id")
+  type           String
+  description    String?
+  amount         Float
+  isAutomatic    Boolean  @default(false) @map("is_automatic")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  payment        Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("payment_concepts")
 }

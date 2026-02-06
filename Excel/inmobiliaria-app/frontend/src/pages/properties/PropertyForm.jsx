@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useProperties } from '../../hooks/useProperties'
 import { useCategories } from '../../hooks/useCategories'
+import { useOwners } from '../../hooks/useOwners'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
@@ -19,6 +20,7 @@ export const PropertyForm = () => {
 
   const { createProperty, updateProperty, isCreating, isUpdating, useProperty } = useProperties(currentGroup?.id)
   const { categories } = useCategories(currentGroup?.id)
+  const { owners } = useOwners(currentGroup?.id)
 
   const { data: property, isLoading: isLoadingProperty } = isEditing ? useProperty(id) : { data: null, isLoading: false }
 
@@ -26,6 +28,7 @@ export const PropertyForm = () => {
     address: '',
     code: '',
     categoryId: '',
+    ownerId: '',
     squareMeters: '',
     rooms: '',
     bathrooms: '',
@@ -42,6 +45,7 @@ export const PropertyForm = () => {
         address: property.address || '',
         code: property.code || '',
         categoryId: property.categoryId || '',
+        ownerId: property.ownerId || '',
         squareMeters: property.squareMeters || '',
         rooms: property.rooms || '',
         bathrooms: property.bathrooms || '',
@@ -76,6 +80,7 @@ export const PropertyForm = () => {
     const data = {
       ...formData,
       categoryId: formData.categoryId || null,
+      ownerId: formData.ownerId || null,
       squareMeters: formData.squareMeters ? parseFloat(formData.squareMeters) : null,
       rooms: formData.rooms ? parseInt(formData.rooms, 10) : null,
       bathrooms: formData.bathrooms ? parseInt(formData.bathrooms, 10) : null,
@@ -131,7 +136,7 @@ export const PropertyForm = () => {
               error={errors.address}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input
                 label="Código"
                 name="code"
@@ -154,6 +159,25 @@ export const PropertyForm = () => {
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.id}>
                       {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="label">
+                  <span className="label-text">Dueño</span>
+                </label>
+                <select
+                  name="ownerId"
+                  className="select select-bordered w-full"
+                  value={formData.ownerId}
+                  onChange={handleChange}
+                >
+                  <option value="">Sin dueño asignado</option>
+                  {owners.map((owner) => (
+                    <option key={owner.id} value={owner.id}>
+                      {owner.name} - DNI: {owner.dni}
                     </option>
                   ))}
                 </select>

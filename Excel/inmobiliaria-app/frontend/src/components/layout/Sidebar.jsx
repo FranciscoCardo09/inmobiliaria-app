@@ -4,8 +4,11 @@ import {
   HomeIcon,
   BuildingOfficeIcon,
   UserGroupIcon,
+  UsersIcon,
   CurrencyDollarIcon,
   DocumentTextIcon,
+  ClipboardDocumentListIcon,
+  ChartBarIcon,
   Cog6ToothIcon,
   XMarkIcon,
   PlusIcon,
@@ -16,7 +19,10 @@ import { useUIStore } from '../../stores/uiStore'
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   { name: 'Propiedades', href: '/properties', icon: BuildingOfficeIcon, phase: 2 },
+  { name: 'Dueños', href: '/owners', icon: UsersIcon, phase: 3 },
   { name: 'Inquilinos', href: '/tenants', icon: UserGroupIcon, phase: 3 },
+  { name: 'Contratos', href: '/contracts', icon: ClipboardDocumentListIcon, phase: 3 },
+  { name: 'Índices de Ajuste', href: '/adjustments', icon: ChartBarIcon, phase: 3 },
   { name: 'Pagos', href: '/payments', icon: CurrencyDollarIcon, phase: 4 },
   { name: 'Reportes', href: '/reports', icon: DocumentTextIcon, phase: 6 },
 ]
@@ -88,8 +94,8 @@ export const Sidebar = () => {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
-            // Phase 2 is complete, only disable phases 3+
-            const isDisabled = item.phase && item.phase > 2;
+            // Phase 3 is complete, only disable phases 4+
+            const isDisabled = item.phase && item.phase > 4;
             
             return (
               <NavLink
@@ -122,7 +128,7 @@ export const Sidebar = () => {
           </NavLink>
           <div className="mt-4 text-center">
             <p className="text-xs text-base-content/40">
-              Fase 2 - v1.0.0
+              Fase 4 - v1.1.0
             </p>
           </div>
         </div>

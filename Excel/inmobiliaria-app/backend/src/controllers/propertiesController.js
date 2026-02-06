@@ -36,11 +36,10 @@ const getProperties = async (req, res, next) => {
       where,
       include: {
         category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
+          select: { id: true, name: true, color: true },
+        },
+        owner: {
+          select: { id: true, name: true, dni: true, phone: true },
         },
       },
       orderBy: { address: 'asc' },
@@ -61,11 +60,10 @@ const getPropertyById = async (req, res, next) => {
       where: { id },
       include: {
         category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
+          select: { id: true, name: true, color: true },
+        },
+        owner: {
+          select: { id: true, name: true, dni: true, phone: true },
         },
       },
     });
@@ -86,6 +84,7 @@ const createProperty = async (req, res, next) => {
     const { groupId } = req.params;
     const {
       categoryId,
+      ownerId,
       address,
       code,
       squareMeters,
@@ -107,10 +106,19 @@ const createProperty = async (req, res, next) => {
       }
     }
 
+    // Verify owner belongs to group if provided
+    if (ownerId) {
+      const owner = await prisma.owner.findUnique({ where: { id: ownerId } });
+      if (!owner || owner.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Dueño invalido');
+      }
+    }
+
     const property = await prisma.property.create({
       data: {
         groupId,
         categoryId,
+        ownerId: ownerId || null,
         address,
         code,
         squareMeters: squareMeters ? parseFloat(squareMeters) : null,
@@ -122,11 +130,10 @@ const createProperty = async (req, res, next) => {
       },
       include: {
         category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
+          select: { id: true, name: true, color: true },
+        },
+        owner: {
+          select: { id: true, name: true, dni: true, phone: true },
         },
       },
     });
@@ -143,6 +150,7 @@ const updateProperty = async (req, res, next) => {
     const { groupId, id } = req.params;
     const {
       categoryId,
+      ownerId,
       address,
       code,
       squareMeters,
@@ -174,10 +182,19 @@ const updateProperty = async (req, res, next) => {
       }
     }
 
+    // Verify owner if provided
+    if (ownerId) {
+      const owner = await prisma.owner.findUnique({ where: { id: ownerId } });
+      if (!owner || owner.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Dueño invalido');
+      }
+    }
+
     const updated = await prisma.property.update({
       where: { id },
       data: {
         ...(categoryId !== undefined && { categoryId }),
+        ...(ownerId !== undefined && { ownerId: ownerId || null }),
         ...(address && { address }),
         ...(code !== undefined && { code }),
         ...(squareMeters !== undefined && { squareMeters: squareMeters ? parseFloat(squareMeters) : null }),
@@ -190,11 +207,10 @@ const updateProperty = async (req, res, next) => {
       },
       include: {
         category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
+          select: { id: true, name: true, color: true },
+        },
+        owner: {
+          select: { id: true, name: true, dni: true, phone: true },
         },
       },
     });

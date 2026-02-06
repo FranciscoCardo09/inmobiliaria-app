@@ -1,0 +1,422 @@
+// Contracts Controller
+// Handles: CRUD contracts with adjustment info, punitory fields, currentMonth
+
+const { PrismaClient } = require('@prisma/client');
+const ApiResponse = require('../utils/apiResponse');
+const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services/adjustmentService');
+
+const prisma = new PrismaClient();
+
+// Helper: compute period label from startDate + currentMonth
+const getPeriodLabel = (startDate, currentMonth) => {
+  const start = new Date(startDate);
+  const date = new Date(start);
+  date.setMonth(date.getMonth() + currentMonth - 1);
+  const months = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  ];
+  return `${months[date.getMonth()]} ${date.getFullYear()}`;
+};
+
+// Helper: enrich contract with computed fields
+const enrichContract = (c) => {
+  const adjustmentIndex = c.adjustmentIndex;
+  const currentPeriodLabel = getPeriodLabel(c.startDate, c.currentMonth);
+
+  let nextAdjustmentLabel = null;
+  let nextAdjustmentIsThisMonth = false;
+
+  if (adjustmentIndex && c.nextAdjustmentMonth) {
+    nextAdjustmentIsThisMonth = c.currentMonth === c.nextAdjustmentMonth;
+    if (nextAdjustmentIsThisMonth) {
+      nextAdjustmentLabel = `Ajuste este mes (Mes ${c.currentMonth})`;
+    } else {
+      nextAdjustmentLabel = `Mes ${c.nextAdjustmentMonth} (${adjustmentIndex.name})`;
+    }
+  }
+
+  // Compute end date from startDate + durationMonths
+  const start = new Date(c.startDate);
+  const endDate = new Date(start);
+  endDate.setMonth(endDate.getMonth() + c.durationMonths);
+
+  // Remaining months
+  const now = new Date();
+  const remainingMonths = Math.max(0, c.durationMonths - c.currentMonth);
+
+  // Is expiring soon (2 months or less remaining)
+  const isExpiringSoon = c.active && remainingMonths <= 2;
+
+  return {
+    ...c,
+    endDate,
+    currentPeriodLabel,
+    remainingMonths,
+    isExpiringSoon,
+    nextAdjustmentIsThisMonth,
+    nextAdjustmentLabel,
+  };
+};
+
+// GET /api/groups/:groupId/contracts
+const getContracts = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { status, propertyId, tenantId, search } = req.query;
+
+    const where = { groupId };
+
+    if (status === 'ACTIVE') where.active = true;
+    else if (status === 'INACTIVE') where.active = false;
+
+    if (propertyId) where.propertyId = propertyId;
+    if (tenantId) where.tenantId = tenantId;
+
+    if (search) {
+      where.OR = [
+        { tenant: { name: { contains: search } } },
+        { property: { address: { contains: search } } },
+        { observations: { contains: search } },
+      ];
+    }
+
+    const contracts = await prisma.contract.findMany({
+      where,
+      include: {
+        tenant: { select: { id: true, name: true, dni: true, phone: true } },
+        property: { select: { id: true, address: true, code: true } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+      orderBy: { startDate: 'desc' },
+    });
+
+    return ApiResponse.success(res, contracts.map(enrichContract));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/groups/:groupId/contracts/expiring
+const getExpiringContracts = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+
+    const contracts = await prisma.contract.findMany({
+      where: { groupId, active: true },
+      include: {
+        tenant: { select: { id: true, name: true, dni: true, phone: true } },
+        property: {
+          select: {
+            id: true, address: true, code: true,
+            category: { select: { id: true, name: true, color: true } },
+          },
+        },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+      orderBy: { startDate: 'asc' },
+    });
+
+    // Filter: remaining months <= 2
+    const expiring = contracts
+      .map(enrichContract)
+      .filter((c) => c.isExpiringSoon);
+
+    return ApiResponse.success(res, expiring);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/groups/:groupId/contracts/adjustments
+const getContractAdjustments = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const {
+      getContractsWithAdjustmentThisMonth,
+      getContractsWithAdjustmentNextMonth,
+    } = require('../services/adjustmentService');
+
+    const thisMonth = await getContractsWithAdjustmentThisMonth(groupId);
+    const nextMonth = await getContractsWithAdjustmentNextMonth(groupId);
+
+    return ApiResponse.success(res, {
+      thisMonth: thisMonth.map(enrichContract),
+      nextMonth: nextMonth.map(enrichContract),
+      thisMonthCount: thisMonth.length,
+      nextMonthCount: nextMonth.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/groups/:groupId/contracts/:id
+const getContractById = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      include: {
+        tenant: true,
+        property: {
+          include: {
+            category: { select: { id: true, name: true, color: true } },
+            owner: { select: { id: true, name: true, dni: true, phone: true } },
+          },
+        },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    return ApiResponse.success(res, enrichContract(contract));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/contracts
+const createContract = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const {
+      tenantId,
+      propertyId,
+      startDate,
+      durationMonths,
+      currentMonth,
+      baseRent,
+      adjustmentIndexId,
+      punitoryStartDay,
+      punitoryPercent,
+      observations,
+    } = req.body;
+
+    if (!tenantId || !propertyId || !startDate || !baseRent || !durationMonths) {
+      return ApiResponse.badRequest(
+        res,
+        'Inquilino, propiedad, fecha inicio, duración y monto son requeridos'
+      );
+    }
+
+    // Verify tenant belongs to group
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || tenant.groupId !== groupId) {
+      return ApiResponse.badRequest(res, 'Inquilino invalido');
+    }
+
+    // Verify property belongs to group
+    const property = await prisma.property.findUnique({ where: { id: propertyId } });
+    if (!property || property.groupId !== groupId) {
+      return ApiResponse.badRequest(res, 'Propiedad invalida');
+    }
+
+    // Check no other active contract on this property
+    const activeContract = await prisma.contract.findFirst({
+      where: { propertyId, active: true },
+    });
+    if (activeContract) {
+      return ApiResponse.conflict(
+        res,
+        'Esta propiedad ya tiene un contrato activo. Finalícelo primero.'
+      );
+    }
+
+    // Verify adjustment index if provided and calculate next adjustment
+    const startMonthVal = currentMonth ? parseInt(currentMonth, 10) : 1;
+    let nextAdjMonth = null;
+    if (adjustmentIndexId) {
+      const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
+      if (!adjIndex || adjIndex.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
+      }
+      // CORREGIDO: usar startMonth para calcular
+      nextAdjMonth = calculateNextAdjustmentMonth(
+        startMonthVal,
+        startMonthVal,
+        adjIndex.frequencyMonths,
+        parseInt(durationMonths, 10)
+      );
+    }
+
+    const contract = await prisma.contract.create({
+      data: {
+        groupId,
+        tenantId,
+        propertyId,
+        startDate: new Date(startDate),
+        startMonth: startMonthVal,
+        durationMonths: parseInt(durationMonths, 10),
+        currentMonth: startMonthVal,
+        baseRent: parseFloat(baseRent),
+        adjustmentIndexId: adjustmentIndexId || null,
+        nextAdjustmentMonth: nextAdjMonth,
+        punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
+        punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
+        observations,
+      },
+      include: {
+        tenant: { select: { id: true, name: true, dni: true } },
+        property: { select: { id: true, address: true, code: true } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+    });
+
+    return ApiResponse.created(res, enrichContract(contract), 'Contrato creado exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/groups/:groupId/contracts/:id
+const updateContract = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const {
+      startDate,
+      durationMonths,
+      currentMonth,
+      baseRent,
+      adjustmentIndexId,
+      punitoryStartDay,
+      punitoryPercent,
+      active,
+      observations,
+    } = req.body;
+
+    const contract = await prisma.contract.findUnique({ where: { id } });
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const data = {};
+    if (startDate) data.startDate = new Date(startDate);
+    if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
+    if (currentMonth) data.currentMonth = parseInt(currentMonth, 10);
+    if (baseRent) data.baseRent = parseFloat(baseRent);
+    if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
+    if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
+    if (active !== undefined) data.active = active;
+    if (observations !== undefined) data.observations = observations;
+
+    // Handle adjustment index change - LÓGICA CORREGIDA
+    if (adjustmentIndexId !== undefined) {
+      data.adjustmentIndexId = adjustmentIndexId || null;
+      if (adjustmentIndexId) {
+        const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
+        if (!adjIndex || adjIndex.groupId !== groupId) {
+          return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
+        }
+        const startM = contract.startMonth;
+        const currentM = data.currentMonth || contract.currentMonth;
+        const dur = data.durationMonths || contract.durationMonths;
+        data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, currentM, adjIndex.frequencyMonths, dur);
+      } else {
+        data.nextAdjustmentMonth = null;
+      }
+    }
+
+    const updated = await prisma.contract.update({
+      where: { id },
+      data,
+      include: {
+        tenant: { select: { id: true, name: true, dni: true } },
+        property: { select: { id: true, address: true, code: true } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+    });
+
+    return ApiResponse.success(res, enrichContract(updated), 'Contrato actualizado');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/properties/:propertyId/tenant
+const assignTenantToProperty = async (req, res, next) => {
+  try {
+    const { groupId, propertyId } = req.params;
+    const {
+      tenantId,
+      startDate,
+      durationMonths,
+      baseRent,
+      adjustmentIndexId,
+      punitoryStartDay,
+      punitoryPercent,
+      observations,
+    } = req.body;
+
+    const property = await prisma.property.findUnique({ where: { id: propertyId } });
+    if (!property || property.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Propiedad no encontrada');
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || tenant.groupId !== groupId) {
+      return ApiResponse.badRequest(res, 'Inquilino invalido');
+    }
+
+    const activeContract = await prisma.contract.findFirst({
+      where: { propertyId, active: true },
+    });
+    if (activeContract) {
+      return ApiResponse.conflict(res, 'Esta propiedad ya tiene un contrato activo');
+    }
+
+    if (!startDate || !baseRent || !durationMonths) {
+      return ApiResponse.badRequest(res, 'Fecha inicio, duración y monto son requeridos');
+    }
+
+    // CORREGIDO: usar lógica correcta de ajustes
+    let nextAdjMonth = null;
+    if (adjustmentIndexId) {
+      const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
+      if (adjIndex) {
+        nextAdjMonth = calculateNextAdjustmentMonth(1, 1, adjIndex.frequencyMonths, parseInt(durationMonths, 10));
+      }
+    }
+
+    const contract = await prisma.contract.create({
+      data: {
+        groupId,
+        tenantId,
+        propertyId,
+        startDate: new Date(startDate),
+        startMonth: 1,
+        durationMonths: parseInt(durationMonths, 10),
+        currentMonth: 1,
+        baseRent: parseFloat(baseRent),
+        adjustmentIndexId: adjustmentIndexId || null,
+        nextAdjustmentMonth: nextAdjMonth,
+        punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
+        punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
+        observations,
+      },
+      include: {
+        tenant: { select: { id: true, name: true, dni: true } },
+        property: { select: { id: true, address: true, code: true } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      },
+    });
+
+    return ApiResponse.created(res, enrichContract(contract), 'Inquilino asignado a propiedad exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  getContracts,
+  getExpiringContracts,
+  getContractAdjustments,
+  getContractById,
+  createContract,
+  updateContract,
+  assignTenantToProperty,
+};

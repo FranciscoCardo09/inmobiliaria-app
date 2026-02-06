@@ -7,6 +7,16 @@ const groupsRoutes = require('./groups.routes');
 const invitesRoutes = require('./invites.routes');
 const categoriesRoutes = require('./categories.routes');
 const propertiesRoutes = require('./properties.routes');
+const ownersRoutes = require('./owners.routes');
+const tenantsRoutes = require('./tenants.routes');
+const contractsRoutes = require('./contracts.routes');
+const adjustmentIndicesRoutes = require('./adjustmentIndices.routes');
+const { authenticate } = require('../middleware/auth');
+const { requireGroupAccess } = require('../middleware/groupAuth');
+const contractsController = require('../controllers/contractsController');
+const adjustmentIndicesController = require('../controllers/adjustmentIndicesController');
+const dashboardRoutes = require('./dashboard.routes');
+const paymentsRoutes = require('./payments.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -15,7 +25,35 @@ router.use('/invites', invitesRoutes);
 
 // Nested group routes (Phase 2)
 router.use('/groups/:groupId/categories', categoriesRoutes);
+router.use('/groups/:groupId/owners', ownersRoutes);
 router.use('/groups/:groupId/properties', propertiesRoutes);
+
+// Nested group routes (Phase 3)
+router.use('/groups/:groupId/tenants', tenantsRoutes);
+router.use('/groups/:groupId/contracts', contractsRoutes);
+router.use('/groups/:groupId/adjustment-indices', adjustmentIndicesRoutes);
+
+// Assign tenant to property
+router.post(
+  '/groups/:groupId/properties/:propertyId/tenant',
+  authenticate,
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  contractsController.assignTenantToProperty
+);
+
+// Apply all adjustments at once (Phase 3.5)
+router.post(
+  '/groups/:groupId/adjustments/apply-all-next-month',
+  authenticate,
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  adjustmentIndicesController.applyAllNextMonth
+);
+
+// Dashboard (Phase 3.5)
+router.use('/groups/:groupId/dashboard', dashboardRoutes);
+
+// Payments (Phase 4)
+router.use('/groups/:groupId/payments', paymentsRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
