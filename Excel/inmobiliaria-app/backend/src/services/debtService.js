@@ -231,11 +231,38 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
   // Use calculatePunitoryV2 with proper parameters
   // The debt is from a PAST period, so punitorios count from punitoryStartDate
   // If there was a partial payment on the debt, use lastPaymentDate
-  const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : null;
+  // If there was NO partial payment on debt, but debt started from a specific date (punitoryStartDate),
+  // we need to pass that as lastPaymentDate to avoid counting from day 1 of the month
+
   const punitoryStartDate = new Date(debt.punitoryStartDate);
+  let effectiveLastPaymentDate;
+
+  if (debt.lastPaymentDate) {
+    // There was a partial payment on the debt itself
+    effectiveLastPaymentDate = new Date(debt.lastPaymentDate);
+    console.log('  Using lastPaymentDate from debt:', effectiveLastPaymentDate);
+  } else {
+    // No partial payment on debt, but debt started counting from punitoryStartDate
+    // Check if punitoryStartDate is different from day 1 of the month
+    const firstOfMonth = new Date(debt.periodYear, debt.periodMonth - 1, 1);
+    const punitoryStartDay = punitoryStartDate.getDate();
+    const firstDay = firstOfMonth.getDate();
+
+    if (punitoryStartDay !== firstDay || punitoryStartDate.getTime() !== firstOfMonth.getTime()) {
+      // punitoryStartDate is NOT day 1, so use it as effectiveLastPaymentDate
+      // This happens when there was a partial payment on the MonthlyRecord before closing
+      effectiveLastPaymentDate = punitoryStartDate;
+      console.log('  Using punitoryStartDate as effective last payment:', effectiveLastPaymentDate);
+    } else {
+      // punitoryStartDate IS day 1, so let calculatePunitoryV2 handle it naturally
+      effectiveLastPaymentDate = null;
+      console.log('  No effective last payment, will count from day 1');
+    }
+  }
 
   console.log('  Punitory start date:', punitoryStartDate);
-  console.log('  Last payment date on debt:', lastPaymentDate);
+  console.log('  Last payment date on debt:', debt.lastPaymentDate || 'NONE');
+  console.log('  Effective last payment date for calculation:', effectiveLastPaymentDate || 'NONE');
   console.log('  Contract config:', contract);
 
   const result = calculatePunitoryV2(
@@ -247,7 +274,7 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
     contract.punitoryGraceDay,
     contract.punitoryPercent,
     holidays,
-    lastPaymentDate // If there was a partial debt payment, count from there
+    effectiveLastPaymentDate // Use effective last payment date
   );
 
   console.log('  Calculated punitory result:', result);
