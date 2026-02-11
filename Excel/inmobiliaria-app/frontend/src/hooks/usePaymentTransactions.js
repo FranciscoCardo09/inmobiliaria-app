@@ -27,6 +27,10 @@ export const usePaymentTransactions = (groupId, filters = {}) => {
   })
 
   const invalidateAll = async () => {
+    // Remove cached punitory previews entirely — payment changes make them stale
+    // and with global staleTime=5min they would be served as "fresh" otherwise
+    queryClient.removeQueries({ queryKey: ['punitoryPreview'] })
+
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['paymentTransactions'], refetchType: 'active' }),
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords'], refetchType: 'active' }),
