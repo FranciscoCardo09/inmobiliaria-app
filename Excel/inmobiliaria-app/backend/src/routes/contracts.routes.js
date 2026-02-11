@@ -27,4 +27,10 @@ router.put(
   contractsController.updateContract
 );
 
+router.delete(
+  '/:id',
+  requireGroupAccess(['ADMIN']),
+  contractsController.deleteContract
+);
+
 module.exports = router;

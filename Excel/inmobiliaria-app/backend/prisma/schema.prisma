@@ -1,5 +1,5 @@
 // Prisma Schema - Sistema Gestion Inmobiliaria
-// Fase 3: Inquilinos + Contratos
+// Fase 5+: Control Mensual de Pagos + Deudas + Punitorios
 
 generator client {
   provider = "prisma-client-js"
@@ -53,15 +53,20 @@ model Group {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  members           UserGroup[]
-  invites           GroupInvite[]
-  categories        Category[]
-  owners            Owner[]
-  properties        Property[]
-  tenants           Tenant[]
-  contracts         Contract[]
-  adjustmentIndices AdjustmentIndex[]
-  payments          Payment[]
+  members               UserGroup[]
+  invites               GroupInvite[]
+  categories            Category[]
+  owners                Owner[]
+  properties            Property[]
+  tenants               Tenant[]
+  contracts             Contract[]
+  adjustmentIndices     AdjustmentIndex[]
+  payments              Payment[]
+  conceptTypes          ConceptType[]
+  serviceCategories     ServiceCategory[]
+  monthlyRecords        MonthlyRecord[]
+  paymentTransactions   PaymentTransaction[]
+  debts                 Debt[]
 
   @@map("groups")
 }
@@ -234,7 +239,7 @@ model AdjustmentIndex {
   @@map("adjustment_indices")
 }
 
-// Tenant - Inquilinos (sin garante - el garante se movió a Owner)
+// Tenant - Inquilinos
 model Tenant {
   id              String   @id @default(uuid())
   groupId         String   @map("group_id")
@@ -248,11 +253,32 @@ model Tenant {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   // Relations
-  group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group           Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   contracts       Contract[]
+  guarantors      Guarantor[]
 
   @@unique([groupId, dni])
   @@map("tenants")
+}
+
+// Guarantor - Garantes de inquilinos (hasta 5 por inquilino)
+model Guarantor {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  name            String   // Nombre completo del garante
+  dni             String   // DNI / CUIT del garante
+  phone           String?  // Teléfono
+  email           String?  // Email
+  address         String?  // Domicilio del garante
+  observations    String?  // Notas
+  order           Int      @default(1) // Orden (1-5)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("guarantors")
 }
 
 // Contract - Contratos de alquiler
@@ -273,8 +299,9 @@ model Contract {
   nextAdjustmentMonth Int?     @map("next_adjustment_month") // Mes del contrato del próximo ajuste
 
   // Punitorios
-  punitoryStartDay    Int      @default(10) @map("punitory_start_day") // Día desde donde cuentan punitorios
-  punitoryPercent     Float    @default(0.006) @map("punitory_percent") // % diario (0.006 = 0.6%)
+  punitoryStartDay    Int      @default(4) @map("punitory_start_day")   // Día desde donde cuentan punitorios
+  punitoryGraceDay    Int      @default(10) @map("punitory_grace_day")  // Día límite hábil sin punitorios
+  punitoryPercent     Float    @default(0.02) @map("punitory_percent")  // % diario (0.02 = 2%)
 
   observations        String?
   createdAt           DateTime @default(now()) @map("created_at")
@@ -286,6 +313,8 @@ model Contract {
   property            Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   adjustmentIndex     AdjustmentIndex? @relation(fields: [adjustmentIndexId], references: [id], onDelete: SetNull)
   payments            Payment[]
+  monthlyRecords      MonthlyRecord[]
+  debts               Debt[]
 
   @@map("contracts")
 }
@@ -299,6 +328,8 @@ model Payment {
   groupId        String           @map("group_id")
   contractId     String           @map("contract_id")
   monthNumber    Int              @map("month_number")
+  periodMonth    Int              @map("period_month")    // 1-12 mes de la cuota (enero=1, dic=12)
+  periodYear     Int              @map("period_year")     // año de la cuota
   paymentDate    DateTime?        @map("payment_date")
   totalDue       Float            @map("total_due")
   amountPaid     Float            @default(0) @map("amount_paid")
@@ -328,4 +359,220 @@ model PaymentConcept {
   payment        Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@map("payment_concepts")
+}
+
+// Tipos de conceptos dinámicos por grupo
+model ConceptType {
+  id             String   @id @default(uuid())
+  groupId        String   @map("group_id")
+  name           String   // ej: "LUZ", "SEGURO", "PINTURA_TECHO"
+  label          String   // ej: "Luz", "Seguro", "Pintura de techo"
+  category       String   @default("OTROS") // Referencia a ServiceCategory.name
+  description    String?  // Descripción detallada para reportes
+  isDefault      Boolean  @default(false) @map("is_default")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  monthlyServices MonthlyService[]
+
+  @@unique([groupId, name])
+  @@map("concept_types")
+}
+
+// Categorías de servicios dinámicas por grupo
+model ServiceCategory {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  name      String   // Clave interna: IMPUESTO, SERVICIO, GASTO, MANTENIMIENTO, etc
+  label     String   // Display: "Impuesto", "Servicio", "Gasto", "Mantenimiento"
+  color     String   @default("badge-ghost") // Clase CSS para badge
+  isDefault Boolean  @default(false) @map("is_default")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, name])
+  @@map("service_categories")
+}
+
+// ============================================
+// FASE 5: Control Mensual de Pagos
+// ============================================
+
+// MonthlyRecord - Fila de control mensual por contrato (se auto-genera)
+model MonthlyRecord {
+  id                  String    @id @default(uuid())
+  groupId             String    @map("group_id")
+  contractId          String    @map("contract_id")
+  monthNumber         Int       @map("month_number")         // Mes del contrato (1..N)
+  periodMonth         Int       @map("period_month")          // Mes calendario 1-12
+  periodYear          Int       @map("period_year")           // Año calendario
+
+  // Montos
+  rentAmount          Float     @map("rent_amount")           // Valor alquiler del mes
+  servicesTotal       Float     @default(0) @map("services_total") // Suma de todos los extras
+  previousBalance     Float     @default(0) @map("previous_balance") // A favor (positivo) o deuda (negativo) del mes anterior
+  punitoryAmount      Float     @default(0) @map("punitory_amount")  // Punitorios calculados
+  punitoryDays        Int       @default(0) @map("punitory_days")
+  punitoryForgiven    Boolean   @default(false) @map("punitory_forgiven")
+  totalDue            Float     @map("total_due")             // Alquiler + servicios + punitorios - a_favor
+
+  // Seguimiento de pagos
+  amountPaid          Float     @default(0) @map("amount_paid")
+  balance             Float     @default(0)                    // amountPaid - totalDue (+ = a favor, - = debe)
+  fullPaymentDate     DateTime? @map("full_payment_date")     // Fecha cuando pagó completamente
+
+  // Estado
+  status              String    @default("PENDING")           // PENDING, PARTIAL, COMPLETE
+  isPaid              Boolean   @default(false) @map("is_paid")       // PAGÓ (TRUE/FALSE)
+  isCancelled         Boolean   @default(false) @map("is_cancelled")  // CANCELÓ (SI/NO)
+
+  observations        String?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  group               Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contract            Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  services            MonthlyService[]
+  transactions        PaymentTransaction[]
+  debt                Debt?
+
+  @@unique([contractId, monthNumber])
+  @@unique([contractId, periodMonth, periodYear])
+  @@map("monthly_records")
+}
+
+// MonthlyService - Servicios/extras asignados por mes/contrato
+model MonthlyService {
+  id                String   @id @default(uuid())
+  monthlyRecordId   String   @map("monthly_record_id")
+  conceptTypeId     String   @map("concept_type_id")
+  amount            Float
+  description       String?
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  monthlyRecord     MonthlyRecord @relation(fields: [monthlyRecordId], references: [id], onDelete: Cascade)
+  conceptType       ConceptType   @relation(fields: [conceptTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([monthlyRecordId, conceptTypeId])
+  @@map("monthly_services")
+}
+
+// PaymentTransaction - Registro de cada pago real
+model PaymentTransaction {
+  id                String   @id @default(uuid())
+  groupId           String   @map("group_id")
+  monthlyRecordId   String   @map("monthly_record_id")
+
+  paymentDate       DateTime @map("payment_date")
+  amount            Float
+  paymentMethod     String   @default("EFECTIVO") @map("payment_method") // EFECTIVO, TRANSFERENCIA
+
+  // Punitorios de esta transacción
+  punitoryAmount    Float    @default(0) @map("punitory_amount")
+  punitoryForgiven  Boolean  @default(false) @map("punitory_forgiven")
+
+  // Recibo
+  receiptGenerated  Boolean  @default(false) @map("receipt_generated")
+  receiptNumber     String?  @map("receipt_number")
+
+  observations      String?
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  group             Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  monthlyRecord     MonthlyRecord  @relation(fields: [monthlyRecordId], references: [id], onDelete: Cascade)
+  concepts          TransactionConcept[]
+
+  @@map("payment_transactions")
+}
+
+// TransactionConcept - Desglose de cada transacción
+model TransactionConcept {
+  id                String   @id @default(uuid())
+  transactionId     String   @map("transaction_id")
+  type              String                                // ALQUILER, IVA, PUNITORIOS, nombre servicio, etc.
+  description       String?
+  amount            Float
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  transaction       PaymentTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@map("transaction_concepts")
+}
+
+// Holiday - Feriados para cálculo de días hábiles
+model Holiday {
+  id          String   @id @default(uuid())
+  date        DateTime @unique
+  name        String
+  year        Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("holidays")
+}
+
+// ============================================
+// FASE 5+: Deudas y Punitorios
+// ============================================
+
+// Debt - Deuda generada al cerrar un mes con pago pendiente/parcial
+model Debt {
+  id                  String    @id @default(uuid())
+  groupId             String    @map("group_id")
+  contractId          String    @map("contract_id")
+  monthlyRecordId     String    @unique @map("monthly_record_id")
+
+  periodLabel         String    @map("period_label")          // "Noviembre 2025"
+  periodMonth         Int       @map("period_month")
+  periodYear          Int       @map("period_year")
+
+  originalAmount         Float     @map("original_amount")          // Total que debía ese mes
+  unpaidRentAmount       Float     @map("unpaid_rent_amount")       // Deuda post imputación servicios
+  previousRecordPayment  Float     @default(0) @map("previous_record_payment") // Cuánto pagó del MonthlyRecord antes de cerrar
+  accumulatedPunitory    Float     @default(0) @map("accumulated_punitory")
+
+  currentTotal           Float     @map("current_total")            // unpaidRentAmount + punitorios - pagos
+  amountPaid             Float     @default(0) @map("amount_paid")  // Pagos de la deuda (después de crearla)
+
+  punitoryPercent     Float     @map("punitory_percent")      // % diario copiado del contrato
+  punitoryStartDate   DateTime  @map("punitory_start_date")   // Desde cuándo cuentan punitorios
+  lastPaymentDate     DateTime? @map("last_payment_date")
+
+  status              String    @default("OPEN")              // OPEN, PARTIAL, PAID
+  closedAt            DateTime? @map("closed_at")
+
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  group               Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contract            Contract       @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  monthlyRecord       MonthlyRecord  @relation(fields: [monthlyRecordId], references: [id])
+  payments            DebtPayment[]
+
+  @@map("debts")
+}
+
+// DebtPayment - Pagos parciales o totales contra una deuda
+model DebtPayment {
+  id                  String   @id @default(uuid())
+  debtId              String   @map("debt_id")
+  paymentDate         DateTime @map("payment_date")
+  amount              Float
+  punitoryAtPayment   Float    @default(0) @map("punitory_at_payment")
+  paymentMethod       String   @default("EFECTIVO") @map("payment_method")
+  observations        String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  // Relations
+  debt                Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@map("debt_payments")
 }

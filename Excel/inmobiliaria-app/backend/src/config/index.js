@@ -43,6 +43,6 @@ module.exports = {
   // Rate limiting
   rateLimit: {
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // requests per window
+    max: process.env.NODE_ENV === 'production' ? 100 : 1000, // más permisivo en desarrollo
   },
 };

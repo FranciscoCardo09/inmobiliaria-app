@@ -1,4 +1,4 @@
-// Dashboard Page - Phase 4 (Cards + Tablas de Pagos)
+// Dashboard Page - Phase 5
 import { useNavigate } from 'react-router-dom'
 import {
   BuildingOfficeIcon,
@@ -7,12 +7,14 @@ import {
   ExclamationTriangleIcon,
   ChevronRightIcon,
   ClipboardDocumentListIcon,
-  PlusIcon,
-  CurrencyDollarIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  TableCellsIcon,
+  NoSymbolIcon,
+  BanknotesIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../stores/authStore'
 import { useDashboard } from '../hooks/useDashboard'
-import { usePayments } from '../hooks/usePayments'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
@@ -20,34 +22,6 @@ import GroupCreator from '../components/GroupCreator'
 import InviteUser from '../components/InviteUser'
 import PendingInvites from '../components/PendingInvites'
 import { LoadingPage } from '../components/ui/Loading'
-
-// Format number to compact form: 150000 → "150k", 31500 → "31.5k"
-const formatK = (n) => {
-  if (!n || n === 0) return '-'
-  if (Math.abs(n) >= 1000) {
-    const k = (n / 1000).toFixed(1)
-    return `$${k.replace('.0', '')}k`
-  }
-  return `$${n.toLocaleString('es-AR')}`
-}
-
-// Status badge with emoji
-const StatusBadge = ({ status }) => {
-  const config = {
-    COMPLETE: { label: 'Pagado', cls: 'badge-success' },
-    PARTIAL: { label: 'Parcial', cls: 'badge-warning' },
-    PENDING: { label: 'Pendiente', cls: 'badge-error' },
-  }
-  const c = config[status] || config.PENDING
-  return <span className={`badge ${c.cls} badge-sm`}>{c.label}</span>
-}
-
-// Get current month/year label
-const getMonthLabel = (offset = 0) => {
-  const d = new Date()
-  d.setMonth(d.getMonth() + offset)
-  return d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-}
 
 // Stats card component with optional click
 const StatCard = ({ icon: Icon, label, value, color = 'primary', onClick }) => {
@@ -79,82 +53,11 @@ const StatCard = ({ icon: Icon, label, value, color = 'primary', onClick }) => {
   )
 }
 
-// Payment table component
-const PaymentTable = ({ payments, isProjection, onRowClick }) => {
-  if (!payments || payments.length === 0) {
-    return (
-      <div className="text-center py-6 text-base-content/60">
-        <CurrencyDollarIcon className="w-10 h-10 mx-auto mb-2 opacity-30" />
-        <p>No hay pagos para mostrar</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="table table-compact w-full">
-        <thead>
-          <tr className="text-xs">
-            <th>Inquilino</th>
-            <th>Prop</th>
-            <th className="text-center">Mes</th>
-            <th className="text-right">Alq</th>
-            <th className="text-right">IVA</th>
-            <th className="text-right">Pun</th>
-            <th className="text-right">Exp</th>
-            <th className="text-right font-bold">Total</th>
-            <th className="text-center">Estado</th>
-          </tr>
-        </thead>
-        <tbody>
-          {payments.map((p, i) => (
-            <tr
-              key={p.contractId + '-' + i}
-              className={onRowClick ? 'cursor-pointer hover:bg-base-200' : ''}
-              onClick={() => onRowClick?.(p)}
-            >
-              <td className="font-medium text-sm">{p.tenant?.name}</td>
-              <td className="text-sm text-base-content/70">{p.property?.code || '-'}</td>
-              <td className="text-center text-sm">{p.monthNumber}</td>
-              <td className="text-right text-sm">{formatK(p.alquiler)}</td>
-              <td className="text-right text-sm">{formatK(p.iva)}</td>
-              <td className="text-right text-sm">{formatK(p.punitorios)}</td>
-              <td className="text-right text-sm">{formatK(p.expensas + (p.municipal || 0))}</td>
-              <td className="text-right text-sm font-bold">{formatK(p.totalDue)}</td>
-              <td className="text-center">
-                <StatusBadge status={p.status} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 export const Dashboard = () => {
   const navigate = useNavigate()
   const { user, groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find((g) => g.id === currentGroupId)
   const { summary, isLoading } = useDashboard(currentGroup?.id)
-  const {
-    currentMonthPayments,
-    nextMonthPayments,
-    isLoadingCurrentMonth,
-    isLoadingNextMonth,
-  } = usePayments(currentGroup?.id)
-
-  const handleCurrentRowClick = (p) => {
-    if (p.paymentId) {
-      navigate(`/payments/${p.paymentId}`)
-    } else {
-      navigate(`/payments/new?contractId=${p.contractId}`)
-    }
-  }
-
-  const handleNextRowClick = (p) => {
-    navigate(`/payments/new?contractId=${p.contractId}`)
-  }
 
   return (
     <div className="space-y-6">
@@ -218,8 +121,46 @@ export const Dashboard = () => {
               />
             </div>
 
-            {/* Stats Grid - Row 2: Alerts (clickable) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Stats Grid - Row 2: Payments + Alerts (clickable) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                icon={CheckCircleIcon}
+                label="Pagos del Mes"
+                value={
+                  summary.paymentsThisMonth
+                    ? `${summary.paymentsThisMonth.paid} / ${summary.paymentsThisMonth.total}`
+                    : '0 / 0'
+                }
+                color="success"
+                onClick={() => navigate('/monthly-control')}
+              />
+              {(summary.pendingDebts > 0) && (
+                <StatCard
+                  icon={ExclamationCircleIcon}
+                  label="Pendientes Mes"
+                  value={summary.pendingDebts}
+                  color="warning"
+                  onClick={() => navigate('/monthly-control?status=PENDING')}
+                />
+              )}
+              {(summary.totalDebt > 0) && (
+                <StatCard
+                  icon={BanknotesIcon}
+                  label="Deudas Totales"
+                  value={`$${Math.round(summary.totalDebt).toLocaleString('es-AR')}`}
+                  color="error"
+                  onClick={() => navigate('/monthly-control')}
+                />
+              )}
+              {(summary.blockedContracts > 0) && (
+                <StatCard
+                  icon={NoSymbolIcon}
+                  label="Inquilinos Bloqueados"
+                  value={summary.blockedContracts}
+                  color="error"
+                  onClick={() => navigate('/monthly-control')}
+                />
+              )}
               <StatCard
                 icon={CalendarIcon}
                 label="Contratos con Ajustes"
@@ -236,44 +177,27 @@ export const Dashboard = () => {
               />
             </div>
 
-            {/* Payment Tables */}
-            <Card title={`Pagos Este Mes (${getMonthLabel()})`}>
-              {isLoadingCurrentMonth ? (
-                <div className="flex justify-center py-6">
-                  <span className="loading loading-spinner loading-md"></span>
+            {/* Quick action card */}
+            <Card>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <TableCellsIcon className="w-6 h-6 text-primary" />
+                  <div>
+                    <h3 className="font-semibold">Control Mensual</h3>
+                    <p className="text-sm text-base-content/60">
+                      Ver planilla completa de pagos del mes actual
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <PaymentTable
-                  payments={currentMonthPayments}
-                  onRowClick={handleCurrentRowClick}
-                />
-              )}
-            </Card>
-
-            <Card
-              title={`Pagos Mes Que Viene (${getMonthLabel(1)})`}
-              actions={
                 <Button
                   variant="primary"
                   size="sm"
-                  onClick={() => navigate('/payments/new')}
+                  onClick={() => navigate('/monthly-control')}
                 >
-                  <PlusIcon className="w-4 h-4" />
-                  Nuevo Pago
+                  Ver Control
+                  <ChevronRightIcon className="w-4 h-4" />
                 </Button>
-              }
-            >
-              {isLoadingNextMonth ? (
-                <div className="flex justify-center py-6">
-                  <span className="loading loading-spinner loading-md"></span>
-                </div>
-              ) : (
-                <PaymentTable
-                  payments={nextMonthPayments}
-                  isProjection
-                  onRowClick={handleNextRowClick}
-                />
-              )}
+              </div>
             </Card>
 
             {/* Group info */}

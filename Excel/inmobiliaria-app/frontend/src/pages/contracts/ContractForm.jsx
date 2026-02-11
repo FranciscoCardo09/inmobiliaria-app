@@ -10,6 +10,8 @@ import { useAdjustmentIndices } from '../../hooks/useAdjustmentIndices'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+import DateInput from '../../components/ui/DateInput'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 
 export const ContractForm = () => {
   const navigate = useNavigate()
@@ -47,7 +49,7 @@ export const ContractForm = () => {
       setFormData({
         tenantId: contract.tenantId || '',
         propertyId: contract.propertyId || '',
-        startDate: contract.startDate ? new Date(contract.startDate).toISOString().split('T')[0] : '',
+        startDate: contract.startDate ? contract.startDate.split('T')[0] : '',
         durationMonths: contract.durationMonths?.toString() || '24',
         currentMonth: contract.currentMonth?.toString() || '1',
         baseRent: contract.baseRent?.toString() || '',
@@ -140,55 +142,33 @@ export const ContractForm = () => {
             <h2 className="text-xl font-semibold">Partes del Contrato</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="label">
-                  <span className="label-text font-medium">Inquilino *</span>
-                </label>
-                <select
-                  name="tenantId"
-                  className={`select select-bordered w-full ${errors.tenantId ? 'select-error' : ''}`}
-                  value={formData.tenantId}
-                  onChange={handleChange}
-                  disabled={isEditing}
-                >
-                  <option value="">Seleccionar inquilino...</option>
-                  {tenants.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} - DNI: {t.dni}
-                    </option>
-                  ))}
-                </select>
-                {errors.tenantId && (
-                  <label className="label">
-                    <span className="label-text-alt text-error">{errors.tenantId}</span>
-                  </label>
-                )}
-              </div>
+              <SearchableSelect
+                label="Inquilino *"
+                name="tenantId"
+                options={tenants.map((t) => ({
+                  value: t.id,
+                  label: `${t.name} - DNI: ${t.dni}`,
+                }))}
+                value={formData.tenantId}
+                onChange={handleChange}
+                placeholder="Buscar inquilino..."
+                error={errors.tenantId}
+                disabled={isEditing}
+              />
 
-              <div>
-                <label className="label">
-                  <span className="label-text font-medium">Propiedad *</span>
-                </label>
-                <select
-                  name="propertyId"
-                  className={`select select-bordered w-full ${errors.propertyId ? 'select-error' : ''}`}
-                  value={formData.propertyId}
-                  onChange={handleChange}
-                  disabled={isEditing}
-                >
-                  <option value="">Seleccionar propiedad...</option>
-                  {properties.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.address} {p.code ? `(${p.code})` : ''}
-                    </option>
-                  ))}
-                </select>
-                {errors.propertyId && (
-                  <label className="label">
-                    <span className="label-text-alt text-error">{errors.propertyId}</span>
-                  </label>
-                )}
-              </div>
+              <SearchableSelect
+                label="Propiedad *"
+                name="propertyId"
+                options={properties.map((p) => ({
+                  value: p.id,
+                  label: `${p.address}${p.code ? ` (${p.code})` : ''}`,
+                }))}
+                value={formData.propertyId}
+                onChange={handleChange}
+                placeholder="Buscar propiedad..."
+                error={errors.propertyId}
+                disabled={isEditing}
+              />
             </div>
           </div>
 
@@ -197,14 +177,23 @@ export const ContractForm = () => {
             <h2 className="text-xl font-semibold">Período del Contrato</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="Fecha Inicio *"
-                name="startDate"
-                type="date"
-                value={formData.startDate}
-                onChange={handleChange}
-                error={errors.startDate}
-              />
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text font-medium">Fecha Inicio *</span>
+                </label>
+                <DateInput
+                  value={formData.startDate}
+                  onChange={(val) => {
+                    setFormData({ ...formData, startDate: val })
+                    if (errors.startDate) setErrors({ ...errors, startDate: '' })
+                  }}
+                />
+                {errors.startDate && (
+                  <label className="label">
+                    <span className="label-text-alt text-error">{errors.startDate}</span>
+                  </label>
+                )}
+              </div>
               <Input
                 label="Duración Total (meses) *"
                 name="durationMonths"

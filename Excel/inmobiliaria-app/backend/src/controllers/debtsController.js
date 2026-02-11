@@ -76,7 +76,7 @@ const getDebtById = async (req, res, next) => {
     // Enriquecer con punitorios actuales
     if (debt.status !== 'PAID') {
       const { amount, days, startDate, endDate } = await calculateDebtPunitory(debt);
-      const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
+      const remainingDebt = Math.max(0, debt.unpaidRentAmount - debt.amountPaid);
       debt.liveAccumulatedPunitory = amount;
       debt.livePunitoryDays = days;
       debt.liveCurrentTotal = remainingDebt + amount;
@@ -195,14 +195,14 @@ const getDebtPunitoryPreview = async (req, res, next) => {
 
     const { amount, days, remainingDebt, startDate, endDate, accumulatedPunitory, newPunitoryAmount } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
     return ApiResponse.success(res, {
-      days: remainingDebt > 0 ? days : 0, // Solo mostrar días si hay deuda base
+      days,
       amount,
       accumulatedPunitory,
       newPunitoryAmount,
       remainingDebt,
       totalToPay: remainingDebt + amount,
-      fromDate: remainingDebt > 0 ? startDate : null,
-      toDate: remainingDebt > 0 ? endDate : null,
+      fromDate: startDate,
+      toDate: endDate,
     });
   } catch (error) {
     next(error);

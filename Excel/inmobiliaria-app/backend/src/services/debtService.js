@@ -69,6 +69,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
   console.log('  - rentAmount:', monthlyRecord.rentAmount);
   console.log('  - servicesTotal:', monthlyRecord.servicesTotal);
   console.log('  - amountPaid:', monthlyRecord.amountPaid);
+  console.log('  - punitoryAmount (frozen):', monthlyRecord.punitoryAmount);
   console.log('  - status:', monthlyRecord.status);
 
   // Verificar que no exista deuda para este record
@@ -81,7 +82,65 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
     return existing;
   }
 
-  const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(monthlyRecord);
+  // CRITICAL: Calculate CURRENT accumulated punitorios at time of closing
+  // The monthlyRecord.punitoryAmount is frozen from the last payment, but punitorios
+  // continue to accumulate. We need to calculate the LIVE punitorios now.
+  let currentPunitoryAmount = monthlyRecord.punitoryAmount || 0;
+
+  if (monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
+    try {
+      // Calculate unpaid rent (payments cover services first, then rent)
+      const amountPaid = monthlyRecord.amountPaid || 0;
+      const servicesTotal = monthlyRecord.servicesTotal || 0;
+      const prevBalance = monthlyRecord.previousBalance || 0;
+      const totalCredits = amountPaid + prevBalance;
+      const paidTowardRent = Math.max(totalCredits - servicesTotal, 0);
+      const unpaidRent = Math.max(monthlyRecord.rentAmount - paidTowardRent, 0);
+
+      // Get last payment date (if partial payment was made)
+      let lastPaymentDate = null;
+      if (monthlyRecord.transactions && monthlyRecord.transactions.length > 0) {
+        const lastTx = monthlyRecord.transactions[monthlyRecord.transactions.length - 1];
+        lastPaymentDate = new Date(lastTx.paymentDate);
+      }
+
+      // Calculate until NOW (when closing the month)
+      const calculationDate = new Date();
+      const holidays = await getHolidaysForYear(monthlyRecord.periodYear);
+
+      const liveResult = calculatePunitoryV2(
+        calculationDate,
+        monthlyRecord.periodMonth,
+        monthlyRecord.periodYear,
+        unpaidRent,
+        contract.punitoryStartDay,
+        contract.punitoryGraceDay,
+        contract.punitoryPercent,
+        holidays,
+        lastPaymentDate
+      );
+
+      currentPunitoryAmount = liveResult.amount;
+
+      console.log('LIVE PUNITORY CALCULATION (at closing):');
+      console.log('  - Unpaid rent:', unpaidRent);
+      console.log('  - Last payment date:', lastPaymentDate);
+      console.log('  - Calculation date:', calculationDate);
+      console.log('  - Frozen punitoryAmount:', monthlyRecord.punitoryAmount);
+      console.log('  - CURRENT punitoryAmount:', currentPunitoryAmount);
+    } catch (error) {
+      console.error('Error calculating live punitorios:', error);
+      // Fallback to frozen value if calculation fails
+    }
+  }
+
+  // Create a modified monthlyRecord with current punitorios for imputation calculation
+  const recordWithCurrentPunitorios = {
+    ...monthlyRecord,
+    punitoryAmount: currentPunitoryAmount,
+  };
+
+  const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(recordWithCurrentPunitorios);
 
   console.log('Imputation calculation:');
   console.log('  - totalOriginal:', totalOriginal);
@@ -197,26 +256,83 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
   console.log('  Remaining rent:', remainingRent);
   console.log('  Accumulated punitory (stored):', accumulatedPunitory);
 
-  // Si no queda renta impaga, calcular cuántos punitorios acumulados quedan por pagar
+  // Si no queda renta impaga, calcular punitorios sobre los punitorios acumulados impagos
   if (remainingRent <= 0) {
-    console.log('  -> Rent fully paid, calculating remaining unpaid punitorios');
+    console.log('  -> Rent fully paid, calculating punitorios on unpaid punitorios');
+
+    // IMPORTANTE: Primero calcular nuevos punitorios sobre los punitorios acumulados del período
+    // Obtener configuración del contrato
+    const contract = await prisma.contract.findUnique({
+      where: { id: debt.contractId },
+      select: {
+        punitoryStartDay: true,
+        punitoryGraceDay: true,
+        punitoryPercent: true,
+      },
+    });
+
+    if (!contract) {
+      throw new Error('Contract not found for debt');
+    }
+
+    const holidays = await getHolidaysForYear(debt.periodYear);
+    const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : new Date(debt.punitoryStartDate);
+
+    // Calcular nuevos punitorios sobre los punitorios acumulados del período
+    console.log('  Calculating NEW punitorios on accumulated punitory:', accumulatedPunitory);
+    console.log('  From date (last payment):', lastPaymentDate);
+    console.log('  To date:', paymentDate);
+
+    const newPunitorios = calculatePunitoryV2(
+      paymentDate,
+      debt.periodMonth,
+      debt.periodYear,
+      accumulatedPunitory,  // Calcular sobre los punitorios acumulados del período
+      contract.punitoryStartDay,
+      contract.punitoryGraceDay,
+      contract.punitoryPercent,
+      holidays,
+      lastPaymentDate
+    );
+
+    // Total de punitorios = acumulados del período + nuevos
+    const totalPunitory = accumulatedPunitory + newPunitorios.amount;
 
     // Cuánto se pagó de punitorios = lo que excede el alquiler
     const amountPaidToPunitory = Math.max(0, debt.amountPaid - debt.unpaidRentAmount);
-    // Punitorios impagos = punitorios acumulados - lo pagado de punitorios
-    const unpaidPunitory = Math.max(0, accumulatedPunitory - amountPaidToPunitory);
 
+    // Punitorios impagos = total de punitorios - lo pagado
+    const unpaidPunitory = Math.max(0, totalPunitory - amountPaidToPunitory);
+
+    console.log('  Accumulated punitory (period):', accumulatedPunitory);
+    console.log('  New punitorios calculated:', newPunitorios.amount);
+    console.log('  Days:', newPunitorios.days);
+    console.log('  Total punitory (period + new):', totalPunitory);
     console.log('  Amount paid to punitory:', amountPaidToPunitory);
     console.log('  Unpaid punitory:', unpaidPunitory);
 
+    // Si no quedan punitorios impagos, return 0
+    if (unpaidPunitory <= 0) {
+      console.log('  -> No unpaid punitorios, returning 0');
+      return {
+        days: 0,
+        amount: 0,
+        newPunitoryAmount: 0,
+        accumulatedPunitory: 0,
+        remainingDebt: 0,
+        startDate: null,
+        endDate: null,
+      };
+    }
+
     return {
-      days: 0,
-      amount: unpaidPunitory,
-      newPunitoryAmount: 0,
-      accumulatedPunitory,
+      days: newPunitorios.days,
+      amount: unpaidPunitory,  // Total impago
+      newPunitoryAmount: newPunitorios.amount,
+      accumulatedPunitory: accumulatedPunitory,
       remainingDebt: 0,
-      startDate: null,
-      endDate: null,
+      startDate: newPunitorios.fromDate,
+      endDate: newPunitorios.toDate,
     };
   }
 
@@ -372,7 +488,11 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   let status = 'OPEN';
   let closedAt = null;
 
-  if (parseFloat(amount) >= totalWithPunitory) {
+  // Usar newCurrentTotal para determinar si la deuda quedó saldada.
+  // La tolerancia de $1 evita problemas de redondeo entre preview y pago.
+  // El check anterior (parseFloat(amount) >= totalWithPunitory) solo comparaba
+  // el pago actual vs el total, lo cual fallaba en pagos parciales acumulados.
+  if (newCurrentTotal <= 1) {
     status = 'PAID';
     closedAt = new Date();
   } else if (newAmountPaid > 0) {
@@ -654,13 +774,23 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
 
   // Revertir cambios en Debt
   const newAmountPaid = Math.max(debt.amountPaid - payment.amount, 0);
-  const newAccumulatedPunitory = 0; // Se recalculará cuando sea necesario
+
+  // Restaurar accumulatedPunitory del pago anterior (si existe).
+  // Cada DebtPayment guarda punitoryAtPayment = punitorios totales calculados al momento de ese pago.
+  // Al anular el último pago, el accumulatedPunitory debe volver al valor del pago previo.
+  // Si no quedan pagos, se pone 0 porque calculateDebtPunitory recalcula desde punitoryStartDate.
+  let newAccumulatedPunitory = 0;
+  if (debt.payments.length > 1) {
+    const previousPayment = debt.payments[debt.payments.length - 2];
+    newAccumulatedPunitory = previousPayment.punitoryAtPayment || 0;
+  }
 
   // Calcular deuda restante (solo la parte de alquiler sin punitorios)
   const remainingDebt = debt.unpaidRentAmount - newAmountPaid;
 
   console.log('CALCULATIONS:');
   console.log('  - newAmountPaid:', newAmountPaid);
+  console.log('  - newAccumulatedPunitory:', newAccumulatedPunitory);
   console.log('  - remainingDebt:', remainingDebt);
   console.log('  - payments remaining:', debt.payments.length - 1);
 
@@ -673,44 +803,65 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     console.log('CASE: Multiple payments (will have', debt.payments.length - 1, 'after cancel)');
     const previousPayment = debt.payments[debt.payments.length - 2];
     newLastPaymentDate = previousPayment.paymentDate;
-
-    // Si después de anular, todavía hay pagos que cubren toda la deuda base
-    if (newAmountPaid >= debt.unpaidRentAmount) {
-      newStatus = 'PAID';
-      console.log('  -> newStatus: PAID (newAmountPaid >= unpaidRentAmount)');
-    } else if (newAmountPaid > 0) {
-      newStatus = 'PARTIAL';
-      console.log('  -> newStatus: PARTIAL (newAmountPaid > 0)');
-    } else {
-      console.log('  -> newStatus: OPEN (default)');
-    }
   } else {
     console.log('CASE: Single payment (will have 0 after cancel)');
-    // No quedan pagos
-    // Si había un amountPaid inicial (del cierre de mes), verificar si cubría la deuda
-    if (newAmountPaid >= debt.unpaidRentAmount) {
-      newStatus = 'PAID';
-      console.log('  -> newStatus: PAID (newAmountPaid >= unpaidRentAmount)');
-    } else if (newAmountPaid > 0) {
-      newStatus = 'PARTIAL';
-      console.log('  -> newStatus: PARTIAL (newAmountPaid > 0)');
-    } else {
-      newStatus = 'OPEN';
-      console.log('  -> newStatus: OPEN (newAmountPaid = 0)');
-    }
-
-    // Restaurar punitoryStartDate como lastPaymentDate si no hay pagos
     newLastPaymentDate = null;
   }
 
+  // IMPORTANTE: Para determinar el status, necesitamos calcular punitorios después de anular
+  // No podemos marcar como PAID solo porque amountPaid >= unpaidRentAmount, porque pueden quedar punitorios impagos
+  const rentRemaining = Math.max(debt.unpaidRentAmount - newAmountPaid, 0);
+
+  // Si no queda renta por pagar, verificar punitorios
+  if (rentRemaining === 0) {
+    // Crear deuda temporal para calcular punitorios con el nuevo amountPaid
+    // IMPORTANTE: usar newAccumulatedPunitory (del pago previo) en vez del valor actual
+    const tempDebt = {
+      ...debt,
+      amountPaid: newAmountPaid,
+      accumulatedPunitory: newAccumulatedPunitory,
+      lastPaymentDate: newLastPaymentDate,
+    };
+
+    // Calcular punitorios impagos
+    // IMPORTANTE: calculateDebtPunitory ya resta internamente lo pagado a punitorios
+    // (amountPaidToPunitory = amountPaid - unpaidRentAmount), así que su retorno
+    // es directamente los punitorios IMPAGOS. NO restar de nuevo aquí.
+    const { amount: unpaidPunitory } = await calculateDebtPunitory(tempDebt, new Date());
+
+    console.log('PUNITORY CHECK:');
+    console.log('  - Unpaid punitory (from calculateDebtPunitory):', unpaidPunitory);
+
+    if (unpaidPunitory <= 1) {
+      newStatus = 'PAID';
+      console.log('  -> newStatus: PAID (rent and punitorios fully paid)');
+    } else {
+      newStatus = 'PARTIAL';
+      console.log('  -> newStatus: PARTIAL (rent paid, but punitorios remain)');
+    }
+  } else if (newAmountPaid > 0) {
+    newStatus = 'PARTIAL';
+    console.log('  -> newStatus: PARTIAL (rent partially paid)');
+  } else {
+    newStatus = 'OPEN';
+    console.log('  -> newStatus: OPEN (no payments)');
+  }
+
   console.log('NEW STATUS DETERMINED:', newStatus);
+
+  // IMPORTANTE: Eliminar el DebtPayment ANTES de la query final
+  // para que el debt retornado tenga la lista de payments correcta
+  await prisma.debtPayment.delete({
+    where: { id: paymentId },
+  });
+  console.log('DEBT PAYMENT DELETED');
 
   const updatedDebt = await prisma.debt.update({
     where: { id: debtId },
     data: {
       amountPaid: newAmountPaid,
       accumulatedPunitory: newAccumulatedPunitory,
-      currentTotal: Math.max(remainingDebt, 0),
+      currentTotal: Math.max(debt.unpaidRentAmount + newAccumulatedPunitory - newAmountPaid, 0),
       lastPaymentDate: newLastPaymentDate,
       status: newStatus,
       closedAt: newStatus === 'PAID' ? debt.closedAt : null,
@@ -738,12 +889,6 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     const { recalculateMonthlyRecord } = require('./monthlyRecordService');
     await recalculateMonthlyRecord(debt.monthlyRecordId);
   }
-
-  // Eliminar el DebtPayment
-  await prisma.debtPayment.delete({
-    where: { id: paymentId },
-  });
-  console.log('DEBT PAYMENT DELETED');
 
   console.log('========== CANCEL DEBT PAYMENT END ==========\n');
 

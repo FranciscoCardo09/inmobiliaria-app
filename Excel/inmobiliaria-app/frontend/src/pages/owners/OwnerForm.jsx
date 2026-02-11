@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useOwners } from '../../hooks/useOwners'
 import Input from '../../components/ui/Input'
+import PhoneInput from '../../components/ui/PhoneInput'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 
@@ -78,7 +79,7 @@ export const OwnerForm = () => {
             <Input label="Nombre Completo *" name="name" value={formData.name} onChange={handleChange} placeholder="María García" error={errors.name} />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input label="DNI / CUIT *" name="dni" value={formData.dni} onChange={handleChange} placeholder="20123456789" error={errors.dni} />
-              <Input label="Teléfono *" name="phone" value={formData.phone} onChange={handleChange} placeholder="1155555555" error={errors.phone} />
+              <PhoneInput label="Teléfono *" name="phone" value={formData.phone} onChange={handleChange} error={errors.phone} />
               <Input label="Email" name="email" type="email" value={formData.email} onChange={handleChange} placeholder="maria@email.com" />
             </div>
           </div>

@@ -54,12 +54,7 @@ const calculatePaymentConcepts = async (contract, paymentDate) => {
     isAutomatic: true,
   });
 
-  // 2. IVA 21%
-  concepts.push({
-    type: 'IVA',
-    amount: Math.round(contract.baseRent * 0.21),
-    isAutomatic: true,
-  });
+  // 2. IVA - ahora se ingresa a mano, no se auto-calcula
 
   // 3. PUNITORIOS (si fecha de pago es despues del dia limite)
   if (paymentDate) {
@@ -155,8 +150,7 @@ const getCurrentMonthPayments = async (groupId) => {
 
     // No payment registered yet - show as PENDING projection
     const alquiler = contract.baseRent;
-    const iva = Math.round(alquiler * 0.21);
-    const totalDue = alquiler + iva;
+    const totalDue = alquiler;
 
     return {
       contractId: contract.id,
@@ -166,10 +160,7 @@ const getCurrentMonthPayments = async (groupId) => {
       monthNumber: contract.currentMonth,
       baseRent: contract.baseRent,
       alquiler,
-      iva,
       punitorios: 0,
-      expensas: 0,
-      municipal: 0,
       totalDue,
       amountPaid: 0,
       balance: -totalDue,
@@ -222,21 +213,7 @@ const getNextMonthPayments = async (groupId) => {
         adjustmentApplied = true;
       }
 
-      const iva = Math.round(baseRent * 0.21);
-
-      // Get last payment's editable concepts for projection
-      const lastPayment = contract.payments[0];
-      let expensas = 0;
-      let municipal = 0;
-
-      if (lastPayment) {
-        lastPayment.concepts.forEach((c) => {
-          if (c.type === 'EXPENSAS') expensas = c.amount;
-          if (c.type === 'MUNICIPAL') municipal = c.amount;
-        });
-      }
-
-      const totalDue = baseRent + iva + expensas + municipal;
+      const totalDue = baseRent;
 
       return {
         contractId: contract.id,
@@ -245,10 +222,6 @@ const getNextMonthPayments = async (groupId) => {
         monthNumber: nextMonth,
         baseRent,
         alquiler: baseRent,
-        iva,
-        punitorios: 0,
-        expensas,
-        municipal,
         totalDue,
         amountPaid: 0,
         balance: -totalDue,

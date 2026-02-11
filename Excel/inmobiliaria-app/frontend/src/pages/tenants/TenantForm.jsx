@@ -1,12 +1,17 @@
 // Tenant Form Page - Create/Edit tenant
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useTenants } from '../../hooks/useTenants'
 import Input from '../../components/ui/Input'
+import PhoneInput from '../../components/ui/PhoneInput'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+
+const MAX_GUARANTORS = 5
+
+const emptyGuarantor = () => ({ name: '', dni: '', phone: '', email: '', address: '', observations: '' })
 
 export const TenantForm = () => {
   const navigate = useNavigate()
@@ -24,11 +29,9 @@ export const TenantForm = () => {
     dni: '',
     phone: '',
     email: '',
-    guarantorName: '',
-    guarantorDni: '',
-    guarantorPhone: '',
     observations: '',
   })
+  const [guarantors, setGuarantors] = useState([])
   const [errors, setErrors] = useState({})
 
   // Load tenant data when editing
@@ -39,11 +42,20 @@ export const TenantForm = () => {
         dni: tenant.dni || '',
         phone: tenant.phone || '',
         email: tenant.email || '',
-        guarantorName: tenant.guarantorName || '',
-        guarantorDni: tenant.guarantorDni || '',
-        guarantorPhone: tenant.guarantorPhone || '',
         observations: tenant.observations || '',
       })
+      if (tenant.guarantors?.length > 0) {
+        setGuarantors(tenant.guarantors.map(g => ({
+          name: g.name || '',
+          dni: g.dni || '',
+          phone: g.phone || '',
+          email: g.email || '',
+          address: g.address || '',
+          observations: g.observations || '',
+        })))
+      } else {
+        setGuarantors([])
+      }
     }
   }, [tenant])
 
@@ -55,6 +67,28 @@ export const TenantForm = () => {
     }
   }
 
+  const handleGuarantorChange = (index, field, value) => {
+    const updated = [...guarantors]
+    updated[index] = { ...updated[index], [field]: value }
+    setGuarantors(updated)
+    // Clear guarantor-specific errors
+    if (errors[`guarantor_${index}_${field}`]) {
+      const newErrors = { ...errors }
+      delete newErrors[`guarantor_${index}_${field}`]
+      setErrors(newErrors)
+    }
+  }
+
+  const addGuarantor = () => {
+    if (guarantors.length < MAX_GUARANTORS) {
+      setGuarantors([...guarantors, emptyGuarantor()])
+    }
+  }
+
+  const removeGuarantor = (index) => {
+    setGuarantors(guarantors.filter((_, i) => i !== index))
+  }
+
   const validate = () => {
     const newErrors = {}
     if (!formData.name || formData.name.trim().length < 2) {
@@ -63,6 +97,15 @@ export const TenantForm = () => {
     if (!formData.dni || formData.dni.trim().length < 7) {
       newErrors.dni = 'DNI es requerido (mín. 7 dígitos)'
     }
+    // Validate each guarantor that has any data filled
+    guarantors.forEach((g, idx) => {
+      if (!g.name || g.name.trim().length < 2) {
+        newErrors[`guarantor_${idx}_name`] = 'Nombre del garante es requerido'
+      }
+      if (!g.dni || g.dni.trim().length < 7) {
+        newErrors[`guarantor_${idx}_dni`] = 'DNI del garante es requerido (mín. 7 dígitos)'
+      }
+    })
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -71,13 +114,18 @@ export const TenantForm = () => {
     e.preventDefault()
     if (!validate()) return
 
+    const payload = {
+      ...formData,
+      guarantors: guarantors.filter(g => g.name && g.dni),
+    }
+
     if (isEditing) {
       updateTenant(
-        { id, ...formData },
+        { id, ...payload },
         { onSuccess: () => navigate('/tenants') }
       )
     } else {
-      createTenant(formData, {
+      createTenant(payload, {
         onSuccess: () => navigate('/tenants'),
       })
     }
@@ -128,12 +176,11 @@ export const TenantForm = () => {
                 placeholder="12345678"
                 error={errors.dni}
               />
-              <Input
+              <PhoneInput
                 label="Teléfono"
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                placeholder="1166666666"
               />
               <Input
                 label="Email"
@@ -146,33 +193,77 @@ export const TenantForm = () => {
             </div>
           </div>
 
-          {/* Garante */}
+          {/* Garantes (hasta 5) */}
           <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Garante</h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="Nombre Garante"
-                name="guarantorName"
-                value={formData.guarantorName}
-                onChange={handleChange}
-                placeholder="María Gómez"
-              />
-              <Input
-                label="DNI Garante"
-                name="guarantorDni"
-                value={formData.guarantorDni}
-                onChange={handleChange}
-                placeholder="11111111"
-              />
-              <Input
-                label="Teléfono Garante"
-                name="guarantorPhone"
-                value={formData.guarantorPhone}
-                onChange={handleChange}
-                placeholder="1155555555"
-              />
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold">Garantes ({guarantors.length}/{MAX_GUARANTORS})</h2>
+              {guarantors.length < MAX_GUARANTORS && (
+                <Button type="button" variant="outline" size="sm" onClick={addGuarantor}>
+                  <PlusIcon className="w-4 h-4" />
+                  Agregar Garante
+                </Button>
+              )}
             </div>
+
+            {guarantors.length === 0 && (
+              <div className="text-base-content/50 text-sm border border-dashed border-base-300 rounded-lg p-4 text-center">
+                No hay garantes cargados. Puede agregar hasta {MAX_GUARANTORS} garantes.
+              </div>
+            )}
+
+            {guarantors.map((g, idx) => (
+              <div key={idx} className="border border-base-300 rounded-lg p-4 space-y-3 relative">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium text-base-content/80">Garante {idx + 1}</h3>
+                  <button
+                    type="button"
+                    onClick={() => removeGuarantor(idx)}
+                    className="btn btn-sm btn-ghost text-error"
+                    title="Eliminar garante"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Nombre Completo *"
+                    value={g.name}
+                    onChange={(e) => handleGuarantorChange(idx, 'name', e.target.value)}
+                    placeholder="María Gómez"
+                    error={errors[`guarantor_${idx}_name`]}
+                  />
+                  <Input
+                    label="DNI / CUIT *"
+                    value={g.dni}
+                    onChange={(e) => handleGuarantorChange(idx, 'dni', e.target.value)}
+                    placeholder="11111111"
+                    error={errors[`guarantor_${idx}_dni`]}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <PhoneInput
+                    label="Teléfono"
+                    value={g.phone}
+                    onChange={(val) => handleGuarantorChange(idx, 'phone', typeof val === 'string' ? val : val?.target?.value || '')}
+                  />
+                  <Input
+                    label="Email"
+                    type="email"
+                    value={g.email}
+                    onChange={(e) => handleGuarantorChange(idx, 'email', e.target.value)}
+                    placeholder="garante@email.com"
+                  />
+                  <Input
+                    label="Domicilio"
+                    value={g.address}
+                    onChange={(e) => handleGuarantorChange(idx, 'address', e.target.value)}
+                    placeholder="Av. Corrientes 1234"
+                  />
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Observaciones */}

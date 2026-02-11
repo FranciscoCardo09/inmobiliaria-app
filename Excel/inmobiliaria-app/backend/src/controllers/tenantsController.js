@@ -30,6 +30,9 @@ const getTenants = async (req, res, next) => {
     const tenants = await prisma.tenant.findMany({
       where,
       include: {
+        guarantors: {
+          orderBy: { order: 'asc' },
+        },
         contracts: {
           where: { active: true },
           include: {
@@ -59,6 +62,9 @@ const getTenantById = async (req, res, next) => {
     const tenant = await prisma.tenant.findUnique({
       where: { id },
       include: {
+        guarantors: {
+          orderBy: { order: 'asc' },
+        },
         contracts: {
           include: {
             property: {
@@ -115,10 +121,15 @@ const getTenantHistory = async (req, res, next) => {
 const createTenant = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, dni, phone, email, observations } = req.body;
+    const { name, dni, phone, email, observations, guarantors } = req.body;
 
     if (!name || !dni) {
       return ApiResponse.badRequest(res, 'Nombre y DNI son requeridos');
+    }
+
+    // Validate guarantors (max 5)
+    if (guarantors && guarantors.length > 5) {
+      return ApiResponse.badRequest(res, 'Un inquilino puede tener como máximo 5 garantes');
     }
 
     const existing = await prisma.tenant.findUnique({
@@ -130,8 +141,22 @@ const createTenant = async (req, res, next) => {
     }
 
     const tenant = await prisma.tenant.create({
-      data: { groupId, name, dni, phone, email, observations },
+      data: {
+        groupId, name, dni, phone, email, observations,
+        guarantors: guarantors?.length ? {
+          create: guarantors.map((g, idx) => ({
+            name: g.name,
+            dni: g.dni,
+            phone: g.phone || null,
+            email: g.email || null,
+            address: g.address || null,
+            observations: g.observations || null,
+            order: idx + 1,
+          })),
+        } : undefined,
+      },
       include: {
+        guarantors: { orderBy: { order: 'asc' } },
         contracts: {
           where: { active: true },
           include: {
@@ -152,7 +177,7 @@ const createTenant = async (req, res, next) => {
 const updateTenant = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { name, dni, phone, email, observations, isActive } = req.body;
+    const { name, dni, phone, email, observations, isActive, guarantors } = req.body;
 
     const tenant = await prisma.tenant.findUnique({ where: { id } });
     if (!tenant || tenant.groupId !== groupId) {
@@ -168,25 +193,53 @@ const updateTenant = async (req, res, next) => {
       }
     }
 
-    const updated = await prisma.tenant.update({
-      where: { id },
-      data: {
-        ...(name && { name }),
-        ...(dni && { dni }),
-        ...(phone !== undefined && { phone }),
-        ...(email !== undefined && { email }),
-        ...(observations !== undefined && { observations }),
-        ...(isActive !== undefined && { isActive }),
-      },
-      include: {
-        contracts: {
-          where: { active: true },
-          include: {
-            property: { select: { id: true, address: true, code: true } },
-          },
+    // Validate guarantors (max 5)
+    if (guarantors && guarantors.length > 5) {
+      return ApiResponse.badRequest(res, 'Un inquilino puede tener como máximo 5 garantes');
+    }
+
+    // Use transaction to replace guarantors atomically
+    const updated = await prisma.$transaction(async (tx) => {
+      // If guarantors provided, delete old ones and create new
+      if (guarantors !== undefined) {
+        await tx.guarantor.deleteMany({ where: { tenantId: id } });
+        if (guarantors.length > 0) {
+          await tx.guarantor.createMany({
+            data: guarantors.map((g, idx) => ({
+              tenantId: id,
+              name: g.name,
+              dni: g.dni,
+              phone: g.phone || null,
+              email: g.email || null,
+              address: g.address || null,
+              observations: g.observations || null,
+              order: idx + 1,
+            })),
+          });
+        }
+      }
+
+      return tx.tenant.update({
+        where: { id },
+        data: {
+          ...(name && { name }),
+          ...(dni && { dni }),
+          ...(phone !== undefined && { phone }),
+          ...(email !== undefined && { email }),
+          ...(observations !== undefined && { observations }),
+          ...(isActive !== undefined && { isActive }),
         },
-        _count: { select: { contracts: true } },
-      },
+        include: {
+          guarantors: { orderBy: { order: 'asc' } },
+          contracts: {
+            where: { active: true },
+            include: {
+              property: { select: { id: true, address: true, code: true } },
+            },
+          },
+          _count: { select: { contracts: true } },
+        },
+      });
     });
 
     return ApiResponse.success(res, updated, 'Inquilino actualizado');

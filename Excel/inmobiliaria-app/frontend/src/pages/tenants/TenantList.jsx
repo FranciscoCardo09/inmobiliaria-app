@@ -110,7 +110,7 @@ export const TenantList = () => {
                 <th>Nombre</th>
                 <th>DNI</th>
                 <th>Teléfono</th>
-                <th>Garante</th>
+                <th>Garantes</th>
                 <th>Propiedad Actual</th>
                 <th>Contratos</th>
                 <th>Acciones</th>
@@ -139,11 +139,13 @@ export const TenantList = () => {
                       ) : '-'}
                     </td>
                     <td>
-                      {tenant.guarantorName ? (
+                      {tenant.guarantors?.length > 0 ? (
                         <div>
-                          <div className="text-sm">{tenant.guarantorName}</div>
-                          {tenant.guarantorDni && (
-                            <div className="text-xs text-base-content/60">DNI: {tenant.guarantorDni}</div>
+                          <div className="text-sm">{tenant.guarantors[0].name}</div>
+                          {tenant.guarantors.length > 1 && (
+                            <div className="text-xs text-base-content/60">
+                              +{tenant.guarantors.length - 1} más
+                            </div>
                           )}
                         </div>
                       ) : (

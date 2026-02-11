@@ -7,6 +7,13 @@ const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services
 
 const prisma = new PrismaClient();
 
+// Helper: parse a date string as local midnight (avoids UTC shift)
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+  const parts = String(dateStr).replace(/T.*/, '').split('-');
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+};
+
 // Helper: compute period label from startDate + currentMonth
 const getPeriodLabel = (startDate, currentMonth) => {
   const start = new Date(startDate);
@@ -22,35 +29,56 @@ const getPeriodLabel = (startDate, currentMonth) => {
 // Helper: enrich contract with computed fields
 const enrichContract = (c) => {
   const adjustmentIndex = c.adjustmentIndex;
-  const currentPeriodLabel = getPeriodLabel(c.startDate, c.currentMonth);
+
+  // Dynamically compute currentMonth from startDate vs now
+  const start = new Date(c.startDate);
+  const now = new Date();
+  const monthsDiff =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    (now.getMonth() - start.getMonth());
+  // currentMonth is 1-based: month 1 = the month the contract started
+  const computedCurrentMonth = Math.max(1, Math.min(monthsDiff + 1, c.durationMonths));
+
+  const currentPeriodLabel = getPeriodLabel(c.startDate, computedCurrentMonth);
 
   let nextAdjustmentLabel = null;
   let nextAdjustmentIsThisMonth = false;
 
   if (adjustmentIndex && c.nextAdjustmentMonth) {
-    nextAdjustmentIsThisMonth = c.currentMonth === c.nextAdjustmentMonth;
+    nextAdjustmentIsThisMonth = computedCurrentMonth === c.nextAdjustmentMonth;
     if (nextAdjustmentIsThisMonth) {
-      nextAdjustmentLabel = `Ajuste este mes (Mes ${c.currentMonth})`;
+      nextAdjustmentLabel = `Ajuste este mes (Mes ${computedCurrentMonth})`;
     } else {
       nextAdjustmentLabel = `Mes ${c.nextAdjustmentMonth} (${adjustmentIndex.name})`;
     }
   }
 
   // Compute end date from startDate + durationMonths
-  const start = new Date(c.startDate);
   const endDate = new Date(start);
   endDate.setMonth(endDate.getMonth() + c.durationMonths);
 
   // Remaining months
-  const now = new Date();
-  const remainingMonths = Math.max(0, c.durationMonths - c.currentMonth);
+  const remainingMonths = Math.max(0, c.durationMonths - computedCurrentMonth);
+
+  // Determine status string for frontend
+  let status;
+  if (!c.active) {
+    status = 'TERMINATED';
+  } else if (now > endDate) {
+    status = 'EXPIRED';
+  } else {
+    status = 'ACTIVE';
+  }
 
   // Is expiring soon (2 months or less remaining)
-  const isExpiringSoon = c.active && remainingMonths <= 2;
+  const isExpiringSoon = status === 'ACTIVE' && remainingMonths <= 2;
 
   return {
     ...c,
+    currentMonth: computedCurrentMonth,
     endDate,
+    status,
+    rentAmount: c.baseRent,
     currentPeriodLabel,
     remainingMonths,
     isExpiringSoon,
@@ -249,7 +277,7 @@ const createContract = async (req, res, next) => {
         groupId,
         tenantId,
         propertyId,
-        startDate: new Date(startDate),
+        startDate: parseLocalDate(startDate),
         startMonth: startMonthVal,
         durationMonths: parseInt(durationMonths, 10),
         currentMonth: startMonthVal,
@@ -295,7 +323,7 @@ const updateContract = async (req, res, next) => {
     }
 
     const data = {};
-    if (startDate) data.startDate = new Date(startDate);
+    if (startDate) data.startDate = parseLocalDate(startDate);
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
     if (currentMonth) data.currentMonth = parseInt(currentMonth, 10);
     if (baseRent) data.baseRent = parseFloat(baseRent);
@@ -332,6 +360,45 @@ const updateContract = async (req, res, next) => {
     });
 
     return ApiResponse.success(res, enrichContract(updated), 'Contrato actualizado');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/groups/:groupId/contracts/:id
+const deleteContract = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      include: {
+        debts: { where: { status: { in: ['OPEN', 'PARTIAL'] } } },
+        tenant: { select: { name: true } },
+        property: { select: { address: true } },
+      },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    // Prevent deletion if there are open debts
+    if (contract.debts.length > 0) {
+      return ApiResponse.badRequest(
+        res,
+        `No se puede eliminar: el contrato tiene ${contract.debts.length} deuda(s) abierta(s). Pague o cancele las deudas primero.`
+      );
+    }
+
+    // Cascade will delete payments, monthly records, closed debts, etc.
+    await prisma.contract.delete({ where: { id } });
+
+    return ApiResponse.success(
+      res,
+      { id },
+      `Contrato de ${contract.tenant?.name} en ${contract.property?.address} eliminado`
+    );
   } catch (error) {
     next(error);
   }
@@ -387,7 +454,7 @@ const assignTenantToProperty = async (req, res, next) => {
         groupId,
         tenantId,
         propertyId,
-        startDate: new Date(startDate),
+        startDate: parseLocalDate(startDate),
         startMonth: 1,
         durationMonths: parseInt(durationMonths, 10),
         currentMonth: 1,
@@ -418,5 +485,6 @@ module.exports = {
   getContractById,
   createContract,
   updateContract,
+  deleteContract,
   assignTenantToProperty,
 };

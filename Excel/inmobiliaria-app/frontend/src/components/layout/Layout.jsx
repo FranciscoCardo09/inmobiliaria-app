@@ -17,12 +17,12 @@ export const Layout = () => {
   }
 
   return (
-    <div className="min-h-screen bg-base-200 flex">
+    <div className="h-screen bg-base-200 flex overflow-hidden">
       {/* Sidebar */}
       <Sidebar />
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-screen lg:ml-0">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Header */}
         <Header />
 

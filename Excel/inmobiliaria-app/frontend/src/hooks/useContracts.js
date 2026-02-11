@@ -73,6 +73,24 @@ export const useContracts = (groupId, filters = {}) => {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await api.delete(`/groups/${groupId}/contracts/${id}`)
+      return response.data
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['dashboard'])
+      queryClient.invalidateQueries(['monthlyRecords'])
+      toast.success(data.message || 'Contrato eliminado')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al eliminar contrato')
+    },
+  })
+
   return {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
@@ -82,7 +100,9 @@ export const useContracts = (groupId, filters = {}) => {
     isLoadingExpiring: expiringQuery.isLoading,
     createContract: createMutation.mutate,
     updateContract: updateMutation.mutate,
+    deleteContract: deleteMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
+    isDeleting: deleteMutation.isPending,
   }
 }

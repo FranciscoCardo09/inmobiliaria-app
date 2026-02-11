@@ -17,6 +17,12 @@ const contractsController = require('../controllers/contractsController');
 const adjustmentIndicesController = require('../controllers/adjustmentIndicesController');
 const dashboardRoutes = require('./dashboard.routes');
 const paymentsRoutes = require('./payments.routes');
+const monthlyRecordsRoutes = require('./monthlyRecords.routes');
+const paymentTransactionsRoutes = require('./paymentTransactions.routes');
+const holidaysRoutes = require('./holidays.routes');
+const debtsRoutes = require('./debts.routes');
+const serviceCategoriesRoutes = require('./serviceCategories.routes');
+const reportsRoutes = require('./reports.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -54,6 +60,22 @@ router.use('/groups/:groupId/dashboard', dashboardRoutes);
 
 // Payments (Phase 4)
 router.use('/groups/:groupId/payments', paymentsRoutes);
+
+// Service Categories
+router.use('/groups/:groupId/service-categories', serviceCategoriesRoutes);
+
+// Monthly Control (Phase 5)
+router.use('/groups/:groupId/monthly-records', monthlyRecordsRoutes);
+router.use('/groups/:groupId/payment-transactions', paymentTransactionsRoutes);
+
+// Debts + Close Month (Phase 5+)
+router.use('/groups/:groupId', debtsRoutes);
+
+// Reports (Phase 6)
+router.use('/groups/:groupId/reports', reportsRoutes);
+
+// Holidays (global)
+router.use('/holidays', holidaysRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

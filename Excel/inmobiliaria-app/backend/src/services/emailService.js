@@ -225,7 +225,7 @@ const welcomeEmailTemplate = (name) => {
 };
 
 // Send email function
-const sendEmail = async ({ to, subject, html }) => {
+const sendEmail = async ({ to, subject, html, attachments }) => {
   try {
     const transporter = createTransporter();
 
@@ -235,6 +235,10 @@ const sendEmail = async ({ to, subject, html }) => {
       subject,
       html,
     };
+
+    if (attachments) {
+      mailOptions.attachments = attachments;
+    }
 
     const info = await transporter.sendMail(mailOptions);
     console.log(`Email sent to ${to}: ${info.messageId}`);
@@ -279,6 +283,30 @@ const emailService = {
       to: user.email,
       subject: 'Bienvenido a Inmobiliaria H&H',
       html,
+    });
+  },
+
+  // Send report email with PDF attachment
+  sendReportEmail: async ({ to, subject, pdfBuffer, filename }) => {
+    const content = `
+      <h1>Reporte Adjunto</h1>
+      <p class="subtitle">Inmobiliaria H&H</p>
+      <div class="content">
+        <p>Adjuntamos el reporte solicitado: <strong>${filename}</strong></p>
+        <p>Este archivo ha sido generado automáticamente por el sistema de gestión inmobiliaria.</p>
+      </div>
+    `;
+    const html = baseTemplate(content, 'Reporte - Inmobiliaria H&H');
+
+    return sendEmail({
+      to,
+      subject,
+      html,
+      attachments: [{
+        filename,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      }],
     });
   },
 };

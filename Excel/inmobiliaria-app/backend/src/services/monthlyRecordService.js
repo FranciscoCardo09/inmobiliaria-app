@@ -238,7 +238,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     if (record.debt && record.debt.status !== 'PAID') {
       const { amount, days, startDate, endDate } = await calculateDebtPunitory(record.debt);
-      const remainingDebt = record.debt.unpaidRentAmount - record.debt.amountPaid;
+      const remainingDebt = Math.max(0, record.debt.unpaidRentAmount - record.debt.amountPaid);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
@@ -383,9 +383,30 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       owner: contract.property?.owner,
       periodLabel: `${monthNames[month]} - Mes ${monthNumber}`,
       nextAdjustmentLabel,
-      // Calculated fields for the view (use live values)
-      aFavorNextMonth: liveBalance > 0 ? liveBalance : 0,
-      debeNextMonth: liveBalance < 0 ? Math.abs(liveBalance) : 0,
+      // Calculated fields for the view
+      // IMPORTANTE: Cuando hay deuda, calcular balance sobre totales históricos
+      aFavorNextMonth: (() => {
+        let realBalance;
+        if (debtInfo && record.debt) {
+          // Si hay deuda (abierta o pagada), usar totales históricos
+          realBalance = totalAbonado - totalHistorico;
+        } else {
+          // Sin deuda, usar balance del período actual
+          realBalance = liveBalance;
+        }
+        return realBalance > 0 ? realBalance : 0;
+      })(),
+      debeNextMonth: (() => {
+        let realBalance;
+        if (debtInfo && record.debt) {
+          // Si hay deuda (abierta o pagada), usar totales históricos
+          realBalance = totalAbonado - totalHistorico;
+        } else {
+          // Sin deuda, usar balance del período actual
+          realBalance = liveBalance;
+        }
+        return realBalance < 0 ? Math.abs(realBalance) : 0;
+      })(),
     });
   }
 

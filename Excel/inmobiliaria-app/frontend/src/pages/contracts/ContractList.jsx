@@ -5,6 +5,7 @@ import {
   PlusIcon,
   MagnifyingGlassIcon,
   PencilIcon,
+  TrashIcon,
   ExclamationTriangleIcon,
   ClockIcon,
 } from '@heroicons/react/24/outline'
@@ -16,15 +17,24 @@ import ContractAlerts from '../../components/ContractAlerts'
 
 export const ContractList = () => {
   const navigate = useNavigate()
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId)
 
   const [filters, setFilters] = useState({
     search: '',
     status: '',
   })
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
-  const { contracts, isLoading } = useContracts(currentGroup?.id, filters)
+  const { contracts, isLoading, deleteContract, isDeleting } = useContracts(currentGroup?.id, filters)
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return
+    try {
+      await deleteContract(confirmDelete.id)
+    } catch { /* toast handles error */ }
+    setConfirmDelete(null)
+  }
 
   const getStatusBadge = (contract) => {
     if (contract.status === 'ACTIVE' && contract.isExpiringSoon) {
@@ -95,11 +105,9 @@ export const ContractList = () => {
               value={filters.status}
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             >
-              <option value="">Todos los estados</option>
+              <option value="">Todos los contratos</option>
               <option value="ACTIVE">Activos</option>
-              <option value="EXPIRED">Vencidos</option>
-              <option value="TERMINATED">Rescindidos</option>
-              <option value="RENEWED">Renovados</option>
+              <option value="INACTIVE">Inactivos</option>
             </select>
           </div>
         </div>
@@ -167,13 +175,22 @@ export const ContractList = () => {
                   </td>
                   <td>{getStatusBadge(contract)}</td>
                   <td>
-                    <button
-                      onClick={() => navigate(`/contracts/${contract.id}`)}
-                      className="btn btn-sm btn-ghost"
-                      title="Editar"
-                    >
-                      <PencilIcon className="w-4 h-4" />
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => navigate(`/contracts/${contract.id}`)}
+                        className="btn btn-sm btn-ghost"
+                        title="Editar"
+                      >
+                        <PencilIcon className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(contract)}
+                        className="btn btn-sm btn-ghost text-error"
+                        title="Eliminar"
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -201,6 +218,41 @@ export const ContractList = () => {
           </div>
         </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg text-error">Eliminar Contrato</h3>
+            <p className="py-4">
+              ¿Estás seguro de eliminar el contrato de{' '}
+              <span className="font-semibold">{confirmDelete.tenant?.name}</span>{' '}
+              en <span className="font-semibold">{confirmDelete.property?.address}</span>?
+            </p>
+            <p className="text-sm text-base-content/60">
+              Se eliminarán todos los registros mensuales, pagos y transacciones asociados. Esta acción no se puede deshacer.
+            </p>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmDelete(null)}
+                disabled={isDeleting}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-error btn-sm"
+                onClick={handleDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? <span className="loading loading-spinner loading-xs" /> : <TrashIcon className="w-4 h-4" />}
+                Eliminar
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => !isDeleting && setConfirmDelete(null)} />
+        </div>
+      )}
     </div>
   )
 }

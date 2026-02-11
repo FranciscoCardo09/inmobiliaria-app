@@ -21,6 +21,8 @@ export const useDashboard = (groupId) => {
       adjustmentsThisMonth: 0,
       adjustmentsNextMonth: 0,
       contractsExpiring: 0,
+      paymentsThisMonth: { paid: 0, total: 0 },
+      pendingDebts: 0,
     },
     isLoading: summaryQuery.isLoading,
   }

@@ -1,4 +1,4 @@
-// Payment Routes - Phase 4
+// Payment Routes - Phase 4 v2
 const express = require('express');
 const router = express.Router({ mergeParams: true });
 const paymentsController = require('../controllers/paymentsController');
@@ -7,19 +7,38 @@ const { requireGroupAccess } = require('../middleware/groupAuth');
 
 router.use(authenticate);
 
-// View routes (VIEWER+)
+// === CONCEPT TYPES ===
 router.get(
-  '/current-month',
+  '/concept-types',
   requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']),
-  paymentsController.getCurrentMonth
+  paymentsController.getConceptTypes
 );
 
-router.get(
-  '/next-month',
-  requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']),
-  paymentsController.getNextMonth
+router.post(
+  '/concept-types',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  paymentsController.createConceptType
 );
 
+router.post(
+  '/concept-types/seed-defaults',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  paymentsController.seedDefaultConceptTypes
+);
+
+router.put(
+  '/concept-types/:id',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  paymentsController.updateConceptType
+);
+
+router.delete(
+  '/concept-types/:id',
+  requireGroupAccess(['ADMIN']),
+  paymentsController.deleteConceptType
+);
+
+// === PAYMENTS ===
 router.get(
   '/calculate',
   requireGroupAccess(['ADMIN', 'OPERATOR']),

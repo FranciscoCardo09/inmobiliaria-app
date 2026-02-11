@@ -31,6 +31,14 @@ import ContractsExpiring from './pages/dashboard/ContractsExpiring'
 import PaymentList from './pages/payments/PaymentList'
 import PaymentForm from './pages/payments/PaymentForm'
 
+// Phase 5: Monthly Control + Debts
+import MonthlyControlPage from './pages/monthly-control/MonthlyControlPage'
+import PaymentHistoryList from './pages/payment-history/PaymentHistoryList'
+import ServiceTypeList from './pages/services/ServiceTypeList'
+
+// Phase 6: Reports
+import ReportsPage from './pages/reports/ReportsPage'
+
 // Loading
 import { LoadingPage } from './components/ui/Loading'
 
@@ -111,10 +119,17 @@ function App() {
         {/* Phase 4: Payments */}
         <Route path="payments" element={<PaymentList />} />
         <Route path="payments/new" element={<PaymentForm />} />
-        <Route path="payments/:id" element={<PaymentForm />} />
+
+        {/* Phase 5: Monthly Control + Debts */}
+        <Route path="monthly-control" element={<MonthlyControlPage />} />
+        <Route path="debts" element={<Navigate to="/monthly-control" replace />} />
+        <Route path="payment-history" element={<PaymentHistoryList />} />
+        <Route path="services" element={<ServiceTypeList />} />
+
+        {/* Phase 6: Reports */}
+        <Route path="reports" element={<ReportsPage />} />
 
         {/* Placeholder routes for future phases */}
-        <Route path="reports" element={<PlaceholderPage title="Reportes" phase={6} />} />
         <Route path="settings" element={<PlaceholderPage title="Configuracion" phase={7} />} />
       </Route>
 

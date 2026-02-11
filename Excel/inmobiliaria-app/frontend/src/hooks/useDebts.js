@@ -38,13 +38,10 @@ export const useDebts = (groupId, filters = {}) => {
       return { updatedDebt: response.data.data.debt, debtId }
     },
     onSuccess: async (data, variables) => {
-      const { updatedDebt } = data
-
-      // CRÍTICO: Actualizar el cache inmediatamente con los datos del servidor
-      queryClient.setQueryData(['debt', groupId, variables.debtId], updatedDebt)
-
-      // Invalidar el resto de queries relacionadas
+      // Invalidar TODAS las queries relacionadas, incluyendo ['debt'] para que
+      // useDebt refetche desde getDebtById (que enriquece con datos live de punitorios)
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['debt', groupId, variables.debtId] }),
         queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
         queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
         queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
@@ -67,13 +64,10 @@ export const useDebts = (groupId, filters = {}) => {
       return { updatedDebt: response.data.data, debtId, paymentId }
     },
     onSuccess: async (data, variables) => {
-      const { updatedDebt } = data
-
-      // CRÍTICO: Actualizar el cache inmediatamente con los datos del servidor
-      queryClient.setQueryData(['debt', groupId, variables.debtId], updatedDebt)
-
-      // Invalidar el resto de queries relacionadas
+      // Invalidar TODAS las queries relacionadas, incluyendo ['debt'] para que
+      // useDebt refetche desde getDebtById (que enriquece con datos live de punitorios)
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['debt', groupId, variables.debtId] }),
         queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
         queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
         queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
