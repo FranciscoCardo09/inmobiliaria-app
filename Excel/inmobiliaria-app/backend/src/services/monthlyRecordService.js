@@ -438,9 +438,23 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
   const totalDue = record.rentAmount + servicesTotal + punitoryAmount - record.previousBalance;
   const balance = amountPaid - Math.max(totalDue, 0);
 
+  // Check if there's an open debt for this record
+  const openDebt = await prisma.debt.findFirst({
+    where: {
+      monthlyRecordId,
+      status: { in: ['OPEN', 'PARTIAL'] },
+    },
+  });
+
   let status = 'PENDING';
-  if (amountPaid >= Math.max(totalDue, 0) && amountPaid > 0) status = 'COMPLETE';
-  else if (amountPaid > 0) status = 'PARTIAL';
+  // Si hay deuda abierta, NUNCA marcar como COMPLETE (aunque amountPaid >= totalDue)
+  if (openDebt) {
+    status = amountPaid > 0 ? 'PARTIAL' : 'PENDING';
+  } else if (amountPaid >= Math.max(totalDue, 0) && amountPaid > 0) {
+    status = 'COMPLETE';
+  } else if (amountPaid > 0) {
+    status = 'PARTIAL';
+  }
 
   const isPaid = status === 'COMPLETE';
   const fullPaymentDate = isPaid && !record.fullPaymentDate
