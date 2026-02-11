@@ -323,6 +323,37 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     // Live balance = what was paid minus what is owed (with live punitorios)
     const liveBalance = record.amountPaid - liveTotalDue;
 
+    // TOTALES HISTÓRICOS: incluyen punitorios de la deuda (pagados + impagos)
+    let totalPunitoriosHistoricos = livePunitoryAmount; // Punitorios del record
+    let totalAbonado = record.amountPaid; // Lo pagado al record
+    let totalHistorico = liveTotalDue; // Total con punitorios del record
+
+    if (debtInfo && record.debt) {
+      // Si hay deuda, calcular punitorios totales de la deuda
+      const debtPunitoriosPagados = Math.max(0, record.debt.amountPaid - record.debt.unpaidRentAmount);
+      const debtPunitoriosImpagos = debtInfo.liveAccumulatedPunitory || 0;
+      const debtPunitoriosTotales = debtPunitoriosPagados + debtPunitoriosImpagos;
+
+      // Sumar punitorios de la deuda a los del record
+      totalPunitoriosHistoricos += debtPunitoriosTotales;
+
+      // Sumar lo pagado en la deuda
+      totalAbonado += record.debt.amountPaid;
+
+      // Total histórico = alquiler + servicios + punitorios totales (record + deuda)
+      totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos - record.previousBalance;
+
+      console.log('\n[monthlyRecordService] HISTORICAL TOTALS WITH DEBT:');
+      console.log('  Record punitorios:', livePunitoryAmount);
+      console.log('  Debt punitorios pagados:', debtPunitoriosPagados);
+      console.log('  Debt punitorios impagos:', debtPunitoriosImpagos);
+      console.log('  TOTAL punitorios históricos:', totalPunitoriosHistoricos);
+      console.log('  Record amountPaid:', record.amountPaid);
+      console.log('  Debt amountPaid:', record.debt.amountPaid);
+      console.log('  TOTAL abonado:', totalAbonado);
+      console.log('  TOTAL histórico:', totalHistorico);
+    }
+
     records.push({
       ...record,
       debtInfo,
@@ -330,6 +361,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       livePunitoryDays,
       liveTotalDue,
       liveBalance,
+      // NUEVOS CAMPOS HISTÓRICOS
+      totalPunitoriosHistoricos,  // Punitorios totales (record + deuda pagada + deuda impaga)
+      totalAbonado,                // Total pagado (record + deuda)
+      totalHistorico,              // Total real (alquiler + servicios + todos los punitorios)
       // Enriched data
       contract: {
         id: contract.id,
