@@ -404,30 +404,26 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   if (status === 'PAID' && debt.monthlyRecordId) {
     console.log('\n[payDebt] Updating MonthlyRecord - Debt FULLY PAID');
 
-    const record = await prisma.monthlyRecord.findUnique({
-      where: { id: debt.monthlyRecordId },
-    });
+    // Use recalculateMonthlyRecord to sum all transactions correctly
+    const { recalculateMonthlyRecord } = require('./monthlyRecordService');
+    const updatedRecord = await recalculateMonthlyRecord(debt.monthlyRecordId);
 
-    if (record) {
-      // Debt is fully paid, so mark MonthlyRecord as COMPLETE
-      // Calculate total amount paid (from record + from debt)
-      const totalPaidForPeriod = (record.amountPaid || 0) + newAmountPaid;
+    console.log('  MonthlyRecord recalculated');
+    console.log('  New amountPaid:', updatedRecord.amountPaid);
+    console.log('  Status:', updatedRecord.status);
 
-      console.log('  MonthlyRecord amountPaid before:', record.amountPaid);
-      console.log('  Debt amountPaid:', newAmountPaid);
-      console.log('  Total paid for period:', totalPaidForPeriod);
-
+    // If still not COMPLETE, force it (debt is fully paid)
+    if (updatedRecord.status !== 'COMPLETE') {
       await prisma.monthlyRecord.update({
         where: { id: debt.monthlyRecordId },
         data: {
           status: 'COMPLETE',
           isPaid: true,
           isCancelled: true,
-          amountPaid: totalPaidForPeriod,
-          balance: 0,
           fullPaymentDate: parseLocalDate(paymentDate),
         },
       });
+      console.log('  Forced MonthlyRecord to COMPLETE');
     }
   } else if (debt.monthlyRecordId) {
     console.log('\n[payDebt] Updating MonthlyRecord - Debt PARTIAL payment');
@@ -437,26 +433,12 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
 
     // Partial debt payment: DO NOT mark MonthlyRecord as COMPLETE
     // because there are still unpaid punitorios or rent on the debt
-    // Just increment amountPaid to reflect the payment
-    const record = await prisma.monthlyRecord.findUnique({
-      where: { id: debt.monthlyRecordId },
-      select: { amountPaid: true, totalDue: true },
-    });
+    // Use recalculateMonthlyRecord to sum all transactions correctly
+    // (avoids manual increment that causes duplicates)
+    const { recalculateMonthlyRecord } = require('./monthlyRecordService');
+    await recalculateMonthlyRecord(debt.monthlyRecordId);
 
-    const newMonthlyAmountPaid = (record.amountPaid || 0) + parsedAmount;
-
-    console.log('  MonthlyRecord totalDue:', record.totalDue);
-    console.log('  MonthlyRecord amountPaid before:', record.amountPaid);
-    console.log('  New MonthlyRecord amountPaid:', newMonthlyAmountPaid);
-
-    await prisma.monthlyRecord.update({
-      where: { id: debt.monthlyRecordId },
-      data: {
-        amountPaid: newMonthlyAmountPaid,
-        // Keep status as PARTIAL until debt is fully paid
-        status: 'PARTIAL',
-      },
-    });
+    console.log('  MonthlyRecord recalculated (amountPaid updated from transactions)');
   }
 
   return { debt: updatedDebt, payment: debtPayment };
