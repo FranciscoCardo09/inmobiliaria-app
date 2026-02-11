@@ -190,19 +190,28 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
 
   // La deuda base sobre la que se calculan punitorios es SOLO el alquiler impago
   // NO calculamos punitorios sobre punitorios (anatocismo)
-  const remainingRent = debt.unpaidRentAmount - debt.amountPaid;
+  const remainingRent = Math.max(debt.unpaidRentAmount - debt.amountPaid, 0);
 
   console.log('  Unpaid rent amount:', debt.unpaidRentAmount);
   console.log('  Amount paid on debt:', debt.amountPaid);
   console.log('  Remaining rent:', remainingRent);
-  console.log('  Accumulated punitory (from MonthlyRecord):', accumulatedPunitory);
+  console.log('  Accumulated punitory (stored):', accumulatedPunitory);
 
-  // Si no queda renta impaga, no hay nuevos punitorios
+  // Si no queda renta impaga, calcular cuántos punitorios acumulados quedan por pagar
   if (remainingRent <= 0) {
-    console.log('  -> No remaining rent, no new punitorios');
+    console.log('  -> Rent fully paid, calculating remaining unpaid punitorios');
+
+    // Cuánto se pagó de punitorios = lo que excede el alquiler
+    const amountPaidToPunitory = Math.max(0, debt.amountPaid - debt.unpaidRentAmount);
+    // Punitorios impagos = punitorios acumulados - lo pagado de punitorios
+    const unpaidPunitory = Math.max(0, accumulatedPunitory - amountPaidToPunitory);
+
+    console.log('  Amount paid to punitory:', amountPaidToPunitory);
+    console.log('  Unpaid punitory:', unpaidPunitory);
+
     return {
       days: 0,
-      amount: 0,
+      amount: unpaidPunitory,
       newPunitoryAmount: 0,
       accumulatedPunitory,
       remainingDebt: 0,
@@ -324,9 +333,17 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   });
 
   // Also create a PaymentTransaction so it appears in the payment history
+  // IMPORTANT: Payment order is RENT FIRST, then PUNITORIOS
   const parsedAmount = parseFloat(amount);
-  const punitoryPortion = Math.min(punitoryAmount, parsedAmount);
-  const rentPortion = parsedAmount - punitoryPortion;
+  const rentPortion = Math.min(remainingDebt, parsedAmount);
+  const punitoryPortion = Math.max(parsedAmount - rentPortion, 0);
+
+  console.log('\n[payDebt] PAYMENT IMPUTATION:');
+  console.log('  Payment amount:', parsedAmount);
+  console.log('  Remaining debt (rent):', remainingDebt);
+  console.log('  Punitory amount:', punitoryAmount);
+  console.log('  -> Rent portion:', rentPortion);
+  console.log('  -> Punitory portion:', punitoryPortion);
 
   const transaction = await prisma.paymentTransaction.create({
     data: {
@@ -383,32 +400,60 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
     },
   });
 
-  // When debt is fully paid, update the associated MonthlyRecord
+  // When debt is fully paid (including punitorios), update the associated MonthlyRecord
   if (status === 'PAID' && debt.monthlyRecordId) {
+    console.log('\n[payDebt] Updating MonthlyRecord - Debt FULLY PAID');
+
     const record = await prisma.monthlyRecord.findUnique({
       where: { id: debt.monthlyRecordId },
     });
 
     if (record) {
-      // amountPaid = totalDue so balance = 0 (debt covered everything)
+      // Debt is fully paid, so mark MonthlyRecord as COMPLETE
+      // Calculate total amount paid (from record + from debt)
+      const totalPaidForPeriod = (record.amountPaid || 0) + newAmountPaid;
+
+      console.log('  MonthlyRecord amountPaid before:', record.amountPaid);
+      console.log('  Debt amountPaid:', newAmountPaid);
+      console.log('  Total paid for period:', totalPaidForPeriod);
+
       await prisma.monthlyRecord.update({
         where: { id: debt.monthlyRecordId },
         data: {
           status: 'COMPLETE',
           isPaid: true,
           isCancelled: true,
-          amountPaid: record.totalDue,
+          amountPaid: totalPaidForPeriod,
           balance: 0,
           fullPaymentDate: parseLocalDate(paymentDate),
         },
       });
     }
   } else if (debt.monthlyRecordId) {
-    // Partial debt payment: update amountPaid on the record incrementally
+    console.log('\n[payDebt] Updating MonthlyRecord - Debt PARTIAL payment');
+    console.log('  Debt status:', status);
+    console.log('  Remaining debt:', remainingDebt - rentPortion);
+    console.log('  Unpaid punitory:', punitoryAmount - punitoryPortion);
+
+    // Partial debt payment: DO NOT mark MonthlyRecord as COMPLETE
+    // because there are still unpaid punitorios or rent on the debt
+    // Just increment amountPaid to reflect the payment
+    const record = await prisma.monthlyRecord.findUnique({
+      where: { id: debt.monthlyRecordId },
+      select: { amountPaid: true, totalDue: true },
+    });
+
+    const newMonthlyAmountPaid = (record.amountPaid || 0) + parsedAmount;
+
+    console.log('  MonthlyRecord totalDue:', record.totalDue);
+    console.log('  MonthlyRecord amountPaid before:', record.amountPaid);
+    console.log('  New MonthlyRecord amountPaid:', newMonthlyAmountPaid);
+
     await prisma.monthlyRecord.update({
       where: { id: debt.monthlyRecordId },
       data: {
-        amountPaid: { increment: parsedAmount },
+        amountPaid: newMonthlyAmountPaid,
+        // Keep status as PARTIAL until debt is fully paid
         status: 'PARTIAL',
       },
     });
