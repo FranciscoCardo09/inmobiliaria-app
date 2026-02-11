@@ -329,25 +329,26 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let totalHistorico = liveTotalDue; // Total con punitorios del record
 
     if (debtInfo && record.debt) {
-      // Si hay deuda, calcular punitorios totales de la deuda
+      // Si hay deuda, los punitorios del record se "transfirieron" a la deuda
+      // NO sumar ambos, usar SOLO los de la deuda (pagados + impagos)
       const debtPunitoriosPagados = Math.max(0, record.debt.amountPaid - record.debt.unpaidRentAmount);
       const debtPunitoriosImpagos = debtInfo.liveAccumulatedPunitory || 0;
       const debtPunitoriosTotales = debtPunitoriosPagados + debtPunitoriosImpagos;
 
-      // Sumar punitorios de la deuda a los del record
-      totalPunitoriosHistoricos += debtPunitoriosTotales;
+      // IMPORTANTE: Reemplazar (no sumar) los punitorios del record con los de la deuda
+      totalPunitoriosHistoricos = debtPunitoriosTotales;
 
       // NOTA: NO sumar debt.amountPaid porque record.amountPaid ya lo incluye
       // (cuando se paga la deuda, se actualiza MonthlyRecord.amountPaid en payDebt)
 
-      // Total histórico = alquiler + servicios + punitorios totales (record + deuda)
+      // Total histórico = alquiler + servicios + punitorios de la deuda
       totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos - record.previousBalance;
 
       console.log('\n[monthlyRecordService] HISTORICAL TOTALS WITH DEBT:');
-      console.log('  Record punitorios:', livePunitoryAmount);
+      console.log('  Record punitorios (congelados):', livePunitoryAmount);
       console.log('  Debt punitorios pagados:', debtPunitoriosPagados);
       console.log('  Debt punitorios impagos:', debtPunitoriosImpagos);
-      console.log('  TOTAL punitorios históricos:', totalPunitoriosHistoricos);
+      console.log('  TOTAL punitorios históricos (SOLO deuda):', totalPunitoriosHistoricos);
       console.log('  Record amountPaid (incluye pagos de deuda):', record.amountPaid);
       console.log('  Debt amountPaid:', record.debt.amountPaid);
       console.log('  TOTAL abonado:', totalAbonado);
