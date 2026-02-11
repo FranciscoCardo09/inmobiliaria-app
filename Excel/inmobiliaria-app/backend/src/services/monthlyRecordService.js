@@ -325,7 +325,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     // TOTALES HISTÓRICOS: incluyen punitorios de la deuda (pagados + impagos)
     let totalPunitoriosHistoricos = livePunitoryAmount; // Punitorios del record
-    let totalAbonado = record.amountPaid; // Lo pagado al record
+    let totalAbonado = record.amountPaid; // Lo pagado al record (ya incluye pagos de deuda)
     let totalHistorico = liveTotalDue; // Total con punitorios del record
 
     if (debtInfo && record.debt) {
@@ -337,8 +337,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       // Sumar punitorios de la deuda a los del record
       totalPunitoriosHistoricos += debtPunitoriosTotales;
 
-      // Sumar lo pagado en la deuda
-      totalAbonado += record.debt.amountPaid;
+      // NOTA: NO sumar debt.amountPaid porque record.amountPaid ya lo incluye
+      // (cuando se paga la deuda, se actualiza MonthlyRecord.amountPaid en payDebt)
 
       // Total histórico = alquiler + servicios + punitorios totales (record + deuda)
       totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos - record.previousBalance;
@@ -348,7 +348,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       console.log('  Debt punitorios pagados:', debtPunitoriosPagados);
       console.log('  Debt punitorios impagos:', debtPunitoriosImpagos);
       console.log('  TOTAL punitorios históricos:', totalPunitoriosHistoricos);
-      console.log('  Record amountPaid:', record.amountPaid);
+      console.log('  Record amountPaid (incluye pagos de deuda):', record.amountPaid);
       console.log('  Debt amountPaid:', record.debt.amountPaid);
       console.log('  TOTAL abonado:', totalAbonado);
       console.log('  TOTAL histórico:', totalHistorico);
