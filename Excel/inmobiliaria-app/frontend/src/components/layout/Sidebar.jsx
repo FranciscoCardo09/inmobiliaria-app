@@ -30,7 +30,6 @@ const navItems = [
   { name: 'Inquilinos', href: '/tenants', icon: UserGroupIcon, phase: 3 },
   { name: 'Contratos', href: '/contracts', icon: ClipboardDocumentListIcon, phase: 3 },
   { name: 'Índices de Ajuste', href: '/adjustments', icon: ChartBarIcon, phase: 3 },
-  { name: 'Pagos', href: '/payments', icon: CurrencyDollarIcon, phase: 4 },
   { name: 'Historial Pagos', href: '/payment-history', icon: ClockIcon, phase: 5 },
   { name: 'Servicios', href: '/services', icon: WrenchScrewdriverIcon, phase: 5 },
   { name: 'Reportes', href: '/reports', icon: DocumentTextIcon, phase: 6 },
@@ -161,7 +160,7 @@ export const Sidebar = () => {
           </NavLink>
           <div className={`mt-4 text-center transition-opacity duration-200 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
             <p className="text-xs text-base-content/40">
-              Fase 6 - v3.0.0
+              Fase 6 - v4.0.0
             </p>
           </div>
         </div>

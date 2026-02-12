@@ -25,7 +25,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     include: {
       contract: true,
       services: {
-        include: { conceptType: { select: { category: true } } },
+        include: { conceptType: { select: { category: true, name: true, label: true } } },
       },
     },
   });
@@ -129,7 +129,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
         concepts.push({
           type: s.conceptType?.name || 'SERVICIO',
           amount: paidToService,
-          description: s.description,
+          description: s.conceptType?.label || s.description || s.conceptType?.name || 'Servicio',
         });
         remainingPayment -= paidToService;
       }

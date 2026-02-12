@@ -295,6 +295,17 @@ const createContract = async (req, res, next) => {
       },
     });
 
+    // Crear registro inicial en el historial de alquileres
+    await prisma.rentHistory.create({
+      data: {
+        contractId: contract.id,
+        effectiveFromMonth: startMonthVal,
+        rentAmount: parseFloat(baseRent),
+        adjustmentPercent: null,
+        reason: 'INICIAL',
+      },
+    });
+
     return ApiResponse.created(res, enrichContract(contract), 'Contrato creado exitosamente');
   } catch (error) {
     next(error);
@@ -478,6 +489,31 @@ const assignTenantToProperty = async (req, res, next) => {
   }
 };
 
+// GET /api/groups/:groupId/contracts/:id/rent-history
+const getContractRentHistory = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      select: { groupId: true },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const history = await prisma.rentHistory.findMany({
+      where: { contractId: id },
+      orderBy: { effectiveFromMonth: 'asc' },
+    });
+
+    return ApiResponse.success(res, history);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getContracts,
   getExpiringContracts,
@@ -487,4 +523,5 @@ module.exports = {
   updateContract,
   deleteContract,
   assignTenantToProperty,
+  getContractRentHistory,
 };

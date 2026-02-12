@@ -22,6 +22,27 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
   }
 }
 
+export const useLiquidacionAll = (groupId, { month, year, propertyIds } = {}) => {
+  const query = useQuery({
+    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds],
+    queryFn: async () => {
+      const params = new URLSearchParams({ month, year })
+      if (propertyIds && propertyIds.length > 0) {
+        params.append('propertyIds', propertyIds.join(','))
+      }
+      const response = await api.get(`/groups/${groupId}/reports/liquidacion-all?${params}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!month && !!year,
+  })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
 export const useEstadoCuentas = (groupId, { contractId } = {}) => {
   const query = useQuery({
     queryKey: ['report', 'estado-cuentas', groupId, contractId],
@@ -69,6 +90,101 @@ export const useEvolucionIngresos = (groupId, { year } = {}) => {
 
   return {
     data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
+export const useAjustesMes = (groupId, { month, year } = {}) => {
+  const query = useQuery({
+    queryKey: ['report', 'ajustes-mes', groupId, month, year],
+    queryFn: async () => {
+      const params = new URLSearchParams({ month, year })
+      const response = await api.get(`/groups/${groupId}/reports/ajustes-mes?${params}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!month && !!year,
+  })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
+export const useControlMensual = (groupId, { month, year } = {}) => {
+  const query = useQuery({
+    queryKey: ['report', 'control-mensual', groupId, month, year],
+    queryFn: async () => {
+      const params = new URLSearchParams({ month, year })
+      const response = await api.get(`/groups/${groupId}/reports/control-mensual?${params}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!month && !!year,
+  })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
+export const useImpuestos = (groupId, { month, year, propertyIds, ownerId } = {}) => {
+  const query = useQuery({
+    queryKey: ['report', 'impuestos', groupId, month, year, propertyIds, ownerId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ month, year })
+      if (propertyIds && propertyIds.length > 0) {
+        params.append('propertyIds', propertyIds.join(','))
+      }
+      if (ownerId) {
+        params.append('ownerId', ownerId)
+      }
+      const response = await api.get(`/groups/${groupId}/reports/impuestos?${params}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!month && !!year,
+  })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
+export const useVencimientos = (groupId) => {
+  const query = useQuery({
+    queryKey: ['report', 'vencimientos', groupId],
+    queryFn: async () => {
+      const response = await api.get(`/groups/${groupId}/reports/vencimientos`)
+      return response.data.data
+    },
+    enabled: !!groupId,
+  })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+  }
+}
+
+export const useMonthlyRecordsForPago = (groupId, { month, year } = {}) => {
+  const query = useQuery({
+    queryKey: ['monthlyRecords', 'pago', groupId, month, year],
+    queryFn: async () => {
+      const params = new URLSearchParams({ month, year })
+      const response = await api.get(`/groups/${groupId}/monthly-records?${params}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!month && !!year,
+  })
+
+  return {
+    records: query.data?.records || [],
     isLoading: query.isLoading,
     error: query.error,
   }

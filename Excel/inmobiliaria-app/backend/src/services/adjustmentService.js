@@ -50,6 +50,110 @@ const isAdjustmentMonth = (startMonth, currentMonth, frequencyMonths) => {
 };
 
 /**
+ * Calculate contract month from calendar date
+ * @param {Date} contractStartDate - Contract start date
+ * @param {number} calendarMonth - Calendar month (1-12)
+ * @param {number} calendarYear - Calendar year
+ * @returns {number} Contract month (1-based)
+ */
+const calculateContractMonthFromCalendar = (contractStartDate, calendarMonth, calendarYear) => {
+  const startDate = new Date(contractStartDate);
+  const targetDate = new Date(calendarYear, calendarMonth - 1, 1);
+  
+  // Calcular diferencia en meses
+  const yearDiff = targetDate.getFullYear() - startDate.getFullYear();
+  const monthDiff = targetDate.getMonth() - startDate.getMonth();
+  const totalMonths = yearDiff * 12 + monthDiff + 1; // +1 porque el primer mes es 1
+  
+  return totalMonths;
+};
+
+/**
+ * Get contracts that adjust in a specific calendar month/year
+ * Uses isAdjustmentMonth() based on frequency to determine if a contract adjusts,
+ * regardless of whether the adjustment was already applied or not.
+ */
+const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, calendarYear) => {
+  const contractInclude = {
+    tenant: { select: { id: true, name: true, dni: true } },
+    property: {
+      select: {
+        id: true,
+        address: true,
+        code: true,
+        owner: { select: { id: true, name: true } }
+      }
+    },
+    adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+  };
+
+  const allContracts = await prisma.contract.findMany({
+    where: {
+      groupId,
+      active: true,
+      adjustmentIndexId: { not: null },
+    },
+    include: contractInclude,
+  });
+
+  // Filtrar contratos que ajustan en este mes de calendario
+  const contractsInMonth = [];
+  
+  for (const contract of allContracts) {
+    if (!contract.adjustmentIndex) continue;
+    
+    const contractMonth = calculateContractMonthFromCalendar(
+      contract.startDate,
+      calendarMonth,
+      calendarYear
+    );
+    
+    // El mes debe estar dentro del rango del contrato
+    if (contractMonth < 1 || contractMonth > contract.durationMonths) continue;
+    
+    // Usar isAdjustmentMonth para verificar si es mes de ajuste según la frecuencia
+    // (no depende de nextAdjustmentMonth que cambia al aplicar)
+    if (!isAdjustmentMonth(contract.startMonth, contractMonth, contract.adjustmentIndex.frequencyMonths)) {
+      continue;
+    }
+    
+    // Buscar TODOS los registros de historial para este mes
+    const rentHistoryRecords = await prisma.rentHistory.findMany({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: contractMonth,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    // Determinar si ya fue aplicado (tiene al menos un registro de historial)
+    const applied = rentHistoryRecords.length > 0;
+    
+    // El alquiler vigente en este período: buscar el último historial anterior o igual a este mes
+    const lastHistoryBefore = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: { lt: contractMonth },
+      },
+      orderBy: { effectiveFromMonth: 'desc' },
+    });
+    
+    // El alquiler ANTES del ajuste de este mes
+    const rentBeforeAdjustment = lastHistoryBefore ? lastHistoryBefore.rentAmount : contract.baseRent;
+    
+    contractsInMonth.push({
+      ...contract,
+      contractMonth,
+      rentHistory: rentHistoryRecords,
+      applied,
+      rentBeforeAdjustment,
+    });
+  }
+
+  return contractsInMonth;
+};
+
+/**
  * Get contracts with adjustment this month
  * Usa nextAdjustmentMonth como fuente de verdad
  */
@@ -114,6 +218,44 @@ const getContractsWithAdjustmentNextMonth = async (groupId) => {
 };
 
 /**
+ * Get contracts with adjustment in a specific month
+ * @param {string} groupId - Group ID
+ * @param {number} targetMonth - Target month (1-based, considering contract month)
+ * @returns {Promise<Array>} Contracts that adjust in the target month
+ */
+const getContractsWithAdjustmentInMonth = async (groupId, targetMonth) => {
+  const contractInclude = {
+    tenant: { select: { id: true, name: true, dni: true } },
+    property: {
+      select: {
+        id: true,
+        address: true,
+        code: true,
+        owner: { select: { id: true, name: true } }
+      }
+    },
+    adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+    rentHistory: {
+      where: { effectiveFromMonth: targetMonth },
+      orderBy: { createdAt: 'desc' },
+    },
+  };
+
+  const contracts = await prisma.contract.findMany({
+    where: {
+      groupId,
+      active: true,
+      adjustmentIndexId: { not: null },
+      nextAdjustmentMonth: { not: null },
+    },
+    include: contractInclude,
+  });
+
+  // Filtrar contratos donde nextAdjustmentMonth === targetMonth
+  return contracts.filter((c) => c.nextAdjustmentMonth === targetMonth);
+};
+
+/**
  * Apply adjustment to contracts with adjustment next month
  * Updates baseRent and advances nextAdjustmentMonth
  */
@@ -146,6 +288,17 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
       contract.durationMonths
     );
 
+    // Guardar en el historial de alquileres
+    await prisma.rentHistory.create({
+      data: {
+        contractId: contract.id,
+        effectiveFromMonth: contract.currentMonth + 1, // Aplica desde el próximo mes
+        rentAmount: newRent,
+        adjustmentPercent: percentageIncrease,
+        reason: 'AJUSTE_AUTOMATICO',
+      },
+    });
+
     const updated = await prisma.contract.update({
       where: { id: contract.id },
       data: {
@@ -166,6 +319,338 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
       newRent: newRent,
       increase: percentageIncrease,
       nextAdjustmentMonth: newNextAdjustmentMonth,
+    });
+  }
+
+  return results;
+};
+
+/**
+ * Apply adjustment to contracts for a specific month
+ * @param {string} groupId - Group ID
+ * @param {string} indexId - Adjustment index ID
+ * @param {number} percentageIncrease - Percentage to increase
+ * @param {number} targetMonth - Target month to apply the adjustment
+ * @returns {Promise<Array>} Results of applied adjustments
+ */
+const applyAdjustmentToSpecificMonth = async (groupId, indexId, percentageIncrease, targetMonth) => {
+  const allContracts = await prisma.contract.findMany({
+    where: {
+      groupId,
+      active: true,
+      adjustmentIndexId: indexId,
+      nextAdjustmentMonth: targetMonth,
+    },
+    include: {
+      adjustmentIndex: { select: { frequencyMonths: true } },
+    },
+  });
+
+  const results = [];
+
+  for (const contract of allContracts) {
+    const newRent = contract.baseRent * (1 + percentageIncrease / 100);
+
+    // Calcular el siguiente mes de ajuste después del que estamos aplicando
+    const newNextAdjustmentMonth = calculateNextAdjustmentMonth(
+      contract.startMonth,
+      targetMonth,
+      contract.adjustmentIndex.frequencyMonths,
+      contract.durationMonths
+    );
+
+    // Guardar en el historial de alquileres
+    await prisma.rentHistory.create({
+      data: {
+        contractId: contract.id,
+        effectiveFromMonth: targetMonth,
+        rentAmount: newRent,
+        adjustmentPercent: percentageIncrease,
+        reason: 'AJUSTE_AUTOMATICO',
+      },
+    });
+
+    const updated = await prisma.contract.update({
+      where: { id: contract.id },
+      data: {
+        baseRent: newRent,
+        nextAdjustmentMonth: newNextAdjustmentMonth,
+      },
+      include: {
+        tenant: { select: { name: true } },
+        property: { select: { address: true } },
+      },
+    });
+
+    results.push({
+      contractId: updated.id,
+      tenant: updated.tenant.name,
+      property: updated.property.address,
+      oldRent: contract.baseRent,
+      newRent: newRent,
+      increase: percentageIncrease,
+      nextAdjustmentMonth: newNextAdjustmentMonth,
+    });
+  }
+
+  return results;
+};
+
+/**
+ * Undo adjustment for a specific month
+ * Reverts the rent to the previous value and deletes the rent history entry
+ * @param {string} groupId - Group ID
+ * @param {string} indexId - Adjustment index ID
+ * @param {number} targetMonth - Month to undo
+ * @returns {Promise<Array>} Results of undone adjustments
+ */
+const undoAdjustmentForMonth = async (groupId, indexId, targetMonth) => {
+  // Buscar todos los contratos que tienen ajuste aplicado en ese mes
+  const rentHistories = await prisma.rentHistory.findMany({
+    where: {
+      effectiveFromMonth: targetMonth,
+      reason: 'AJUSTE_AUTOMATICO',
+      contract: {
+        groupId,
+        adjustmentIndexId: indexId,
+        active: true,
+      },
+    },
+    include: {
+      contract: {
+        include: {
+          adjustmentIndex: { select: { frequencyMonths: true } },
+          tenant: { select: { name: true } },
+          property: { select: { address: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const results = [];
+
+  for (const history of rentHistories) {
+    const contract = history.contract;
+
+    // Buscar el alquiler anterior (el registro inmediatamente anterior en el historial)
+    const previousHistory = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: { lt: targetMonth },
+      },
+      orderBy: { effectiveFromMonth: 'desc' },
+    });
+
+    const previousRent = previousHistory ? previousHistory.rentAmount : contract.baseRent;
+
+    // Restaurar el nextAdjustmentMonth al valor que tenía (targetMonth)
+    const restoredNextAdjustmentMonth = targetMonth;
+
+    // Revertir el contrato
+    const updated = await prisma.contract.update({
+      where: { id: contract.id },
+      data: {
+        baseRent: previousRent,
+        nextAdjustmentMonth: restoredNextAdjustmentMonth,
+      },
+    });
+
+    // Eliminar el registro del historial
+    await prisma.rentHistory.delete({
+      where: { id: history.id },
+    });
+
+    results.push({
+      contractId: updated.id,
+      tenant: contract.tenant.name,
+      property: contract.property.address,
+      currentRent: history.rentAmount,
+      restoredRent: previousRent,
+      undoneMonth: targetMonth,
+    });
+  }
+
+  return results;
+};
+
+/**
+ * Apply adjustment to contracts for a specific calendar month/year
+ */
+const applyAdjustmentToCalendar = async (groupId, indexId, percentageIncrease, calendarMonth, calendarYear) => {
+  const allContracts = await prisma.contract.findMany({
+    where: {
+      groupId,
+      active: true,
+      adjustmentIndexId: indexId,
+    },
+    include: {
+      adjustmentIndex: { select: { frequencyMonths: true } },
+      tenant: { select: { name: true } },
+      property: { select: { address: true } },
+    },
+  });
+
+  const results = [];
+
+  for (const contract of allContracts) {
+    const contractMonth = calculateContractMonthFromCalendar(
+      contract.startDate,
+      calendarMonth,
+      calendarYear
+    );
+    
+    // Verificar que el mes esté dentro del rango del contrato
+    if (contractMonth < 1 || contractMonth > contract.durationMonths) continue;
+    
+    // Usar isAdjustmentMonth basado en la frecuencia para determinar si ajusta
+    if (!isAdjustmentMonth(contract.startMonth, contractMonth, contract.adjustmentIndex.frequencyMonths)) {
+      continue;
+    }
+    
+    // Verificar que no haya sido ya aplicado para este mes
+    const existingHistory = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: contractMonth,
+        reason: 'AJUSTE_AUTOMATICO',
+      },
+    });
+    
+    if (existingHistory) continue; // Ya fue aplicado, no duplicar
+    
+    // Buscar el alquiler anterior para calcular el nuevo
+    const lastHistory = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: { lt: contractMonth },
+      },
+      orderBy: { effectiveFromMonth: 'desc' },
+    });
+    
+    const currentRent = lastHistory ? lastHistory.rentAmount : contract.baseRent;
+    const newRent = Math.round(currentRent * (1 + percentageIncrease / 100));
+
+    // Calcular el siguiente mes de ajuste después del que estamos aplicando
+    const newNextAdjustmentMonth = calculateNextAdjustmentMonth(
+      contract.startMonth,
+      contractMonth,
+      contract.adjustmentIndex.frequencyMonths,
+      contract.durationMonths
+    );
+
+    // Guardar en el historial de alquileres
+    await prisma.rentHistory.create({
+      data: {
+        contractId: contract.id,
+        effectiveFromMonth: contractMonth,
+        rentAmount: newRent,
+        adjustmentPercent: percentageIncrease,
+        reason: 'AJUSTE_AUTOMATICO',
+      },
+    });
+
+    // Actualizar el contrato: baseRent y nextAdjustmentMonth
+    const updated = await prisma.contract.update({
+      where: { id: contract.id },
+      data: {
+        baseRent: newRent,
+        nextAdjustmentMonth: newNextAdjustmentMonth,
+      },
+    });
+
+    results.push({
+      contractId: updated.id,
+      tenant: contract.tenant.name,
+      property: contract.property.address,
+      oldRent: currentRent,
+      newRent: newRent,
+      increase: percentageIncrease,
+      nextAdjustmentMonth: newNextAdjustmentMonth,
+    });
+  }
+
+  return results;
+};
+
+/**
+ * Undo adjustment for a specific calendar month/year
+ */
+const undoAdjustmentForCalendar = async (groupId, indexId, calendarMonth, calendarYear) => {
+  const allContracts = await prisma.contract.findMany({
+    where: {
+      groupId,
+      active: true,
+      adjustmentIndexId: indexId,
+    },
+    include: {
+      adjustmentIndex: { select: { frequencyMonths: true } },
+      tenant: { select: { name: true } },
+      property: { select: { address: true } },
+    },
+  });
+
+  const results = [];
+
+  for (const contract of allContracts) {
+    const contractMonth = calculateContractMonthFromCalendar(
+      contract.startDate,
+      calendarMonth,
+      calendarYear
+    );
+
+    // Verificar que sea un mes de ajuste según la frecuencia
+    if (!isAdjustmentMonth(contract.startMonth, contractMonth, contract.adjustmentIndex.frequencyMonths)) {
+      continue;
+    }
+
+    // Buscar ajuste aplicado para este mes
+    const history = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: contractMonth,
+        reason: 'AJUSTE_AUTOMATICO',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!history) continue;
+
+    // Buscar el alquiler anterior
+    const previousHistory = await prisma.rentHistory.findFirst({
+      where: {
+        contractId: contract.id,
+        effectiveFromMonth: { lt: contractMonth },
+      },
+      orderBy: { effectiveFromMonth: 'desc' },
+    });
+
+    const previousRent = previousHistory ? previousHistory.rentAmount : contract.baseRent;
+
+    // Restaurar el nextAdjustmentMonth al mes que estamos deshaciendo
+    const restoredNextAdjustmentMonth = contractMonth;
+
+    // Revertir el contrato
+    await prisma.contract.update({
+      where: { id: contract.id },
+      data: {
+        baseRent: previousRent,
+        nextAdjustmentMonth: restoredNextAdjustmentMonth,
+      },
+    });
+
+    // Eliminar el registro del historial
+    await prisma.rentHistory.delete({
+      where: { id: history.id },
+    });
+
+    results.push({
+      contractId: contract.id,
+      tenant: contract.tenant.name,
+      property: contract.property.address,
+      currentRent: history.rentAmount,
+      restoredRent: previousRent,
+      undoneMonth: contractMonth,
     });
   }
 
@@ -208,8 +693,15 @@ const applyAllNextMonthAdjustments = async (groupId) => {
 module.exports = {
   calculateNextAdjustmentMonth,
   isAdjustmentMonth,
+  calculateContractMonthFromCalendar,
   getContractsWithAdjustmentThisMonth,
   getContractsWithAdjustmentNextMonth,
+  getContractsWithAdjustmentInMonth,
+  getContractsWithAdjustmentInCalendar,
   applyAdjustmentToNextMonthContracts,
+  applyAdjustmentToSpecificMonth,
+  applyAdjustmentToCalendar,
+  undoAdjustmentForMonth,
+  undoAdjustmentForCalendar,
   applyAllNextMonthAdjustments,
 };

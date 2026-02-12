@@ -19,7 +19,7 @@ export const OwnerForm = () => {
   const { createOwner, updateOwner, isCreating, isUpdating, useOwner } = useOwners(currentGroup?.id)
   const { data: owner, isLoading } = isEditing ? useOwner(id) : { data: null, isLoading: false }
 
-  const [formData, setFormData] = useState({ name: '', dni: '', phone: '', email: '' })
+  const [formData, setFormData] = useState({ name: '', dni: '', phone: '', email: '', bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '' })
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
@@ -29,6 +29,12 @@ export const OwnerForm = () => {
         dni: owner.dni || '',
         phone: owner.phone || '',
         email: owner.email || '',
+        bankName: owner.bankName || '',
+        bankHolder: owner.bankHolder || '',
+        bankCuit: owner.bankCuit || '',
+        bankAccountType: owner.bankAccountType || '',
+        bankAccountNumber: owner.bankAccountNumber || '',
+        bankCbu: owner.bankCbu || '',
       })
     }
   }, [owner])
@@ -81,6 +87,19 @@ export const OwnerForm = () => {
               <Input label="DNI / CUIT *" name="dni" value={formData.dni} onChange={handleChange} placeholder="20123456789" error={errors.dni} />
               <PhoneInput label="Teléfono *" name="phone" value={formData.phone} onChange={handleChange} error={errors.phone} />
               <Input label="Email" name="email" type="email" value={formData.email} onChange={handleChange} placeholder="maria@email.com" />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Datos Bancarios</h2>
+            <p className="text-sm text-base-content/50">Se usan en reportes de impuestos y liquidaciones para indicar datos de transferencia.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Banco" name="bankName" value={formData.bankName} onChange={handleChange} placeholder="Banco Nacion" />
+              <Input label="Titular" name="bankHolder" value={formData.bankHolder} onChange={handleChange} placeholder="Nombre del titular" />
+              <Input label="CUIT Titular" name="bankCuit" value={formData.bankCuit} onChange={handleChange} placeholder="20-12345678-9" />
+              <Input label="Tipo de Cuenta" name="bankAccountType" value={formData.bankAccountType} onChange={handleChange} placeholder="Caja de Ahorro" />
+              <Input label="N° de Cuenta" name="bankAccountNumber" value={formData.bankAccountNumber} onChange={handleChange} placeholder="1234567890" />
+              <Input label="CBU" name="bankCbu" value={formData.bankCbu} onChange={handleChange} placeholder="0000000000000000000000" />
             </div>
           </div>
 

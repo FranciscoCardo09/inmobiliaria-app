@@ -23,6 +23,7 @@ const holidaysRoutes = require('./holidays.routes');
 const debtsRoutes = require('./debts.routes');
 const serviceCategoriesRoutes = require('./serviceCategories.routes');
 const reportsRoutes = require('./reports.routes');
+const settingsRoutes = require('./settings.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -55,6 +56,22 @@ router.post(
   adjustmentIndicesController.applyAllNextMonth
 );
 
+// Get contracts by month
+router.get(
+  '/groups/:groupId/adjustments/contracts-by-month/:targetMonth',
+  authenticate,
+  requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']),
+  adjustmentIndicesController.getContractsByMonth
+);
+
+// Get contracts by calendar month/year
+router.get(
+  '/groups/:groupId/adjustments/contracts-by-calendar',
+  authenticate,
+  requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']),
+  adjustmentIndicesController.getContractsByCalendar
+);
+
 // Dashboard (Phase 3.5)
 router.use('/groups/:groupId/dashboard', dashboardRoutes);
 
@@ -73,6 +90,9 @@ router.use('/groups/:groupId', debtsRoutes);
 
 // Reports (Phase 6)
 router.use('/groups/:groupId/reports', reportsRoutes);
+
+// Settings (Phase 6+)
+router.use('/groups/:groupId/settings', settingsRoutes);
 
 // Holidays (global)
 router.use('/holidays', holidaysRoutes);

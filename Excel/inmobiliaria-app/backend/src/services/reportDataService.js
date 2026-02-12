@@ -1,5 +1,6 @@
 // Report Data Service - Prisma queries for all report types
 const { PrismaClient } = require('@prisma/client');
+const { numeroATexto } = require('../utils/helpers');
 
 const prisma = new PrismaClient();
 
@@ -7,6 +8,63 @@ const MONTH_NAMES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
+
+// ============================================
+// EMPRESA DATA HELPER
+// ============================================
+
+/**
+ * Fetches company data from Group settings with fallback defaults
+ */
+const getEmpresaData = async (groupId) => {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: {
+      name: true,
+      currency: true,
+      companyName: true,
+      address: true,
+      phone: true,
+      email: true,
+      cuit: true,
+      localidad: true,
+      logo: true,
+      ingBrutos: true,
+      fechaInicioAct: true,
+      ivaCondicion: true,
+      subtitulo: true,
+      bankName: true,
+      bankHolder: true,
+      bankCuit: true,
+      bankAccountType: true,
+      bankAccountNumber: true,
+      bankCbu: true,
+    },
+  });
+
+  return {
+    nombre: group?.companyName || group?.name || 'Inmobiliaria',
+    subtitulo: group?.subtitulo || '',
+    direccion: group?.address || '',
+    ciudad: group?.localidad || '',
+    telefono: group?.phone || '',
+    email: group?.email || '',
+    cuit: group?.cuit || '',
+    ingBrutos: group?.ingBrutos || '',
+    fechaInicioAct: group?.fechaInicioAct || '',
+    ivaCondicion: group?.ivaCondicion || '',
+    logo: group?.logo || null,
+    currency: group?.currency || 'ARS',
+    banco: {
+      nombre: group?.bankName || '',
+      titular: group?.bankHolder || '',
+      cuit: group?.bankCuit || '',
+      tipoCuenta: group?.bankAccountType || '',
+      numeroCuenta: group?.bankAccountNumber || '',
+      cbu: group?.bankCbu || '',
+    },
+  };
+};
 
 // ============================================
 // LIQUIDACION (Prioridad #1)
@@ -45,10 +103,8 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
   if (!monthlyRecord) return null;
 
   const { contract } = monthlyRecord;
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { name: true, currency: true },
-  });
+  const empresa = await getEmpresaData(groupId);
+  const owner = contract.property.owner;
 
   // Build conceptos
   const conceptos = [];
@@ -87,14 +143,12 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
     });
   }
 
+  // "Mes vencido" logic
+  const mesVencido = month === 1 ? 12 : month - 1;
+  const anioVencido = month === 1 ? year - 1 : year;
+
   return {
-    empresa: {
-      nombre: group?.name || 'H&H Inmobiliaria',
-      direccion: 'Av. Marcelo T. de Alvear 1234',
-      ciudad: 'Córdoba, Argentina',
-      telefono: '(351) 555-0100',
-      cuit: '30-12345678-9',
-    },
+    empresa,
     inquilino: {
       nombre: contract.tenant.name,
       dni: contract.tenant.dni,
@@ -108,16 +162,28 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
       depto: contract.property.apartment,
     },
     propietario: {
-      nombre: contract.property.owner?.name || 'Sin propietario',
+      nombre: owner?.name || 'Sin propietario',
+      banco: owner?.bankName ? {
+        nombre: owner.bankName,
+        titular: owner.bankHolder || '',
+        cuit: owner.bankCuit || '',
+        tipoCuenta: owner.bankAccountType || '',
+        numeroCuenta: owner.bankAccountNumber || '',
+        cbu: owner.bankCbu || '',
+      } : null,
     },
     periodo: {
       mes: month,
       anio: year,
       label: `${MONTH_NAMES[month]} ${year}`,
       mesContrato: monthlyRecord.monthNumber,
+      mesVencido,
+      anioVencido,
+      labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}`,
     },
     conceptos,
     total: monthlyRecord.totalDue,
+    totalEnLetras: numeroATexto(monthlyRecord.totalDue),
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
@@ -127,8 +193,15 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
       fecha: t.paymentDate,
       monto: t.amount,
       metodo: t.paymentMethod,
+      inquilino: contract.tenant.name,
+      propiedad: contract.property.address,
+      conceptos: t.concepts.map((c) => ({
+        tipo: c.type,
+        descripcion: c.description,
+        monto: c.amount,
+      })),
     })),
-    currency: group?.currency || 'ARS',
+    currency: empresa.currency,
     contractId,
     monthlyRecordId: monthlyRecord.id,
   };
@@ -136,10 +209,21 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
 
 /**
  * Obtiene liquidaciones de TODOS los contratos activos para un mes/año
+ * @param {string} groupId
+ * @param {number} month
+ * @param {number} year
+ * @param {string[]} propertyIds - Opcional: IDs de propiedades para filtrar
  */
-const getLiquidacionesAllContracts = async (groupId, month, year) => {
+const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null) => {
+  const where = { groupId, active: true };
+  
+  // Si se proporcionan propertyIds, filtrar por ellos
+  if (propertyIds && propertyIds.length > 0) {
+    where.propertyId = { in: propertyIds };
+  }
+
   const contracts = await prisma.contract.findMany({
-    where: { groupId, active: true },
+    where,
     select: { id: true },
   });
 
@@ -181,10 +265,7 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     include: { payments: true },
   });
 
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { name: true, currency: true },
-  });
+  const empresa = await getEmpresaData(groupId);
 
   // Build historial
   const historial = monthlyRecords.map((r) => ({
@@ -208,13 +289,7 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     .reduce((sum, d) => sum + d.currentTotal, 0);
 
   return {
-    empresa: {
-      nombre: group?.name || 'H&H Inmobiliaria',
-      direccion: 'Av. Marcelo T. de Alvear 1234',
-      ciudad: 'Córdoba, Argentina',
-      telefono: '(351) 555-0100',
-      cuit: '30-12345678-9',
-    },
+    empresa,
     inquilino: {
       nombre: contract.tenant.name,
       dni: contract.tenant.dni,
@@ -246,7 +321,7 @@ const getEstadoCuentasData = async (groupId, contractId) => {
       pendiente: d.currentTotal,
       status: d.status,
     })),
-    currency: group?.currency || 'ARS',
+    currency: empresa.currency,
   };
 };
 
@@ -255,10 +330,7 @@ const getEstadoCuentasData = async (groupId, contractId) => {
 // ============================================
 
 const getResumenEjecutivoData = async (groupId, month, year) => {
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { name: true, currency: true },
-  });
+  const empresa = await getEmpresaData(groupId);
 
   // Current month data
   const [
@@ -301,9 +373,7 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
   const pendientes = monthlyRecords.filter((r) => r.status === 'PENDING').length;
 
   return {
-    empresa: {
-      nombre: group?.name || 'H&H Inmobiliaria',
-    },
+    empresa,
     periodo: {
       mes: month,
       anio: year,
@@ -332,7 +402,7 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
       pendientes,
       total: monthlyRecords.length,
     },
-    currency: group?.currency || 'ARS',
+    currency: empresa.currency,
   };
 };
 
@@ -356,18 +426,10 @@ const getCartaDocumentoData = async (groupId, contractId) => {
     orderBy: { createdAt: 'asc' },
   });
 
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { name: true, currency: true },
-  });
+  const empresa = await getEmpresaData(groupId);
 
   return {
-    empresa: {
-      nombre: group?.name || 'H&H Inmobiliaria',
-      direccion: 'Av. Marcelo T. de Alvear 1234',
-      ciudad: 'Córdoba, Argentina',
-      cuit: '30-12345678-9',
-    },
+    empresa,
     deudor: {
       nombre: contract.tenant.name,
       dni: contract.tenant.dni,
@@ -383,7 +445,7 @@ const getCartaDocumentoData = async (groupId, contractId) => {
     })),
     totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
     fecha: new Date(),
-    currency: group?.currency || 'ARS',
+    currency: empresa.currency,
   };
 };
 
@@ -392,10 +454,7 @@ const getCartaDocumentoData = async (groupId, contractId) => {
 // ============================================
 
 const getEvolucionIngresosData = async (groupId, year) => {
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { name: true, currency: true },
-  });
+  const empresa = await getEmpresaData(groupId);
 
   const records = await prisma.monthlyRecord.findMany({
     where: { groupId, periodYear: year },
@@ -419,22 +478,380 @@ const getEvolucionIngresosData = async (groupId, year) => {
   const totalAnual = meses.reduce((sum, m) => sum + m.amountPaid, 0);
 
   return {
-    empresa: {
-      nombre: group?.name || 'H&H Inmobiliaria',
-    },
+    empresa,
     anio: year,
     meses,
     totalAnual,
-    currency: group?.currency || 'ARS',
+    currency: empresa.currency,
+  };
+};
+
+// ============================================
+// PAGO EFECTIVO (from MonthlyRecord)
+// ============================================
+
+const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
+  const record = await prisma.monthlyRecord.findFirst({
+    where: { id: monthlyRecordId, groupId },
+    include: {
+      contract: {
+        include: {
+          tenant: true,
+          property: true,
+        },
+      },
+      services: {
+        include: { conceptType: true },
+      },
+      transactions: {
+        orderBy: { paymentDate: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  if (!record) return null;
+
+  const empresa = await getEmpresaData(groupId);
+  const { contract } = record;
+
+  // Build conceptos
+  const conceptos = [];
+  conceptos.push({
+    concepto: 'Alquiler',
+    importe: record.rentAmount,
+  });
+
+  for (const svc of record.services) {
+    conceptos.push({
+      concepto: svc.conceptType?.label || svc.description || 'Servicio',
+      importe: svc.amount,
+    });
+  }
+
+  if (record.punitoryAmount > 0 && !record.punitoryForgiven) {
+    conceptos.push({
+      concepto: `Punitorios (${record.punitoryDays} días)`,
+      importe: record.punitoryAmount,
+    });
+  }
+
+  const total = record.totalDue;
+  const lastTransaction = record.transactions[0];
+
+  // Generate receipt number from record
+  const receiptNumber = `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}`;
+
+  return {
+    empresa,
+    receiptNumber,
+    fecha: lastTransaction?.paymentDate || new Date(),
+    inquilino: {
+      nombre: contract.tenant.name,
+      dni: contract.tenant.dni,
+    },
+    propiedad: {
+      direccion: contract.property.address,
+      codigo: contract.property.code,
+    },
+    periodo: {
+      mes: record.periodMonth,
+      anio: record.periodYear,
+      label: `${MONTH_NAMES[record.periodMonth]} ${record.periodYear}`,
+    },
+    conceptos,
+    total,
+    totalEnLetras: numeroATexto(total),
+    paymentMethod: lastTransaction?.paymentMethod || 'EFECTIVO',
+    currency: empresa.currency,
+    monthlyRecordId: record.id,
+  };
+};
+
+// ============================================
+// AJUSTES MES
+// ============================================
+
+const getAjustesMesData = async (groupId, month, year) => {
+  const empresa = await getEmpresaData(groupId);
+
+  // Import the service function that gets contracts with adjustments
+  const { getContractsWithAdjustmentInCalendar } = require('./adjustmentService');
+  
+  // Get contracts that should adjust in this calendar month
+  const contractsWithAdjustments = await getContractsWithAdjustmentInCalendar(groupId, month, year);
+
+  const ajustes = [];
+  
+  for (const contract of contractsWithAdjustments) {
+    // Si tiene historial aplicado, mostrar el último ajuste aplicado para este mes
+    if (contract.applied && contract.rentHistory.length > 0) {
+      const lastHistory = contract.rentHistory[0]; // ya viene ordenado desc
+      ajustes.push({
+        contractId: contract.id,
+        inquilino: contract.tenant.name,
+        propiedad: contract.property.address,
+        alquilerAnterior: contract.rentBeforeAdjustment,
+        indice: contract.adjustmentIndex.name,
+        porcentajeAjuste: lastHistory.adjustmentPercent,
+        alquilerNuevo: lastHistory.rentAmount,
+        aplicado: true,
+        fechaAplicacion: lastHistory.createdAt,
+      });
+    } else {
+      // Si no tiene historial, mostrar el ajuste pendiente
+      const porcentajeAjuste = contract.adjustmentIndex.currentValue;
+      const alquilerNuevo = Math.round(contract.rentBeforeAdjustment * (1 + porcentajeAjuste / 100));
+      
+      ajustes.push({
+        contractId: contract.id,
+        inquilino: contract.tenant.name,
+        propiedad: contract.property.address,
+        alquilerAnterior: contract.rentBeforeAdjustment,
+        indice: contract.adjustmentIndex.name,
+        porcentajeAjuste,
+        alquilerNuevo,
+        aplicado: false,
+        fechaAplicacion: null,
+      });
+    }
+  }
+
+  return {
+    empresa,
+    periodo: {
+      mes: month,
+      anio: year,
+      label: `${MONTH_NAMES[month]} ${year}`,
+    },
+    ajustes,
+    currency: empresa.currency,
+  };
+};
+
+// ============================================
+// CONTROL MENSUAL
+// ============================================
+
+const getControlMensualData = async (groupId, month, year) => {
+  const empresa = await getEmpresaData(groupId);
+
+  const records = await prisma.monthlyRecord.findMany({
+    where: { groupId, periodMonth: month, periodYear: year },
+    include: {
+      contract: {
+        include: {
+          tenant: true,
+          property: true,
+        },
+      },
+      services: {
+        include: { conceptType: true },
+      },
+    },
+    orderBy: [
+      { contract: { tenant: { name: 'asc' } } },
+    ],
+  });
+
+  const registros = records.map((r) => ({
+    monthlyRecordId: r.id,
+    inquilino: r.contract.tenant.name,
+    propiedad: r.contract.property.address,
+    mesContrato: r.monthNumber,
+    alquiler: r.rentAmount,
+    servicios: r.servicesTotal,
+    punitorios: r.punitoryAmount,
+    total: r.totalDue,
+    pagado: r.amountPaid,
+    saldo: r.balance,
+    estado: r.status,
+    isPaid: r.isPaid,
+    fechaPago: r.fullPaymentDate,
+  }));
+
+  const totales = {
+    alquiler: registros.reduce((s, r) => s + r.alquiler, 0),
+    servicios: registros.reduce((s, r) => s + r.servicios, 0),
+    punitorios: registros.reduce((s, r) => s + r.punitorios, 0),
+    total: registros.reduce((s, r) => s + r.total, 0),
+    pagado: registros.reduce((s, r) => s + r.pagado, 0),
+    saldo: registros.reduce((s, r) => s + r.saldo, 0),
+  };
+
+  return {
+    empresa,
+    periodo: {
+      mes: month,
+      anio: year,
+      label: `${MONTH_NAMES[month]} ${year}`,
+    },
+    registros,
+    totales,
+    currency: empresa.currency,
+  };
+};
+
+// ============================================
+// IMPUESTOS
+// ============================================
+
+const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerId = null) => {
+  const empresa = await getEmpresaData(groupId);
+
+  // Build where clause with optional filters
+  const where = { groupId, periodMonth: month, periodYear: year };
+  
+  // Add property filter if provided
+  if (propertyIds && propertyIds.length > 0) {
+    where.contract = {
+      propertyId: { in: propertyIds },
+    };
+  }
+  
+  // Add owner filter if provided
+  if (ownerId) {
+    where.contract = {
+      ...where.contract,
+      property: {
+        ownerId: ownerId,
+      },
+    };
+  }
+
+  const records = await prisma.monthlyRecord.findMany({
+    where,
+    include: {
+      contract: {
+        include: {
+          tenant: true,
+          property: {
+            include: { owner: true },
+          },
+        },
+      },
+      services: {
+        include: {
+          conceptType: true,
+        },
+      },
+    },
+  });
+
+  // "Mes vencido" logic: the period displayed is the previous month
+  const mesVencido = month === 1 ? 12 : month - 1;
+  const anioVencido = month === 1 ? year - 1 : year;
+
+  // Filter records that have services with category 'IMPUESTO'
+  const impuestos = [];
+  for (const record of records) {
+    const taxServices = record.services.filter(
+      (s) => s.conceptType?.category === 'IMPUESTO'
+    );
+    if (taxServices.length === 0) continue;
+
+    const owner = record.contract.property.owner;
+    impuestos.push({
+      inquilino: record.contract.tenant.name,
+      propiedad: record.contract.property.address,
+      propietario: owner?.name || 'Sin propietario',
+      impuestos: taxServices.map((s) => ({
+        concepto: s.conceptType?.label || s.description || 'Impuesto',
+        monto: s.amount,
+      })),
+      totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),
+      // Owner bank data (fallback to group bank)
+      banco: owner?.bankName ? {
+        nombre: owner.bankName,
+        titular: owner.bankHolder || '',
+        cuit: owner.bankCuit || '',
+        tipoCuenta: owner.bankAccountType || '',
+        numeroCuenta: owner.bankAccountNumber || '',
+        cbu: owner.bankCbu || '',
+      } : empresa.banco,
+    });
+  }
+
+  const grandTotal = impuestos.reduce((sum, i) => sum + i.totalImpuestos, 0);
+
+  return {
+    empresa,
+    periodo: {
+      mes: month,
+      anio: year,
+      label: `${MONTH_NAMES[month]} ${year}`,
+      mesVencido,
+      anioVencido,
+      labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}`,
+    },
+    impuestos,
+    grandTotal,
+    grandTotalEnLetras: numeroATexto(grandTotal),
+    currency: empresa.currency,
+  };
+};
+
+// ============================================
+// VENCIMIENTOS
+// ============================================
+
+const getVencimientosData = async (groupId) => {
+  const empresa = await getEmpresaData(groupId);
+
+  const contracts = await prisma.contract.findMany({
+    where: { groupId, active: true },
+    include: {
+      tenant: true,
+      property: true,
+    },
+  });
+
+  const now = new Date();
+  const twoMonthsFromNow = new Date(now);
+  twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
+
+  const vencimientos = [];
+  for (const contract of contracts) {
+    const startDate = new Date(contract.startDate);
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + contract.durationMonths);
+
+    if (endDate <= twoMonthsFromNow) {
+      vencimientos.push({
+        contractId: contract.id,
+        inquilino: contract.tenant.name,
+        propiedad: contract.property.address,
+        inicio: contract.startDate,
+        vencimiento: endDate,
+        alquiler: contract.baseRent,
+        diasRestantes: Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)),
+      });
+    }
+  }
+
+  // Sort by days remaining (most urgent first)
+  vencimientos.sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+  return {
+    empresa,
+    fecha: now,
+    vencimientos,
+    currency: empresa.currency,
   };
 };
 
 module.exports = {
+  getEmpresaData,
   getLiquidacionData,
   getLiquidacionesAllContracts,
   getEstadoCuentasData,
   getResumenEjecutivoData,
   getCartaDocumentoData,
   getEvolucionIngresosData,
+  getPagoEfectivoFromRecord,
+  getAjustesMesData,
+  getControlMensualData,
+  getImpuestosData,
+  getVencimientosData,
   MONTH_NAMES,
 };

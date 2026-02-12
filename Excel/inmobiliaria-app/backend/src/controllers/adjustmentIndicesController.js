@@ -243,6 +243,249 @@ const applyAllNextMonth = async (req, res, next) => {
   }
 };
 
+// GET /api/groups/:groupId/adjustments/contracts-by-month/:targetMonth
+const getContractsByMonth = async (req, res, next) => {
+  try {
+    const { groupId, targetMonth } = req.params;
+    const month = parseInt(targetMonth, 10);
+
+    if (isNaN(month) || month < 1) {
+      return ApiResponse.badRequest(res, 'Mes inválido');
+    }
+
+    const { getContractsWithAdjustmentInMonth } = require('../services/adjustmentService');
+    const contracts = await getContractsWithAdjustmentInMonth(groupId, month);
+
+    return ApiResponse.success(res, contracts);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/groups/:groupId/adjustments/contracts-by-calendar
+const getContractsByCalendar = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year } = req.query;
+    
+    const calendarMonth = parseInt(month, 10);
+    const calendarYear = parseInt(year, 10);
+
+    if (isNaN(calendarMonth) || calendarMonth < 1 || calendarMonth > 12) {
+      return ApiResponse.badRequest(res, 'Mes inválido');
+    }
+    
+    if (isNaN(calendarYear)) {
+      return ApiResponse.badRequest(res, 'Año inválido');
+    }
+
+    const { getContractsWithAdjustmentInCalendar } = require('../services/adjustmentService');
+    const contracts = await getContractsWithAdjustmentInCalendar(groupId, calendarMonth, calendarYear);
+
+    return ApiResponse.success(res, contracts);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/adjustment-indices/:id/apply-to-month
+const applyAdjustmentToMonth = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { percentageIncrease, targetMonth } = req.body;
+
+    if (percentageIncrease === undefined || percentageIncrease === null) {
+      return ApiResponse.badRequest(res, 'Porcentaje de aumento es requerido');
+    }
+
+    if (!targetMonth || isNaN(parseInt(targetMonth, 10))) {
+      return ApiResponse.badRequest(res, 'Mes objetivo es requerido');
+    }
+
+    const index = await prisma.adjustmentIndex.findUnique({ where: { id } });
+    if (!index || index.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Índice de ajuste no encontrado');
+    }
+
+    const percentage = parseFloat(percentageIncrease);
+    const month = parseInt(targetMonth, 10);
+
+    // Update the index currentValue
+    await prisma.adjustmentIndex.update({
+      where: { id },
+      data: {
+        currentValue: percentage,
+        lastUpdated: new Date(),
+      },
+    });
+
+    // Apply to contracts for specific month
+    const { applyAdjustmentToSpecificMonth } = require('../services/adjustmentService');
+    const results = await applyAdjustmentToSpecificMonth(groupId, id, percentage, month);
+
+    return ApiResponse.success(
+      res,
+      {
+        index: {
+          id: index.id,
+          name: index.name,
+          currentValue: percentage,
+        },
+        targetMonth: month,
+        contractsAdjusted: results.length,
+        details: results,
+      },
+      `Ajuste del ${percentage}% aplicado a ${results.length} contrato(s) para el mes ${month}`
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/adjustment-indices/:id/undo-month
+const undoAdjustmentForMonth = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { targetMonth } = req.body;
+
+    if (!targetMonth || isNaN(parseInt(targetMonth, 10))) {
+      return ApiResponse.badRequest(res, 'Mes objetivo es requerido');
+    }
+
+    const index = await prisma.adjustmentIndex.findUnique({ where: { id } });
+    if (!index || index.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Índice de ajuste no encontrado');
+    }
+
+    const month = parseInt(targetMonth, 10);
+
+    // Undo adjustments for specific month
+    const { undoAdjustmentForMonth: undoService } = require('../services/adjustmentService');
+    const results = await undoService(groupId, id, month);
+
+    return ApiResponse.success(
+      res,
+      {
+        index: {
+          id: index.id,
+          name: index.name,
+        },
+        targetMonth: month,
+        contractsReverted: results.length,
+        details: results,
+      },
+      `Ajuste revertido para ${results.length} contrato(s) del mes ${month}`
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/adjustment-indices/:id/apply-to-calendar
+const applyAdjustmentToCalendar = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { percentageIncrease, calendarMonth, calendarYear } = req.body;
+
+    if (percentageIncrease === undefined || percentageIncrease === null) {
+      return ApiResponse.badRequest(res, 'Porcentaje de aumento es requerido');
+    }
+
+    if (!calendarMonth || isNaN(parseInt(calendarMonth, 10))) {
+      return ApiResponse.badRequest(res, 'Mes es requerido');
+    }
+    
+    if (!calendarYear || isNaN(parseInt(calendarYear, 10))) {
+      return ApiResponse.badRequest(res, 'Año es requerido');
+    }
+
+    const index = await prisma.adjustmentIndex.findUnique({ where: { id } });
+    if (!index || index.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Índice de ajuste no encontrado');
+    }
+
+    const percentage = parseFloat(percentageIncrease);
+    const month = parseInt(calendarMonth, 10);
+    const year = parseInt(calendarYear, 10);
+
+    // Update the index currentValue
+    await prisma.adjustmentIndex.update({
+      where: { id },
+      data: {
+        currentValue: percentage,
+        lastUpdated: new Date(),
+      },
+    });
+
+    // Apply to contracts for specific calendar month
+    const { applyAdjustmentToCalendar } = require('../services/adjustmentService');
+    const results = await applyAdjustmentToCalendar(groupId, id, percentage, month, year);
+
+    return ApiResponse.success(
+      res,
+      {
+        index: {
+          id: index.id,
+          name: index.name,
+          currentValue: percentage,
+        },
+        calendarMonth: month,
+        calendarYear: year,
+        contractsAdjusted: results.length,
+        details: results,
+      },
+      `Ajuste del ${percentage}% aplicado a ${results.length} contrato(s)`
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/adjustment-indices/:id/undo-calendar
+const undoAdjustmentForCalendar = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { calendarMonth, calendarYear } = req.body;
+
+    if (!calendarMonth || isNaN(parseInt(calendarMonth, 10))) {
+      return ApiResponse.badRequest(res, 'Mes es requerido');
+    }
+    
+    if (!calendarYear || isNaN(parseInt(calendarYear, 10))) {
+      return ApiResponse.badRequest(res, 'Año es requerido');
+    }
+
+    const index = await prisma.adjustmentIndex.findUnique({ where: { id } });
+    if (!index || index.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Índice de ajuste no encontrado');
+    }
+
+    const month = parseInt(calendarMonth, 10);
+    const year = parseInt(calendarYear, 10);
+
+    // Undo adjustments for specific calendar month
+    const { undoAdjustmentForCalendar } = require('../services/adjustmentService');
+    const results = await undoAdjustmentForCalendar(groupId, id, month, year);
+
+    return ApiResponse.success(
+      res,
+      {
+        index: {
+          id: index.id,
+          name: index.name,
+        },
+        calendarMonth: month,
+        calendarYear: year,
+        contractsReverted: results.length,
+        details: results,
+      },
+      `Ajuste revertido para ${results.length} contrato(s)`
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getIndices,
   getIndexById,
@@ -251,4 +494,10 @@ module.exports = {
   deleteIndex,
   applyAdjustment,
   applyAllNextMonth,
+  getContractsByMonth,
+  getContractsByCalendar,
+  applyAdjustmentToMonth,
+  applyAdjustmentToCalendar,
+  undoAdjustmentForMonth,
+  undoAdjustmentForCalendar,
 };

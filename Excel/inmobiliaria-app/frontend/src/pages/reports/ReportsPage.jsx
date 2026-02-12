@@ -2,14 +2,22 @@
 import { useState, useMemo } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
+import { useProperties } from '../../hooks/useProperties'
+import { useOwners } from '../../hooks/useOwners'
 import {
   useLiquidacion,
+  useLiquidacionAll,
   useEstadoCuentas,
-  useResumenEjecutivo,
-  useEvolucionIngresos,
+  useAjustesMes,
+  useControlMensual,
+  useImpuestos,
+  useVencimientos,
+  useMonthlyRecordsForPago,
   useReportDownload,
   useSendReportEmail,
 } from '../../hooks/useReports'
+import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
+import api from '../../services/api'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import { LoadingPage } from '../../components/ui/Loading'
@@ -25,6 +33,11 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   ClockIcon,
+  BanknotesIcon,
+  AdjustmentsHorizontalIcon,
+  CalendarDaysIcon,
+  ReceiptPercentIcon,
+  BellAlertIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -54,16 +67,19 @@ const StatusBadge = ({ status, isPaid }) => {
 // ============================================
 
 const TABS = [
+  { id: 'pago-efectivo', label: 'Pago Efectivo', icon: BanknotesIcon },
   { id: 'liquidacion', label: 'Liquidación', icon: DocumentTextIcon },
+  { id: 'ajustes', label: 'Ajustes', icon: AdjustmentsHorizontalIcon },
+  { id: 'control-mensual', label: 'Control Mensual', icon: CalendarDaysIcon },
+  { id: 'impuestos', label: 'Impuestos', icon: ReceiptPercentIcon },
+  { id: 'vencimientos', label: 'Vencimientos', icon: BellAlertIcon },
   { id: 'estado-cuentas', label: 'Estado Cuentas', icon: DocumentDuplicateIcon },
-  { id: 'evolucion', label: 'Evolución', icon: ChartBarIcon },
   { id: 'carta-documento', label: 'Carta Documento', icon: ExclamationTriangleIcon },
-  { id: 'resumen', label: 'Resumen', icon: TableCellsIcon },
 ]
 
 export default function ReportsPage() {
   const currentGroupId = useAuthStore((s) => s.currentGroupId)
-  const [activeTab, setActiveTab] = useState('liquidacion')
+  const [activeTab, setActiveTab] = useState('pago-efectivo')
 
   if (!currentGroupId) {
     return <EmptyState title="Sin grupo" description="Selecciona un grupo para ver reportes" />
@@ -81,11 +97,11 @@ export default function ReportsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="tabs tabs-boxed bg-base-200">
+      <div className="tabs tabs-boxed bg-base-200 overflow-x-auto flex-nowrap">
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            className={`tab gap-2 ${activeTab === tab.id ? 'tab-active' : ''}`}
+            className={`tab gap-2 whitespace-nowrap ${activeTab === tab.id ? 'tab-active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
             <tab.icon className="w-4 h-4" />
@@ -95,69 +111,90 @@ export default function ReportsPage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'pago-efectivo' && <PagoEfectivoTab groupId={currentGroupId} />}
       {activeTab === 'liquidacion' && <LiquidacionTab groupId={currentGroupId} />}
+      {activeTab === 'ajustes' && <AjustesTab groupId={currentGroupId} />}
+      {activeTab === 'control-mensual' && <ControlMensualTab groupId={currentGroupId} />}
+      {activeTab === 'impuestos' && <ImpuestosTab groupId={currentGroupId} />}
+      {activeTab === 'vencimientos' && <VencimientosTab groupId={currentGroupId} />}
       {activeTab === 'estado-cuentas' && <EstadoCuentasTab groupId={currentGroupId} />}
-      {activeTab === 'evolucion' && <EvolucionTab groupId={currentGroupId} />}
       {activeTab === 'carta-documento' && <CartaDocumentoTab groupId={currentGroupId} />}
-      {activeTab === 'resumen' && <ResumenTab groupId={currentGroupId} />}
     </div>
   )
 }
 
 // ============================================
-// LIQUIDACION TAB
+// LIQUIDACION TAB - Modern Design with Property Multi-Select
 // ============================================
 
 function LiquidacionTab({ groupId }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
-  const [contractId, setContractId] = useState('')
-  const [showPreview, setShowPreview] = useState(false)
-  const [emailTo, setEmailTo] = useState('')
-  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
 
-  const { contracts, isLoading: loadingContracts } = useContracts(groupId, { status: 'active' })
-  const { data, isLoading, error } = useLiquidacion(groupId, {
-    month: showPreview ? month : null,
-    year: showPreview ? year : null,
-    contractId: showPreview ? contractId : null,
+  const { properties } = useProperties(groupId, { isActive: true })
+  const { data: allData, isLoading } = useLiquidacionAll(groupId, { 
+    month: String(month), 
+    year: String(year),
+    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined
   })
   const { downloadPDF, downloadExcel } = useReportDownload(groupId)
-  const { send, isSending } = useSendReportEmail(groupId)
 
-  const handleView = () => {
-    if (!contractId) return
-    setShowPreview(true)
-  }
+  // Property options for multi-select
+  const propertyOptions = useMemo(() => {
+    return properties.map((p) => ({
+      value: p.id,
+      label: `${p.address}${p.floor ? ` - Piso ${p.floor}` : ''}${p.apartment ? ` - ${p.apartment}` : ''}`,
+    }))
+  }, [properties])
+
+  // Filter data by selected properties
+  const filteredData = useMemo(() => {
+    return allData || []
+  }, [allData])
 
   const handleDownloadPDF = () => {
-    downloadPDF(`liquidacion/pdf?month=${month}&year=${year}&contractId=${contractId}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+    downloadPDF(`liquidacion-all/pdf?month=${month}&year=${year}${propertyIdsParam}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
   }
 
   const handleDownloadExcel = () => {
-    downloadExcel(`liquidacion/excel?month=${month}&year=${year}`, `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
+    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+    downloadExcel(`liquidacion/excel?month=${month}&year=${year}${propertyIdsParam}`, `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
   }
 
-  const handlePrint = () => {
-    window.open(`/api/groups/${groupId}/reports/liquidacion/pdf?month=${month}&year=${year}&contractId=${contractId}`, '_blank')
-  }
+  // Collect all transactions
+  const allTransactions = useMemo(() => {
+    if (!filteredData) return []
+    const txns = []
+    for (const d of filteredData) {
+      for (const t of (d.transacciones || [])) {
+        txns.push({ ...t, inquilino: t.inquilino || d.inquilino.nombre })
+      }
+    }
+    txns.sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+    return txns
+  }, [filteredData])
 
-  const handleSendEmail = () => {
-    if (!emailTo) return
-    send({ type: 'liquidacion', contractId, month, year, to: emailTo })
-    setShowEmailModal(false)
-    setEmailTo('')
-  }
+  const grandTotal = useMemo(() => {
+    if (!filteredData) return 0
+    return filteredData.reduce((s, d) => s + d.total, 0)
+  }, [filteredData])
+
+  const totalPagado = useMemo(() => {
+    return allTransactions.reduce((s, t) => s + t.monto, 0)
+  }, [allTransactions])
+
+  const saldo = grandTotal - totalPagado
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <Card title="Filtros">
+      <Card title="Liquidación Mensual">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
           <div>
             <label className="label"><span className="label-text text-xs">Mes</span></label>
-            <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => { setMonth(parseInt(e.target.value)); setShowPreview(false) }}>
+            <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
               {monthNames.slice(1).map((m, i) => (
                 <option key={i + 1} value={i + 1}>{m}</option>
               ))}
@@ -165,132 +202,137 @@ function LiquidacionTab({ groupId }) {
           </div>
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
-            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => { setYear(parseInt(e.target.value)); setShowPreview(false) }}>
+            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
               {[2024, 2025, 2026, 2027].map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="label"><span className="label-text text-xs">Contrato / Inquilino</span></label>
-            <select className="select select-bordered select-sm w-full" value={contractId} onChange={(e) => { setContractId(e.target.value); setShowPreview(false) }}>
-              <option value="">Seleccionar...</option>
-              {contracts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.tenant?.name || 'Sin inquilino'} - {c.property?.address || 'Sin propiedad'}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
-            <Button onClick={handleView} disabled={!contractId} className="btn-primary btn-sm w-full">
-              Ver Reporte
+          <div className="flex items-end gap-2">
+            <Button onClick={handleDownloadPDF} className="btn-sm btn-primary gap-1" disabled={!filteredData || filteredData.length === 0}>
+              <ArrowDownTrayIcon className="w-4 h-4" /> PDF
+            </Button>
+            <Button onClick={handleDownloadExcel} className="btn-sm btn-secondary gap-1" disabled={!filteredData || filteredData.length === 0}>
+              <TableCellsIcon className="w-4 h-4" /> Excel
             </Button>
           </div>
         </div>
+        <div className="mt-4">
+          <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
+          <MultiSearchableSelect
+            options={propertyOptions}
+            value={selectedPropertyIds}
+            onChange={setSelectedPropertyIds}
+            placeholder="Todas las propiedades..."
+          />
+          {selectedPropertyIds.length > 0 && (
+            <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
+          )}
+        </div>
       </Card>
 
-      {/* Preview */}
-      {showPreview && isLoading && <LoadingPage />}
-      {showPreview && error && (
-        <Card><p className="text-error">No se encontró liquidación para ese período</p></Card>
-      )}
-      {showPreview && data && (
-        <Card
-          title={`Liquidación - ${data.periodo.label}`}
-          actions={
-            <div className="flex gap-2 flex-wrap">
-              <Button onClick={handleDownloadPDF} className="btn-sm btn-primary gap-1">
-                <ArrowDownTrayIcon className="w-4 h-4" /> PDF
-              </Button>
-              <Button onClick={handleDownloadExcel} className="btn-sm btn-secondary gap-1">
-                <TableCellsIcon className="w-4 h-4" /> Excel
-              </Button>
-              <Button onClick={handlePrint} className="btn-sm btn-ghost gap-1">
-                <PrinterIcon className="w-4 h-4" /> Imprimir
-              </Button>
-              <Button onClick={() => setShowEmailModal(true)} className="btn-sm btn-accent gap-1">
-                <EnvelopeIcon className="w-4 h-4" /> Email
-              </Button>
-            </div>
-          }
-        >
-          {/* Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-sm">
-            <div>
-              <p><span className="font-semibold">Inquilino:</span> {data.inquilino.nombre}</p>
-              <p><span className="font-semibold">DNI/CUIT:</span> {data.inquilino.dni}</p>
-            </div>
-            <div>
-              <p><span className="font-semibold">Propiedad:</span> {data.propiedad.direccion}</p>
-              <p><span className="font-semibold">Propietario:</span> {data.propietario.nombre}</p>
-            </div>
-          </div>
+      {isLoading && <LoadingPage />}
 
-          {/* Concepts Table */}
-          <div className="overflow-x-auto">
-            <table className="table table-sm">
-              <thead>
-                <tr className="bg-[#003087] text-white">
-                  <th>Concepto</th>
-                  <th className="text-right">Base</th>
-                  <th className="text-right">Importe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.conceptos.map((c, i) => (
-                  <tr key={i} className={i % 2 === 1 ? 'bg-base-200' : ''}>
-                    <td>{c.concepto}</td>
-                    <td className="text-right">{c.base != null ? formatCurrency(c.base) : '-'}</td>
-                    <td className="text-right">{formatCurrency(c.importe)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-[#003087] text-white font-bold text-base">
-                  <td>TOTAL A PAGAR</td>
-                  <td></td>
-                  <td className="text-right">{formatCurrency(data.total)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {/* Status */}
-          <div className="mt-4 flex items-center gap-4 text-sm">
-            <StatusBadge status={data.estado} isPaid={data.isPaid} />
-            {data.fechaPago && <span>Fecha pago: {formatDate(data.fechaPago)}</span>}
-            {data.amountPaid > 0 && !data.isPaid && (
-              <span>Pagado: {formatCurrency(data.amountPaid)} | Saldo: {formatCurrency(Math.abs(data.balance))}</span>
-            )}
-          </div>
-        </Card>
+      {!isLoading && filteredData.length === 0 && (
+        <Card><p className="text-base-content/60 text-center py-4">No hay liquidaciones para este período</p></Card>
       )}
 
-      {/* Email Modal */}
-      {showEmailModal && (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">Enviar Liquidación por Email</h3>
-            <div className="mt-4">
-              <label className="label"><span className="label-text">Email destinatario</span></label>
-              <input
-                type="email"
-                className="input input-bordered w-full"
-                value={emailTo}
-                onChange={(e) => setEmailTo(e.target.value)}
-                placeholder="email@ejemplo.com"
-              />
+      {filteredData.length > 0 && (
+        <>
+          <Card title="Resumen">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs text-base-content/60 mb-1">Total Facturado</p>
+                <p className="text-xl font-bold">{formatCurrency(grandTotal)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-base-content/60 mb-1">Total Cobrado</p>
+                <p className="text-xl font-bold">{formatCurrency(totalPagado)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-base-content/60 mb-1">{saldo > 0 ? 'Saldo Pendiente' : 'Saldo a Favor'}</p>
+                <p className="text-xl font-bold">{formatCurrency(Math.abs(saldo))}</p>
+              </div>
             </div>
-            <div className="modal-action">
-              <Button onClick={() => setShowEmailModal(false)} className="btn-ghost">Cancelar</Button>
-              <Button onClick={handleSendEmail} disabled={!emailTo || isSending} className="btn-primary">
-                {isSending ? 'Enviando...' : 'Enviar'}
-              </Button>
+          </Card>
+
+          <Card title={`Detalle - ${monthNames[month]} ${year}`}>
+            {filteredData.map((data, idx) => {
+              const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
+              return (
+                <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                  <h3 className="font-semibold text-sm mb-2">{addr} - {data.inquilino.nombre}</h3>
+                  <div className="overflow-x-auto">
+                    <table className="table table-xs">
+                      <tbody>
+                        {data.conceptos.map((c, ci) => {
+                          const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto
+                          if (c.concepto.includes('Punitorios') && c.importe === 0) return null
+                          return (
+                            <tr key={ci}>
+                              <td className="pl-4">{label}</td>
+                              <td className="text-right">{formatCurrency(c.importe)}</td>
+                            </tr>
+                          )
+                        })}
+                        <tr className="font-semibold">
+                          <td className="pl-4">Subtotal</td>
+                          <td className="text-right">{formatCurrency(data.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Grand Total */}
+            <div className="mt-4 pt-3 border-t-2 border-base-content flex justify-between items-center">
+              <span className="font-bold text-lg">TOTAL</span>
+              <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
             </div>
-          </div>
-          <div className="modal-backdrop" onClick={() => setShowEmailModal(false)} />
-        </div>
+          </Card>
+
+          {/* Payments */}
+          {allTransactions.length > 0 && (
+            <Card title="Pagos Registrados">
+              <div className="overflow-x-auto">
+                <table className="table table-xs">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Inquilino</th>
+                      <th>Medio</th>
+                      <th className="text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allTransactions.map((t, i) => (
+                      <tr key={i}>
+                        <td>{formatDate(t.fecha)}</td>
+                        <td>{t.inquilino}</td>
+                        <td>{t.metodo === 'TRANSFERENCIA' ? 'Transf.' : 'Efectivo'}</td>
+                        <td className="text-right">{formatCurrency(t.monto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-semibold">
+                      <td colSpan="3">Total Pagado</td>
+                      <td className="text-right">{formatCurrency(totalPagado)}</td>
+                    </tr>
+                    {Math.abs(saldo) > 0.01 && (
+                      <tr className="font-semibold">
+                        <td colSpan="3">{saldo > 0 ? 'Saldo Pendiente' : 'Saldo a Favor'}</td>
+                        <td className="text-right">{formatCurrency(Math.abs(saldo))}</td>
+                      </tr>
+                    )}
+                  </tfoot>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
       )}
     </div>
   )
@@ -433,106 +475,6 @@ function EstadoCuentasTab({ groupId }) {
 }
 
 // ============================================
-// EVOLUCION TAB
-// ============================================
-
-function EvolucionTab({ groupId }) {
-  const now = new Date()
-  const [year, setYear] = useState(now.getFullYear())
-  const { data, isLoading } = useEvolucionIngresos(groupId, { year: String(year) })
-  const { downloadExcel } = useReportDownload(groupId)
-
-  const maxAmount = useMemo(() => {
-    if (!data?.meses) return 1
-    return Math.max(...data.meses.map((m) => m.amountPaid), 1)
-  }, [data])
-
-  return (
-    <div className="space-y-4">
-      <Card title="Filtros">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
-          <div>
-            <label className="label"><span className="label-text text-xs">Año</span></label>
-            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-              {[2024, 2025, 2026, 2027].map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
-            <Button
-              onClick={() => downloadExcel(`evolucion-ingresos/excel?year=${year}`, `evolucion-ingresos-${year}.xlsx`)}
-              className="btn-sm btn-secondary gap-1"
-              disabled={!data}
-            >
-              <TableCellsIcon className="w-4 h-4" /> Excel
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      {isLoading && <LoadingPage />}
-
-      {data && (
-        <Card title={`Evolución de Ingresos - ${year}`}>
-          {/* Mini bar chart */}
-          <div className="overflow-x-auto">
-            <table className="table table-sm">
-              <thead>
-                <tr>
-                  <th>Mes</th>
-                  <th className="text-right">Facturado</th>
-                  <th className="text-right">Cobrado</th>
-                  <th className="w-48">Progreso</th>
-                  <th className="text-right">Contratos</th>
-                  <th className="text-right">Pagados</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.meses.map((m) => {
-                  const pct = maxAmount > 0 ? (m.amountPaid / maxAmount) * 100 : 0
-                  const cobranza = m.totalDue > 0 ? ((m.amountPaid / m.totalDue) * 100).toFixed(0) : '-'
-                  return (
-                    <tr key={m.mes} className={m.contratos === 0 ? 'opacity-40' : ''}>
-                      <td className="font-medium">{m.label}</td>
-                      <td className="text-right">{formatCurrency(m.totalDue)}</td>
-                      <td className="text-right font-medium">{formatCurrency(m.amountPaid)}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <div className="w-full bg-base-200 rounded-full h-3">
-                            <div
-                              className="bg-primary h-3 rounded-full transition-all"
-                              style={{ width: `${Math.min(pct, 100)}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-base-content/60 w-10 text-right">{cobranza}%</span>
-                        </div>
-                      </td>
-                      <td className="text-right">{m.contratos}</td>
-                      <td className="text-right">{m.pagados}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="font-bold">
-                  <td>TOTAL</td>
-                  <td className="text-right">{formatCurrency(data.meses.reduce((s, m) => s + m.totalDue, 0))}</td>
-                  <td className="text-right">{formatCurrency(data.totalAnual)}</td>
-                  <td></td>
-                  <td></td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </Card>
-      )}
-    </div>
-  )
-}
-
-// ============================================
 // CARTA DOCUMENTO TAB
 // ============================================
 
@@ -619,19 +561,158 @@ function CartaDocumentoTab({ groupId }) {
 }
 
 // ============================================
-// RESUMEN TAB
+// PAGO EFECTIVO TAB
 // ============================================
 
-function ResumenTab({ groupId }) {
+function PagoEfectivoTab({ groupId }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
-  const { data, isLoading } = useResumenEjecutivo(groupId, { month: String(month), year: String(year) })
+  const [selectedIds, setSelectedIds] = useState([])
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  const { records, isLoading } = useMonthlyRecordsForPago(groupId, { month: String(month), year: String(year) })
   const { downloadPDF } = useReportDownload(groupId)
+
+  const recordOptions = records.map((r) => ({
+    value: r.id,
+    label: `${r.tenant?.name || 'Sin inquilino'} - ${r.property?.address || 'Sin propiedad'}`,
+  }))
+
+  const handleDownloadSingle = (recordId) => {
+    const rec = records.find((r) => r.id === recordId)
+    const name = rec?.tenant?.name || 'recibo'
+    downloadPDF(`pago-efectivo/pdf?monthlyRecordId=${recordId}`, `recibo-${name.toLowerCase().replace(/\s/g, '-')}.pdf`)
+  }
+
+  const handleDownloadMulti = async () => {
+    if (selectedIds.length === 0) return
+    setIsDownloading(true)
+    try {
+      const response = await api.post(`/groups/${groupId}/reports/pago-efectivo/pdf/multi`, {
+        monthlyRecordIds: selectedIds,
+      }, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `recibos-${monthNames[month]?.toLowerCase()}-${year}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+    }
+    setIsDownloading(false)
+  }
 
   return (
     <div className="space-y-4">
-      <Card title="Filtros">
+      <Card title="Recibos de Pago Efectivo">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+          <div>
+            <label className="label"><span className="label-text text-xs">Mes</span></label>
+            <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => { setMonth(parseInt(e.target.value)); setSelectedIds([]) }}>
+              {monthNames.slice(1).map((m, i) => (
+                <option key={i + 1} value={i + 1}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label"><span className="label-text text-xs">Año</span></label>
+            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => { setYear(parseInt(e.target.value)); setSelectedIds([]) }}>
+              {[2024, 2025, 2026, 2027].map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={handleDownloadMulti}
+              disabled={selectedIds.length === 0 || isDownloading}
+              className="btn-primary btn-sm gap-1"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              {isDownloading ? 'Generando...' : `PDF Consolidado (${selectedIds.length})`}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {isLoading && <LoadingPage />}
+
+      {!isLoading && records.length === 0 && (
+        <Card><p className="text-base-content/60 text-center py-4">No hay registros para este período</p></Card>
+      )}
+
+      {records.length > 0 && (
+        <Card title={`Registros - ${monthNames[month]} ${year}`}>
+          <div className="mb-4">
+            <MultiSearchableSelect
+              label="Seleccionar registros para PDF consolidado"
+              options={recordOptions}
+              value={selectedIds}
+              onChange={setSelectedIds}
+              placeholder="Buscar inquilino o propiedad..."
+            />
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="table table-sm table-zebra">
+              <thead>
+                <tr>
+                  <th>Inquilino</th>
+                  <th>Propiedad</th>
+                  <th className="text-right">Total</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r) => {
+                  // Determinar si está completamente pagado basado en liveBalance y deuda
+                  const isFullyPaid = r.status === 'COMPLETE' || 
+                    (r.liveBalance >= 0 && (!r.debtInfo || r.debtInfo.status === 'PAID'))
+                  const displayStatus = isFullyPaid ? 'PAID' : r.status
+                  
+                  return (
+                    <tr key={r.id}>
+                      <td className="font-medium">{r.tenant?.name || '-'}</td>
+                      <td>{r.property?.address || '-'}</td>
+                      <td className="text-right font-medium">{formatCurrency(r.liveTotalDue || r.totalDue)}</td>
+                      <td><StatusBadge status={displayStatus} isPaid={isFullyPaid} /></td>
+                      <td>
+                        <Button onClick={() => handleDownloadSingle(r.id)} className="btn-xs btn-ghost gap-1">
+                          <ArrowDownTrayIcon className="w-3 h-3" /> PDF
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ============================================
+// AJUSTES TAB
+// ============================================
+
+function AjustesTab({ groupId }) {
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const { data, isLoading } = useAjustesMes(groupId, { month: String(month), year: String(year) })
+  const { downloadExcel } = useReportDownload(groupId)
+
+  return (
+    <div className="space-y-4">
+      <Card title="Ajustes del Mes">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
           <div>
             <label className="label"><span className="label-text text-xs">Mes</span></label>
@@ -651,11 +732,11 @@ function ResumenTab({ groupId }) {
           </div>
           <div className="flex items-end">
             <Button
-              onClick={() => downloadPDF(`resumen-ejecutivo/pdf?month=${month}&year=${year}`, `resumen-ejecutivo-${monthNames[month]?.toLowerCase()}-${year}.pdf`)}
-              className="btn-sm btn-primary gap-1"
+              onClick={() => downloadExcel(`ajustes-mes/excel?month=${month}&year=${year}`, `ajustes-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)}
+              className="btn-sm btn-secondary gap-1"
               disabled={!data}
             >
-              <ArrowDownTrayIcon className="w-4 h-4" /> PDF
+              <TableCellsIcon className="w-4 h-4" /> Excel
             </Button>
           </div>
         </div>
@@ -664,53 +745,401 @@ function ResumenTab({ groupId }) {
       {isLoading && <LoadingPage />}
 
       {data && (
-        <Card title={`Resumen Ejecutivo - ${data.periodo.label}`}>
-          {/* KPIs Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
-            <KPIBox label="Ingresos del Mes" value={formatCurrency(data.kpis.ingresosMes)} color="text-success" />
-            <KPIBox label="Total Facturado" value={formatCurrency(data.kpis.totalDueMes)} color="text-primary" />
-            <KPIBox label="% Cobranza" value={`${data.kpis.cobranza}%`} color="text-primary" />
-            <KPIBox label="Deuda Total" value={formatCurrency(data.kpis.totalDeuda)} color="text-error" />
-            <KPIBox label="Punitorios" value={formatCurrency(data.kpis.punitoryMes)} color="text-warning" />
-            <KPIBox label="Ocupación" value={`${data.kpis.ocupacion}%`} color="text-info" />
-          </div>
-
-          {/* Variation */}
-          {data.kpis.variacionIngresos !== null && (
-            <div className="flex items-center gap-2 mb-4 text-sm">
-              <span className="text-base-content/60">Variación vs. mes anterior:</span>
-              <span className={`font-bold ${parseFloat(data.kpis.variacionIngresos) >= 0 ? 'text-success' : 'text-error'}`}>
-                {parseFloat(data.kpis.variacionIngresos) >= 0 ? '+' : ''}{data.kpis.variacionIngresos}%
-              </span>
+        <Card title={`Ajustes - ${monthNames[month]} ${year}`}>
+          {data.ajustes.length === 0 ? (
+            <p className="text-base-content/60 text-center py-4">No hay ajustes para este período</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table table-sm table-zebra">
+                <thead>
+                  <tr>
+                    <th>Inquilino</th>
+                    <th>Propiedad</th>
+                    <th className="text-right">Alquiler Anterior</th>
+                    <th>Índice</th>
+                    <th className="text-right">% Ajuste</th>
+                    <th className="text-right">Alquiler Nuevo</th>
+                    <th className="text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.ajustes.map((a, i) => (
+                    <tr key={i}>
+                      <td className="font-medium">{a.inquilino}</td>
+                      <td>{a.propiedad}</td>
+                      <td className="text-right">{formatCurrency(a.alquilerAnterior)}</td>
+                      <td>{a.indice}</td>
+                      <td className="text-right font-medium text-info">{a.porcentajeAjuste}%</td>
+                      <td className="text-right font-bold text-success">{formatCurrency(a.alquilerNuevo)}</td>
+                      <td className="text-center">
+                        {a.aplicado ? (
+                          <span className="badge badge-sm badge-success">Aplicado</span>
+                        ) : (
+                          <span className="badge badge-sm badge-warning">Pendiente</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
+        </Card>
+      )}
+    </div>
+  )
+}
 
-          {/* Payment Status */}
-          <h3 className="text-md font-semibold mb-2">Estado de Pagos</h3>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="bg-success/10 rounded-lg p-3">
-              <CheckCircleIcon className="w-6 h-6 text-success mx-auto mb-1" />
-              <div className="text-xl font-bold text-success">{data.estadoPagos.pagados}</div>
-              <div className="text-xs text-base-content/60">Pagados</div>
-            </div>
-            <div className="bg-warning/10 rounded-lg p-3">
-              <ClockIcon className="w-6 h-6 text-warning mx-auto mb-1" />
-              <div className="text-xl font-bold text-warning">{data.estadoPagos.parciales}</div>
-              <div className="text-xs text-base-content/60">Parciales</div>
-            </div>
-            <div className="bg-error/10 rounded-lg p-3">
-              <ExclamationTriangleIcon className="w-6 h-6 text-error mx-auto mb-1" />
-              <div className="text-xl font-bold text-error">{data.estadoPagos.pendientes}</div>
-              <div className="text-xs text-base-content/60">Pendientes</div>
-            </div>
+// ============================================
+// CONTROL MENSUAL TAB
+// ============================================
+
+function ControlMensualTab({ groupId }) {
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const { data, isLoading } = useControlMensual(groupId, { month: String(month), year: String(year) })
+  const { downloadExcel } = useReportDownload(groupId)
+
+  return (
+    <div className="space-y-4">
+      <Card title="Control Mensual">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
+          <div>
+            <label className="label"><span className="label-text text-xs">Mes</span></label>
+            <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
+              {monthNames.slice(1).map((m, i) => (
+                <option key={i + 1} value={i + 1}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label"><span className="label-text text-xs">Año</span></label>
+            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
+              {[2024, 2025, 2026, 2027].map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={() => downloadExcel(`control-mensual/excel?month=${month}&year=${year}`, `control-mensual-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)}
+              className="btn-sm btn-secondary gap-1"
+              disabled={!data}
+            >
+              <TableCellsIcon className="w-4 h-4" /> Excel
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {isLoading && <LoadingPage />}
+
+      {data && (
+        <>
+          {/* Totals Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <KPIBox label="Total Facturado" value={formatCurrency(data.totales.total)} color="text-primary" />
+            <KPIBox label="Total Cobrado" value={formatCurrency(data.totales.pagado)} color="text-success" />
+            <KPIBox label="Saldo Pendiente" value={formatCurrency(data.totales.saldo)} color="text-error" />
           </div>
 
-          {/* Additional info */}
-          <div className="mt-4 text-sm text-base-content/60 space-y-1">
-            <p>Contratos activos: <span className="font-medium text-base-content">{data.kpis.contratosActivos}</span></p>
-            <p>Propiedades totales: <span className="font-medium text-base-content">{data.kpis.totalPropiedades}</span></p>
-            <p>Deudas abiertas: <span className="font-medium text-base-content">{data.kpis.deudasAbiertas}</span></p>
+          <Card title={`Registros - ${monthNames[month]} ${year}`}>
+            {data.registros.length === 0 ? (
+              <p className="text-base-content/60 text-center py-4">No hay registros para este período</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table table-sm table-zebra">
+                  <thead>
+                    <tr>
+                      <th>Inquilino</th>
+                      <th>Propiedad</th>
+                      <th className="text-right">Alquiler</th>
+                      <th className="text-right">Servicios</th>
+                      <th className="text-right">Total</th>
+                      <th className="text-right">Pagado</th>
+                      <th className="text-right">Saldo</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.registros.map((r, i) => (
+                      <tr key={i}>
+                        <td className="font-medium">{r.inquilino}</td>
+                        <td>{r.propiedad}</td>
+                        <td className="text-right">{formatCurrency(r.alquiler)}</td>
+                        <td className="text-right">{formatCurrency(r.servicios)}</td>
+                        <td className="text-right font-medium">{formatCurrency(r.total)}</td>
+                        <td className="text-right">{formatCurrency(r.pagado)}</td>
+                        <td className={`text-right ${r.saldo > 0 ? 'text-error' : 'text-success'}`}>
+                          {formatCurrency(r.saldo)}
+                        </td>
+                        <td><StatusBadge status={r.estado} isPaid={r.isPaid} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-bold">
+                      <td colSpan={2}>TOTALES</td>
+                      <td className="text-right">{formatCurrency(data.totales.alquiler)}</td>
+                      <td className="text-right">{formatCurrency(data.totales.servicios)}</td>
+                      <td className="text-right">{formatCurrency(data.totales.total)}</td>
+                      <td className="text-right">{formatCurrency(data.totales.pagado)}</td>
+                      <td className="text-right">{formatCurrency(data.totales.saldo)}</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================
+// IMPUESTOS TAB
+// ============================================
+
+function ImpuestosTab({ groupId }) {
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
+  const [selectedOwnerId, setSelectedOwnerId] = useState('')
+
+  const { properties } = useProperties(groupId, { isActive: true })
+  const { owners } = useOwners(groupId)
+  const { data, isLoading } = useImpuestos(groupId, { 
+    month: String(month), 
+    year: String(year),
+    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined,
+    ownerId: selectedOwnerId || undefined
+  })
+  const { downloadPDF } = useReportDownload(groupId)
+
+  // Property options for multi-select
+  const propertyOptions = useMemo(() => {
+    return properties.map((p) => ({
+      value: p.id,
+      label: `${p.address}${p.floor ? ` - Piso ${p.floor}` : ''}${p.apartment ? ` - ${p.apartment}` : ''}`,
+    }))
+  }, [properties])
+
+  // Collect unique owner bank details
+  const ownerBanks = useMemo(() => {
+    if (!data?.impuestos) return []
+    const seen = new Map()
+    for (const item of data.impuestos) {
+      if (item.banco && item.banco.nombre) {
+        const key = item.banco.cbu || item.banco.nombre + item.banco.titular
+        if (!seen.has(key)) {
+          seen.set(key, { propietario: item.propietario, banco: item.banco })
+        }
+      }
+    }
+    return Array.from(seen.values())
+  }, [data])
+
+  const handleDownloadPDF = () => {
+    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+    const ownerIdParam = selectedOwnerId ? `&ownerId=${selectedOwnerId}` : ''
+    downloadPDF(`impuestos/pdf?month=${month}&year=${year}${propertyIdsParam}${ownerIdParam}`, `impuestos-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card title="Reporte de Impuestos">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
+          <div>
+            <label className="label"><span className="label-text text-xs">Mes</span></label>
+            <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
+              {monthNames.slice(1).map((m, i) => (
+                <option key={i + 1} value={i + 1}>{m}</option>
+              ))}
+            </select>
           </div>
+          <div>
+            <label className="label"><span className="label-text text-xs">Año</span></label>
+            <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
+              {[2024, 2025, 2026, 2027].map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={handleDownloadPDF}
+              className="btn-sm btn-primary gap-1"
+              disabled={!data}
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" /> PDF
+            </Button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          <div>
+            <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
+            <MultiSearchableSelect
+              options={propertyOptions}
+              value={selectedPropertyIds}
+              onChange={setSelectedPropertyIds}
+              placeholder="Todas las propiedades..."
+            />
+            {selectedPropertyIds.length > 0 && (
+              <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
+            )}
+          </div>
+          <div>
+            <label className="label"><span className="label-text text-xs">Filtrar por dueño (opcional)</span></label>
+            <select 
+              className="select select-bordered select-sm w-full" 
+              value={selectedOwnerId} 
+              onChange={(e) => setSelectedOwnerId(e.target.value)}
+            >
+              <option value="">Todos los dueños</option>
+              {(owners || []).map((owner) => (
+                <option key={owner.id} value={owner.id}>{owner.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </Card>
+
+      {isLoading && <LoadingPage />}
+
+      {data && data.impuestos.length === 0 && (
+        <Card><p className="text-base-content/60 text-center py-4">No hay impuestos registrados para este período</p></Card>
+      )}
+
+      {data && data.impuestos.length > 0 && (
+        <>
+          {/* Per-property detail */}
+          <Card title={`Detalle - ${monthNames[month]} ${year}`}>
+            {data.impuestos.map((item, idx) => (
+              <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                <h3 className="font-semibold text-sm mb-2">{item.propiedad} - {item.inquilino}</h3>
+                <div className="overflow-x-auto">
+                  <table className="table table-xs">
+                    <tbody>
+                      {item.impuestos.map((imp, ii) => (
+                        <tr key={ii}>
+                          <td className="pl-4">{imp.concepto}</td>
+                          <td className="text-right">{formatCurrency(imp.monto)}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-semibold">
+                        <td className="pl-4">Subtotal</td>
+                        <td className="text-right">{formatCurrency(item.totalImpuestos)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+
+            {/* Grand Total */}
+            <div className="mt-4 pt-3 border-t-2 border-base-content flex justify-between items-center">
+              <span className="font-bold text-lg">TOTAL</span>
+              <span className="font-bold text-lg">{formatCurrency(data.grandTotal)}</span>
+            </div>
+          </Card>
+
+          {/* Owner bank details */}
+          {ownerBanks.length > 0 && (
+            <Card title="Datos Bancarios por Propietario">
+              {ownerBanks.map((ob, idx) => (
+                <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                  <h3 className="font-semibold text-sm mb-2">{ob.propietario}</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                    {ob.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {ob.banco.nombre}</div>}
+                    {ob.banco.titular && <div><span className="text-base-content/60">Titular:</span> {ob.banco.titular}</div>}
+                    {ob.banco.cuit && <div><span className="text-base-content/60">CUIT:</span> {ob.banco.cuit}</div>}
+                    {ob.banco.tipoCuenta && <div><span className="text-base-content/60">Tipo:</span> {ob.banco.tipoCuenta}</div>}
+                    {ob.banco.numeroCuenta && <div><span className="text-base-content/60">N° Cuenta:</span> {ob.banco.numeroCuenta}</div>}
+                    {ob.banco.cbu && <div><span className="text-base-content/60">CBU:</span> {ob.banco.cbu}</div>}
+                  </div>
+                </div>
+              ))}
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================
+// VENCIMIENTOS TAB
+// ============================================
+
+function VencimientosTab({ groupId }) {
+  const { data, isLoading } = useVencimientos(groupId)
+  const { downloadPDF } = useReportDownload(groupId)
+
+  return (
+    <div className="space-y-4">
+      <Card title="Contratos por Vencer">
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-sm text-base-content/60">Contratos que vencen en los próximos 2 meses</p>
+          <Button
+            onClick={() => downloadPDF('vencimientos/pdf', 'vencimientos.pdf')}
+            className="btn-sm btn-primary gap-1"
+            disabled={!data}
+          >
+            <ArrowDownTrayIcon className="w-4 h-4" /> PDF
+          </Button>
+        </div>
+      </Card>
+
+      {isLoading && <LoadingPage />}
+
+      {data && (
+        <Card>
+          {data.vencimientos.length === 0 ? (
+            <div className="text-center py-8">
+              <CheckCircleIcon className="w-12 h-12 text-success mx-auto mb-2" />
+              <p className="text-lg font-medium text-success">Sin vencimientos próximos</p>
+              <p className="text-sm text-base-content/60">No hay contratos por vencer en los próximos 2 meses</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table table-sm table-zebra">
+                <thead>
+                  <tr>
+                    <th>Inquilino</th>
+                    <th>Propiedad</th>
+                    <th>Inicio</th>
+                    <th>Vencimiento</th>
+                    <th className="text-right">Alquiler</th>
+                    <th>Días Restantes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.vencimientos.map((v, i) => {
+                    const isExpired = v.diasRestantes <= 0
+                    const isUrgent = v.diasRestantes > 0 && v.diasRestantes <= 30
+                    return (
+                      <tr key={i}>
+                        <td className="font-medium">{v.inquilino}</td>
+                        <td>{v.propiedad}</td>
+                        <td>{formatDate(v.inicio)}</td>
+                        <td>{formatDate(v.vencimiento)}</td>
+                        <td className="text-right">{formatCurrency(v.alquiler)}</td>
+                        <td>
+                          <span className={`badge badge-sm ${isExpired ? 'badge-error' : isUrgent ? 'badge-warning' : 'badge-info'}`}>
+                            {isExpired ? 'Vencido' : `${v.diasRestantes} días`}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
     </div>

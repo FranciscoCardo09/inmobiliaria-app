@@ -166,7 +166,7 @@ export const Dashboard = () => {
                 label="Contratos con Ajustes"
                 value={summary.adjustmentsThisMonth + summary.adjustmentsNextMonth}
                 color="warning"
-                onClick={() => navigate('/dashboard/contracts-adjustments')}
+                onClick={() => navigate('/adjustments')}
               />
               <StatCard
                 icon={ExclamationTriangleIcon}

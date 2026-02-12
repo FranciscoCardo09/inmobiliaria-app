@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { usePaymentTransactions, usePunitoryPreview } from '../hooks/usePaymentTransactions'
 import { useCanPayCurrentMonth } from '../hooks/useDebts'
 import { useMonthlyRecordDetail } from '../hooks/useMonthlyRecords'
+import { useAuthStore } from '../stores/authStore'
+import api from '../services/api'
+import toast from 'react-hot-toast'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import DateInput, { getLocalToday } from './ui/DateInput'
@@ -100,7 +103,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
     if (!amount || amount <= 0) return
 
     try {
-      await registerPayment({
+      const result = await registerPayment({
         monthlyRecordId: record.id,
         paymentDate,
         amount: amount,
@@ -109,6 +112,32 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
         generateReceipt,
         observations: observations || undefined,
       })
+
+      // Auto-download receipt PDF for cash payments
+      if (paymentMethod === 'EFECTIVO' && generateReceipt) {
+        try {
+          const txId = result?.transaction?.id || ''
+          const tenantName = record?.contract?.tenant?.name || record?.tenant?.name || 'recibo'
+          const response = await api.get(
+            `/groups/${groupId}/reports/pago-efectivo/pdf?monthlyRecordId=${record.id}${txId ? `&transactionId=${txId}` : ''}`,
+            { responseType: 'blob' }
+          )
+          const blob = new Blob([response.data], { type: 'application/pdf' })
+          const url = window.URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `recibo-${tenantName.toLowerCase().replace(/\s/g, '-')}.pdf`
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(url)
+          toast.success('Recibo descargado')
+        } catch (pdfErr) {
+          console.error('Error descargando recibo:', pdfErr)
+          toast.error('Pago registrado pero no se pudo descargar el recibo')
+        }
+      }
+
       onClose()
     } catch (e) {
       // Error handled by hook

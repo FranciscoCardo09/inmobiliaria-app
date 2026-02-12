@@ -41,9 +41,24 @@ function isContractActiveForMonth(contract, monthNumber) {
 /**
  * Calculate rent for a specific month considering adjustments
  */
-function calculateRentForMonth(contract, monthNumber) {
-  // Base rent - in reality, adjustments would have been applied cumulatively
-  // For now, use the current baseRent stored in the contract
+async function calculateRentForMonth(contract, monthNumber) {
+  // Buscar en el historial cuál era el rent vigente para este mes
+  // El historial está ordenado por effectiveFromMonth descendente
+  const rentHistory = await prisma.rentHistory.findFirst({
+    where: {
+      contractId: contract.id,
+      effectiveFromMonth: { lte: monthNumber },
+    },
+    orderBy: {
+      effectiveFromMonth: 'desc',
+    },
+  });
+
+  if (rentHistory) {
+    return rentHistory.rentAmount;
+  }
+
+  // Si no hay historial, usar baseRent (caso de contratos viejos sin historial)
   return contract.baseRent;
 }
 
@@ -69,7 +84,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           owner: { select: { id: true, name: true } },
         },
       },
-      adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+      adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
     },
   });
 
@@ -110,7 +125,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     if (!record) {
       // Auto-generate the record
-      const rentAmount = calculateRentForMonth(contract, monthNumber);
+      const rentAmount = await calculateRentForMonth(contract, monthNumber);
 
       // Get previous month balance
       const prevMonthNumber = monthNumber - 1;
@@ -262,19 +277,34 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     }
 
     // Calculate LIVE punitorios for display
+    // IMPORTANT: record.punitoryAmount is the frozen value from the last payment.
+    // We need to:
+    // 1. Keep frozen punitorios that were not covered by payments
+    // 2. Calculate additional LIVE punitorios on remaining unpaid rent since last payment
     let livePunitoryAmount = record.punitoryAmount || 0;
     let livePunitoryDays = record.punitoryDays || 0;
     const isFullyPaid = record.status === 'COMPLETE';
 
     if (!isFullyPaid && !record.punitoryForgiven) {
       try {
-        // Calculate unpaid rent (payments cover services first, then rent)
+        // Calculate unpaid rent (payments cover services first, then rent, then punitorios)
         const amountPaid = record.amountPaid || 0;
         const servicesTotal = record.servicesTotal || 0;
         const prevBalance = record.previousBalance || 0;
+        const frozenPunitory = record.punitoryAmount || 0;
         const totalCredits = amountPaid + prevBalance;
-        const paidTowardRent = Math.max(totalCredits - servicesTotal, 0);
-        const unpaidRent = Math.max(record.rentAmount - paidTowardRent, 0);
+        
+        // Credits cover: services → rent → frozen punitorios
+        let remaining = totalCredits;
+        const servicesCovered = Math.min(remaining, servicesTotal);
+        remaining -= servicesCovered;
+        const rentCovered = Math.min(remaining, record.rentAmount);
+        remaining -= rentCovered;
+        const punitoryCovered = Math.min(remaining, frozenPunitory);
+        remaining -= punitoryCovered;
+        
+        const unpaidRent = Math.max(record.rentAmount - rentCovered, 0);
+        const unpaidFrozenPunitory = Math.max(frozenPunitory - punitoryCovered, 0);
 
         // Get last payment date (if partial payment was made)
         let lastPaymentDate = null;
@@ -283,23 +313,31 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           lastPaymentDate = new Date(lastTx.paymentDate);
         }
 
-        // Calculate until today for live preview
+        // Calculate ADDITIONAL live punitorios on remaining unpaid rent since last payment
         const calculationDate = new Date();
-
         const holidays = await getHolidaysForYear(year);
-        const liveResult = calculatePunitoryV2(
-          calculationDate, // Calculate until today
-          month,
-          year,
-          unpaidRent, // Calculate on UNPAID rent only (not full rent)
-          contract.punitoryStartDay,
-          contract.punitoryGraceDay,
-          contract.punitoryPercent,
-          holidays,
-          lastPaymentDate // Pass last payment date for partial payment logic
-        );
-        livePunitoryAmount = liveResult.amount;
-        livePunitoryDays = liveResult.days;
+        
+        if (unpaidRent > 0) {
+          // There's still unpaid rent → calculate live punitorios on it
+          const liveResult = calculatePunitoryV2(
+            calculationDate,
+            month,
+            year,
+            unpaidRent,
+            contract.punitoryStartDay,
+            contract.punitoryGraceDay,
+            contract.punitoryPercent,
+            holidays,
+            lastPaymentDate
+          );
+          // Total punitorios = frozen unpaid + new live
+          livePunitoryAmount = unpaidFrozenPunitory + liveResult.amount;
+          livePunitoryDays = liveResult.days;
+        } else {
+          // Rent fully paid → only unpaid frozen punitorios remain
+          livePunitoryAmount = unpaidFrozenPunitory;
+          livePunitoryDays = record.punitoryDays || 0;
+        }
 
         console.log('\n[monthlyRecordService] LIVE PUNITORY CALCULATION:');
         console.log('  Record ID:', record.id);
@@ -307,7 +345,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         console.log('  Rent amount:', record.rentAmount);
         console.log('  Amount paid:', amountPaid);
         console.log('  Services total:', servicesTotal);
+        console.log('  Frozen punitory:', frozenPunitory);
         console.log('  Unpaid rent:', unpaidRent);
+        console.log('  Unpaid frozen punitory:', unpaidFrozenPunitory);
         console.log('  Last payment date:', lastPaymentDate);
         console.log('  Calculation date:', calculationDate);
         console.log('  Live punitory amount:', livePunitoryAmount);
@@ -467,11 +507,13 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
     },
   });
 
+  // Determine status: COMPLETE only if ALL is paid (rent + services + punitorios)
   let status = 'PENDING';
-  // Si hay deuda abierta, NUNCA marcar como COMPLETE (aunque amountPaid >= totalDue)
   if (openDebt) {
+    // Si hay deuda abierta, NUNCA marcar como COMPLETE
     status = amountPaid > 0 ? 'PARTIAL' : 'PENDING';
-  } else if (amountPaid >= Math.max(totalDue, 0) && amountPaid > 0) {
+  } else if (balance >= 0 && amountPaid > 0) {
+    // Paid enough to cover everything including punitorios
     status = 'COMPLETE';
   } else if (amountPaid > 0) {
     status = 'PARTIAL';

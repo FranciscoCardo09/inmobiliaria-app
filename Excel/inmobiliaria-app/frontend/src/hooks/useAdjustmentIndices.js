@@ -105,6 +105,55 @@ export const useAdjustmentIndices = (groupId) => {
     },
   })
 
+  // Get contracts for specific month
+  const getContractsForMonth = async (targetMonth) => {
+    const response = await api.get(
+      `/groups/${groupId}/adjustments/contracts-by-month/${targetMonth}`
+    )
+    return response.data.data
+  }
+
+  // Apply adjustment to specific month
+  const applyToMonthMutation = useMutation({
+    mutationFn: async ({ indexId, percentageIncrease, targetMonth }) => {
+      const response = await api.post(
+        `/groups/${groupId}/adjustment-indices/${indexId}/apply-to-month`,
+        { percentageIncrease, targetMonth }
+      )
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['adjustmentIndices', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al aplicar ajuste')
+    },
+  })
+
+  // Undo adjustment for specific month
+  const undoMonthMutation = useMutation({
+    mutationFn: async ({ indexId, targetMonth }) => {
+      const response = await api.post(
+        `/groups/${groupId}/adjustment-indices/${indexId}/undo-month`,
+        { targetMonth }
+      )
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['adjustmentIndices', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
+      toast.success('Ajuste revertido correctamente')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al deshacer ajuste')
+    },
+  })
+
   return {
     indices: indicesQuery.data || [],
     isLoading: indicesQuery.isLoading,
@@ -120,5 +169,10 @@ export const useAdjustmentIndices = (groupId) => {
     isApplying: applyAdjustmentMutation.isPending,
     applyAllNextMonth: applyAllMutation.mutate,
     isApplyingAll: applyAllMutation.isPending,
+    getContractsForMonth,
+    applyToMonth: applyToMonthMutation.mutate,
+    isApplyingToMonth: applyToMonthMutation.isPending,
+    undoMonth: undoMonthMutation.mutate,
+    isUndoingMonth: undoMonthMutation.isPending,
   }
 }

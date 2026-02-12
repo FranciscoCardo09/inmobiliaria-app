@@ -36,4 +36,32 @@ router.post(
   controller.applyAdjustment
 );
 
+// Apply adjustment to specific month
+router.post(
+  '/:id/apply-to-month',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.applyAdjustmentToMonth
+);
+
+// Apply adjustment to specific calendar month/year
+router.post(
+  '/:id/apply-to-calendar',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.applyAdjustmentToCalendar
+);
+
+// Undo adjustment for specific month
+router.post(
+  '/:id/undo-month',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.undoAdjustmentForMonth
+);
+
+// Undo adjustment for specific calendar month/year
+router.post(
+  '/:id/undo-calendar',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.undoAdjustmentForCalendar
+);
+
 module.exports = router;

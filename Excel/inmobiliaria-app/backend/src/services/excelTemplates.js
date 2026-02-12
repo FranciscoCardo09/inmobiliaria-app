@@ -77,7 +77,8 @@ const applyTotalRowStyle = (row) => {
 
 const generateLiquidacionExcel = async (dataArray) => {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'H&H Inmobiliaria';
+  const empresaNombre = dataArray[0]?.empresa?.nombre || 'Inmobiliaria';
+  workbook.creator = empresaNombre;
   workbook.created = new Date();
 
   // Summary sheet
@@ -141,7 +142,7 @@ const generateLiquidacionExcel = async (dataArray) => {
 
     // Header info
     sheet.mergeCells('A1:C1');
-    sheet.getCell('A1').value = 'H&H INMOBILIARIA';
+    sheet.getCell('A1').value = empresaNombre.toUpperCase();
     sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
 
     sheet.getCell('A3').value = 'Inquilino:';
@@ -157,7 +158,7 @@ const generateLiquidacionExcel = async (dataArray) => {
     sheet.getCell('B5').value = data.periodo.label;
 
     // Concepts table
-    const conceptHeaderRow = sheet.addRow([]);
+    sheet.addRow([]);
     sheet.addRow([]);
     const cHeaders = sheet.addRow(['Concepto', 'Base', 'Importe']);
     applyHeaderStyle(cHeaders);
@@ -201,7 +202,7 @@ const generateLiquidacionExcel = async (dataArray) => {
 
 const generateEstadoCuentasExcel = async (data) => {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'H&H Inmobiliaria';
+  workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
 
   const sheet = workbook.addWorksheet('Estado de Cuentas');
 
@@ -301,7 +302,7 @@ const generateEstadoCuentasExcel = async (data) => {
 
 const generateEvolucionIngresosExcel = async (data) => {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'H&H Inmobiliaria';
+  workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
 
   const sheet = workbook.addWorksheet('Evolución Ingresos');
 
@@ -358,8 +359,147 @@ const generateEvolucionIngresosExcel = async (data) => {
   return Buffer.from(buffer);
 };
 
+// ============================================
+// AJUSTES MES EXCEL
+// ============================================
+
+const generateAjustesMesExcel = async (data) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
+
+  const sheet = workbook.addWorksheet('Ajustes del Mes');
+
+  // Title
+  sheet.mergeCells('A1:F1');
+  sheet.getCell('A1').value = `AJUSTES DEL MES - ${data.periodo.label}`;
+  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').alignment = { horizontal: 'center' };
+
+  sheet.addRow([]);
+
+  // Headers
+  const headerRow = sheet.addRow(['Inquilino', 'Propiedad', 'Alquiler Anterior', 'Índice', '% Ajuste', 'Alquiler Nuevo', 'Estado']);
+  applyHeaderStyle(headerRow);
+
+  sheet.columns = [
+    { width: 25 },
+    { width: 30 },
+    { width: 18 },
+    { width: 18 },
+    { width: 14 },
+    { width: 18 },
+    { width: 12 },
+  ];
+
+  data.ajustes.forEach((a, i) => {
+    const row = sheet.addRow([
+      a.inquilino,
+      a.propiedad,
+      a.alquilerAnterior,
+      a.indice,
+      `${a.porcentajeAjuste}%`,
+      a.alquilerNuevo,
+      a.aplicado ? 'Aplicado' : 'Pendiente',
+    ]);
+    applyDataRowStyle(row, i);
+    row.getCell(3).numFmt = CURRENCY_FORMAT;
+    row.getCell(6).numFmt = CURRENCY_FORMAT;
+  });
+
+  if (data.ajustes.length === 0) {
+    sheet.addRow(['No hay ajustes programados para este período']);
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+};
+
+// ============================================
+// CONTROL MENSUAL EXCEL
+// ============================================
+
+const generateControlMensualExcel = async (data) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
+
+  const sheet = workbook.addWorksheet('Control Mensual');
+
+  // Title
+  sheet.mergeCells('A1:K1');
+  sheet.getCell('A1').value = `CONTROL MENSUAL - ${data.periodo.label}`;
+  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').alignment = { horizontal: 'center' };
+
+  sheet.addRow([]);
+
+  // Headers
+  const headerRow = sheet.addRow([
+    'Inquilino', 'Propiedad', 'Mes#', 'Alquiler', 'Servicios',
+    'Punitorios', 'Total', 'Pagado', 'Saldo', 'Estado', 'Fecha Pago',
+  ]);
+  applyHeaderStyle(headerRow);
+
+  sheet.columns = [
+    { width: 22 },
+    { width: 28 },
+    { width: 8 },
+    { width: 14 },
+    { width: 14 },
+    { width: 14 },
+    { width: 14 },
+    { width: 14 },
+    { width: 14 },
+    { width: 12 },
+    { width: 14 },
+  ];
+
+  data.registros.forEach((r, i) => {
+    const estadoLabel = r.isPaid ? 'Pagado' : r.estado === 'PARTIAL' ? 'Parcial' : 'Pendiente';
+    const fechaPago = r.fechaPago ? new Date(r.fechaPago).toLocaleDateString('es-AR') : '-';
+
+    const row = sheet.addRow([
+      r.inquilino,
+      r.propiedad,
+      r.mesContrato,
+      r.alquiler,
+      r.servicios,
+      r.punitorios,
+      r.total,
+      r.pagado,
+      r.saldo,
+      estadoLabel,
+      fechaPago,
+    ]);
+    applyDataRowStyle(row, i);
+    for (let c = 4; c <= 9; c++) {
+      row.getCell(c).numFmt = CURRENCY_FORMAT;
+    }
+  });
+
+  // Grand totals
+  const totalRow = sheet.addRow([
+    '', 'TOTALES', '',
+    data.totales.alquiler,
+    data.totales.servicios,
+    data.totales.punitorios,
+    data.totales.total,
+    data.totales.pagado,
+    data.totales.saldo,
+    '', '',
+  ]);
+  applyTotalRowStyle(totalRow);
+  for (let c = 4; c <= 9; c++) {
+    totalRow.getCell(c).numFmt = CURRENCY_FORMAT;
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+};
+
 module.exports = {
   generateLiquidacionExcel,
   generateEstadoCuentasExcel,
   generateEvolucionIngresosExcel,
+  generateAjustesMesExcel,
+  generateControlMensualExcel,
 };
