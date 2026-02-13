@@ -122,6 +122,36 @@ router.get(
 );
 
 // ============================================
+// DOCX Downloads
+// ============================================
+router.get(
+  '/liquidacion/docx',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionDOCX
+);
+
+router.get(
+  '/liquidacion-all/docx',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllDOCX
+);
+
+// ============================================
+// HTML Downloads
+// ============================================
+router.get(
+  '/liquidacion/html',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionHTMLEndpoint
+);
+
+router.get(
+  '/liquidacion-all/html',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllHTMLEndpoint
+);
+
+// ============================================
 // Excel Downloads
 // ============================================
 router.get(

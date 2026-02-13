@@ -219,7 +219,15 @@ export const useReportDownload = (groupId) => {
     return downloadFile(`/groups/${groupId}/reports/${path}`, filename)
   }
 
-  return { downloadPDF, downloadExcel }
+  const downloadDOCX = (path, filename) => {
+    return downloadFile(`/groups/${groupId}/reports/${path}`, filename)
+  }
+
+  const downloadHTML = (path, filename) => {
+    return downloadFile(`/groups/${groupId}/reports/${path}`, filename)
+  }
+
+  return { downloadPDF, downloadExcel, downloadDOCX, downloadHTML }
 }
 
 export const useSendReportEmail = (groupId) => {

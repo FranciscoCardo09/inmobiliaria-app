@@ -38,6 +38,7 @@ import {
   CalendarDaysIcon,
   ReceiptPercentIcon,
   BellAlertIcon,
+  CodeBracketIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -139,7 +140,7 @@ function LiquidacionTab({ groupId }) {
     year: String(year),
     propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined
   })
-  const { downloadPDF, downloadExcel } = useReportDownload(groupId)
+  const { downloadPDF, downloadExcel, downloadDOCX, downloadHTML } = useReportDownload(groupId)
 
   // Property options for multi-select
   const propertyOptions = useMemo(() => {
@@ -154,14 +155,25 @@ function LiquidacionTab({ groupId }) {
     return allData || []
   }, [allData])
 
-  const handleDownloadPDF = () => {
+  const buildParams = () => {
     const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
-    downloadPDF(`liquidacion-all/pdf?month=${month}&year=${year}${propertyIdsParam}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+    return `month=${month}&year=${year}${propertyIdsParam}`
+  }
+
+  const handleDownloadPDF = () => {
+    downloadPDF(`liquidacion-all/pdf?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+  }
+
+  const handleDownloadDOCX = () => {
+    downloadDOCX(`liquidacion-all/docx?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.docx`)
+  }
+
+  const handleDownloadHTML = () => {
+    downloadHTML(`liquidacion-all/html?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.html`)
   }
 
   const handleDownloadExcel = () => {
-    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
-    downloadExcel(`liquidacion/excel?month=${month}&year=${year}${propertyIdsParam}`, `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
+    downloadExcel(`liquidacion/excel?${buildParams()}`, `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
   }
 
   // Collect all transactions
@@ -208,14 +220,6 @@ function LiquidacionTab({ groupId }) {
               ))}
             </select>
           </div>
-          <div className="flex items-end gap-2">
-            <Button onClick={handleDownloadPDF} className="btn-sm btn-primary gap-1" disabled={!filteredData || filteredData.length === 0}>
-              <ArrowDownTrayIcon className="w-4 h-4" /> PDF
-            </Button>
-            <Button onClick={handleDownloadExcel} className="btn-sm btn-secondary gap-1" disabled={!filteredData || filteredData.length === 0}>
-              <TableCellsIcon className="w-4 h-4" /> Excel
-            </Button>
-          </div>
         </div>
         <div className="mt-4">
           <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
@@ -228,6 +232,28 @@ function LiquidacionTab({ groupId }) {
           {selectedPropertyIds.length > 0 && (
             <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
           )}
+        </div>
+
+        {/* Download buttons row */}
+        <div className="mt-4 pt-3 border-t border-base-300">
+          <p className="text-xs text-base-content/60 mb-2">Descargar liquidación</p>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleDownloadPDF} className="btn-sm btn-neutral gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+              <ArrowDownTrayIcon className="w-4 h-4" /> PDF
+            </Button>
+            <Button onClick={handleDownloadDOCX} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+              <DocumentTextIcon className="w-4 h-4" /> DOCX
+            </Button>
+            <Button onClick={handleDownloadHTML} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+              <CodeBracketIcon className="w-4 h-4" /> HTML
+            </Button>
+            <Button onClick={handleDownloadExcel} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+              <TableCellsIcon className="w-4 h-4" /> Excel
+            </Button>
+            <Button onClick={() => handleDownloadPDF() && window.print()} className="btn-sm btn-ghost gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+              <PrinterIcon className="w-4 h-4" /> Imprimir
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -366,10 +392,10 @@ function EstadoCuentasTab({ groupId }) {
           <div className="flex items-end gap-2">
             {contractId && (
               <>
-                <Button onClick={() => downloadPDF(`estado-cuentas/pdf?contractId=${contractId}`, 'estado-cuentas.pdf')} className="btn-sm btn-primary gap-1">
+                <Button onClick={() => downloadPDF(`estado-cuentas/pdf?contractId=${contractId}`, 'estado-cuentas.pdf')} className="btn-sm btn-neutral gap-1.5">
                   <ArrowDownTrayIcon className="w-4 h-4" /> PDF
                 </Button>
-                <Button onClick={() => downloadExcel(`estado-cuentas/excel?contractId=${contractId}`, 'estado-cuentas.xlsx')} className="btn-sm btn-secondary gap-1">
+                <Button onClick={() => downloadExcel(`estado-cuentas/excel?contractId=${contractId}`, 'estado-cuentas.xlsx')} className="btn-sm btn-outline gap-1.5">
                   <TableCellsIcon className="w-4 h-4" /> Excel
                 </Button>
               </>
@@ -541,7 +567,7 @@ function CartaDocumentoTab({ groupId }) {
           <Button
             onClick={handleGenerate}
             disabled={!contractId || isGenerating}
-            className="btn-primary gap-1"
+            className="btn-neutral gap-1.5"
           >
             <ArrowDownTrayIcon className="w-4 h-4" />
             {isGenerating ? 'Generando...' : 'Generar PDF'}
@@ -631,7 +657,7 @@ function PagoEfectivoTab({ groupId }) {
             <Button
               onClick={handleDownloadMulti}
               disabled={selectedIds.length === 0 || isDownloading}
-              className="btn-primary btn-sm gap-1"
+              className="btn-neutral btn-sm gap-1.5"
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
               {isDownloading ? 'Generando...' : `PDF Consolidado (${selectedIds.length})`}
@@ -733,7 +759,7 @@ function AjustesTab({ groupId }) {
           <div className="flex items-end">
             <Button
               onClick={() => downloadExcel(`ajustes-mes/excel?month=${month}&year=${year}`, `ajustes-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)}
-              className="btn-sm btn-secondary gap-1"
+              className="btn-sm btn-neutral gap-1.5"
               disabled={!data}
             >
               <TableCellsIcon className="w-4 h-4" /> Excel
@@ -824,7 +850,7 @@ function ControlMensualTab({ groupId }) {
           <div className="flex items-end">
             <Button
               onClick={() => downloadExcel(`control-mensual/excel?month=${month}&year=${year}`, `control-mensual-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)}
-              className="btn-sm btn-secondary gap-1"
+              className="btn-sm btn-neutral gap-1.5"
               disabled={!data}
             >
               <TableCellsIcon className="w-4 h-4" /> Excel
@@ -952,7 +978,7 @@ function ImpuestosTab({ groupId }) {
   return (
     <div className="space-y-4">
       <Card title="Reporte de Impuestos">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
           <div>
             <label className="label"><span className="label-text text-xs">Mes</span></label>
             <select className="select select-bordered select-sm w-full" value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
@@ -970,11 +996,7 @@ function ImpuestosTab({ groupId }) {
             </select>
           </div>
           <div className="flex items-end">
-            <Button
-              onClick={handleDownloadPDF}
-              className="btn-sm btn-primary gap-1"
-              disabled={!data}
-            >
+            <Button onClick={handleDownloadPDF} className="btn-sm btn-neutral gap-1.5" disabled={!data}>
               <ArrowDownTrayIcon className="w-4 h-4" /> PDF
             </Button>
           </div>
@@ -1086,7 +1108,7 @@ function VencimientosTab({ groupId }) {
           <p className="text-sm text-base-content/60">Contratos que vencen en los próximos 2 meses</p>
           <Button
             onClick={() => downloadPDF('vencimientos/pdf', 'vencimientos.pdf')}
-            className="btn-sm btn-primary gap-1"
+            className="btn-sm btn-neutral gap-1.5"
             disabled={!data}
           >
             <ArrowDownTrayIcon className="w-4 h-4" /> PDF

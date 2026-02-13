@@ -2,41 +2,56 @@
 const ExcelJS = require('exceljs');
 const { MONTH_NAMES } = require('./reportDataService');
 
+// Professional minimalist palette (black/gray)
 const HEADER_FILL = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FF003087' },
+  fgColor: { argb: 'FF333333' },
 };
 
 const HEADER_FONT = {
   bold: true,
   color: { argb: 'FFFFFFFF' },
   size: 10,
+  name: 'Arial',
 };
 
 const TOTAL_FILL = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FF003087' },
+  fgColor: { argb: 'FF000000' },
 };
 
 const TOTAL_FONT = {
   bold: true,
   color: { argb: 'FFFFFFFF' },
   size: 11,
+  name: 'Arial',
 };
 
 const ALT_ROW_FILL = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FFF0F0F0' },
+  fgColor: { argb: 'FFF5F5F5' },
 };
 
 const BORDER_STYLE = {
-  top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-  left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-  bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-  right: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+  top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+  left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+  bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+  right: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+};
+
+const DATA_FONT = {
+  size: 11,
+  name: 'Arial',
+};
+
+const TITLE_FONT = {
+  bold: true,
+  size: 14,
+  color: { argb: 'FF000000' },
+  name: 'Arial',
 };
 
 const CURRENCY_FORMAT = '#,##0.00';
@@ -55,6 +70,7 @@ const applyDataRowStyle = (row, rowIndex) => {
   row.eachCell((cell) => {
     cell.border = BORDER_STYLE;
     cell.alignment = { vertical: 'middle' };
+    cell.font = DATA_FONT;
     if (rowIndex % 2 === 0) {
       cell.fill = ALT_ROW_FILL;
     }
@@ -88,7 +104,7 @@ const generateLiquidacionExcel = async (dataArray) => {
   summarySheet.mergeCells('A1:F1');
   const titleCell = summarySheet.getCell('A1');
   titleCell.value = `LIQUIDACIONES - ${dataArray[0]?.periodo?.label || ''}`;
-  titleCell.font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  titleCell.font = TITLE_FONT;
   titleCell.alignment = { horizontal: 'center' };
 
   // Headers
@@ -143,7 +159,7 @@ const generateLiquidacionExcel = async (dataArray) => {
     // Header info
     sheet.mergeCells('A1:C1');
     sheet.getCell('A1').value = empresaNombre.toUpperCase();
-    sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+    sheet.getCell('A1').font = TITLE_FONT;
 
     sheet.getCell('A3').value = 'Inquilino:';
     sheet.getCell('A3').font = { bold: true };
@@ -209,7 +225,7 @@ const generateEstadoCuentasExcel = async (data) => {
   // Title
   sheet.mergeCells('A1:G1');
   sheet.getCell('A1').value = 'ESTADO DE CUENTAS';
-  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').font = TITLE_FONT;
   sheet.getCell('A1').alignment = { horizontal: 'center' };
 
   // Info
@@ -309,7 +325,7 @@ const generateEvolucionIngresosExcel = async (data) => {
   // Title
   sheet.mergeCells('A1:F1');
   sheet.getCell('A1').value = `EVOLUCIÓN DE INGRESOS - ${data.anio}`;
-  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').font = TITLE_FONT;
   sheet.getCell('A1').alignment = { horizontal: 'center' };
 
   sheet.addRow([]);
@@ -372,7 +388,7 @@ const generateAjustesMesExcel = async (data) => {
   // Title
   sheet.mergeCells('A1:F1');
   sheet.getCell('A1').value = `AJUSTES DEL MES - ${data.periodo.label}`;
-  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').font = TITLE_FONT;
   sheet.getCell('A1').alignment = { horizontal: 'center' };
 
   sheet.addRow([]);
@@ -427,7 +443,7 @@ const generateControlMensualExcel = async (data) => {
   // Title
   sheet.mergeCells('A1:K1');
   sheet.getCell('A1').value = `CONTROL MENSUAL - ${data.periodo.label}`;
-  sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF003087' } };
+  sheet.getCell('A1').font = TITLE_FONT;
   sheet.getCell('A1').alignment = { horizontal: 'center' };
 
   sheet.addRow([]);

@@ -1,45 +1,42 @@
-// PDF Templates - Modern minimal design
+// PDF Templates - Professional minimalist design (black/gray)
 const PDFDocument = require('pdfkit');
 const { MONTH_NAMES } = require('./reportDataService');
 
 // ============================================
-// DESIGN TOKENS - Modern minimal palette
+// DESIGN TOKENS - Professional minimalist (black/gray)
 // ============================================
 
 const C = {
-  // Primary
-  brand: '#2563EB',
-  brandDark: '#1D4ED8',
-  brandLight: '#EFF6FF',
+  // Primary accent - used sparingly (5%) for logo/titles only
+  brand: '#2B6CB0',
+  brandDark: '#1E4E8C',
+  brandLight: '#F0F4F8',
 
-  // Gradients (used as solid fallbacks)
-  gradStart: '#2563EB',
-  gradEnd: '#7C3AED',
-
-  // Text
-  black: '#0F172A',
-  dark: '#1E293B',
-  medium: '#475569',
-  muted: '#94A3B8',
-  light: '#CBD5E1',
+  // Text hierarchy - 90% black, rest gray
+  black: '#000000',
+  dark: '#333333',
+  medium: '#666666',
+  muted: '#999999',
+  light: '#CCCCCC',
 
   // Backgrounds
   white: '#FFFFFF',
-  snow: '#F8FAFC',
-  cloud: '#F1F5F9',
-  line: '#E2E8F0',
+  snow: '#FAFAFA',
+  cloud: '#F5F5F5',
+  line: '#E0E0E0',
 
-  // Status
-  green: '#10B981',
-  greenBg: '#F0FDF4',
-  amber: '#F59E0B',
-  amberBg: '#FFFBEB',
-  red: '#EF4444',
-  redBg: '#FEF2F2',
-  purple: '#8B5CF6',
+  // Status (muted versions)
+  green: '#2D7A4F',
+  greenBg: '#F0F7F3',
+  amber: '#8B6914',
+  amberBg: '#FBF8F0',
+  red: '#B91C1C',
+  redBg: '#FDF2F2',
+  purple: '#6B4FA0',
 };
 
-const PAGE = { width: 595.28, height: 841.89, margin: 50 };
+// A4 with 20mm margins (56.69pt)
+const PAGE = { width: 595.28, height: 841.89, margin: 56.69 };
 const W = PAGE.width - PAGE.margin * 2; // content width
 
 const F = { r: 'Helvetica', b: 'Helvetica-Bold', i: 'Helvetica-Oblique' };
@@ -85,46 +82,46 @@ const strokeR = (doc, x, y, w, h, color, lw = 0.75, r = 6) => {
 };
 
 // ============================================
-// HEADER - Clean modern with left accent
+// HEADER - Professional minimalist (black/gray)
 // ============================================
 
 const drawHeader = (doc, emp) => {
-  // Thin top gradient line
-  doc.rect(0, 0, PAGE.width, 3).fill(C.brand);
+  // Thin top line (black, not colored)
+  doc.rect(0, 0, PAGE.width, 1.5).fill(C.black);
 
-  // White header area with bottom border
-  doc.rect(0, 3, PAGE.width, 64).fill(C.white);
-  doc.strokeColor(C.line).lineWidth(0.5).moveTo(0, 67).lineTo(PAGE.width, 67).stroke();
+  // White header area with bottom rule
+  doc.rect(0, 1.5, PAGE.width, 64).fill(C.white);
+  doc.strokeColor(C.black).lineWidth(0.5).moveTo(PAGE.margin, 66).lineTo(PAGE.width - PAGE.margin, 66).stroke();
 
-  // Logo
+  // Logo - 25x25mm (approx 71pt) B/N sutil, top-left
   let tx = PAGE.margin;
   if (emp.logo && emp.logo.startsWith('data:image')) {
     try {
       const buf = Buffer.from(emp.logo.split(',')[1], 'base64');
-      doc.image(buf, PAGE.margin, 10, { height: 48 });
+      doc.image(buf, PAGE.margin, 8, { height: 50 });
       tx = PAGE.margin + 58;
     } catch (e) { /* skip */ }
   }
 
-  // Company name - clean and bold
-  doc.font(F.b).fontSize(16).fillColor(C.black)
-    .text(emp.nombre || 'Inmobiliaria', tx, 14, { width: 260 });
+  // Company name - bold black
+  doc.font(F.b).fontSize(14).fillColor(C.black)
+    .text(emp.nombre || 'Inmobiliaria', tx, 12, { width: 260 });
 
-  // Subtitle line
-  const sub = [emp.direccion, emp.ciudad].filter(Boolean).join(' · ');
-  if (sub) {
-    doc.font(F.r).fontSize(7.5).fillColor(C.muted).text(sub, tx, 34, { width: 260 });
+  // Contact line
+  const parts = [emp.direccion, emp.ciudad].filter(Boolean).join(' | ');
+  if (parts) {
+    doc.font(F.r).fontSize(8).fillColor(C.dark).text(parts, tx, 30, { width: 260 });
   }
 
-  // Right side details
+  // Right side - CUIT, phone, email
   const rx = PAGE.width - PAGE.margin - 160;
   let ry = 12;
-  doc.font(F.r).fontSize(7.5).fillColor(C.medium);
+  doc.font(F.r).fontSize(8).fillColor(C.dark);
   if (emp.cuit) { doc.text(`CUIT ${emp.cuit}`, rx, ry, { width: 160, align: 'right' }); ry += 12; }
   if (emp.telefono) { doc.text(emp.telefono, rx, ry, { width: 160, align: 'right' }); ry += 12; }
   if (emp.email) { doc.text(emp.email, rx, ry, { width: 160, align: 'right' }); ry += 12; }
 
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
   return 84;
 };
 
@@ -134,15 +131,15 @@ const drawHeader = (doc, emp) => {
 
 const drawFooter = (doc, emp, pg) => {
   const fy = PAGE.height - 30;
-  doc.strokeColor(C.line).lineWidth(0.3).moveTo(PAGE.margin, fy - 6).lineTo(PAGE.width - PAGE.margin, fy - 6).stroke();
+  doc.strokeColor(C.light).lineWidth(0.3).moveTo(PAGE.margin, fy - 6).lineTo(PAGE.width - PAGE.margin, fy - 6).stroke();
 
-  const parts = [emp.nombre || 'Inmobiliaria'];
+  const parts = ['Generado por ' + (emp.nombre || 'Inmobiliaria')];
   if (emp.cuit) parts.push(`CUIT ${emp.cuit}`);
 
-  doc.font(F.r).fontSize(6).fillColor(C.muted)
-    .text(parts.join('  ·  '), PAGE.margin, fy, { width: W - 40 });
+  doc.font(F.r).fontSize(7).fillColor(C.muted)
+    .text(parts.join('  |  '), PAGE.margin, fy, { width: W - 40 });
   if (pg) doc.text(`${pg}`, PAGE.width - PAGE.margin - 30, fy, { width: 30, align: 'right' });
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
 };
 
 // ============================================
@@ -151,102 +148,95 @@ const drawFooter = (doc, emp, pg) => {
 
 const drawTitle = (doc, y, title, sub) => {
   doc.font(F.b).fontSize(13).fillColor(C.black)
-    .text(title.toUpperCase(), PAGE.margin, y, { width: W, align: 'center', characterSpacing: 2 });
-  y += 20;
+    .text(title.toUpperCase(), PAGE.margin, y, { width: W, align: 'left', characterSpacing: 1.5 });
+  y += 18;
 
   if (sub) {
-    doc.font(F.r).fontSize(9).fillColor(C.muted)
-      .text(sub, PAGE.margin, y, { width: W, align: 'center' });
+    doc.font(F.r).fontSize(9).fillColor(C.medium)
+      .text(sub, PAGE.margin, y, { width: W, align: 'left' });
     y += 14;
   }
 
-  // Thin accent line
-  const lw = 40;
-  doc.strokeColor(C.brand).lineWidth(1.5)
-    .moveTo((PAGE.width - lw) / 2, y).lineTo((PAGE.width + lw) / 2, y).stroke();
+  // Thin black rule
+  doc.strokeColor(C.black).lineWidth(0.8)
+    .moveTo(PAGE.margin, y).lineTo(PAGE.width - PAGE.margin, y).stroke();
 
-  return y + 20;
+  return y + 16;
 };
 
 // ============================================
-// INFO CARD - Minimal with left accent
+// INFO CARD - Clean with thin border
 // ============================================
 
 const drawInfo = (doc, y, left, right) => {
   const rows = Math.max(left.length, (right || []).length);
   const h = rows * 16 + 16;
 
-  // Card background
-  fillR(doc, PAGE.margin, y, W, h, C.snow);
-  // Left accent bar
-  doc.save(); doc.rect(PAGE.margin, y + 4, 3, h - 8).fill(C.brand); doc.restore();
+  // Light background with thin border
+  fillR(doc, PAGE.margin, y, W, h, C.snow, 2);
+  strokeR(doc, PAGE.margin, y, W, h, C.line, 0.5, 2);
 
-  const lx = PAGE.margin + 16;
+  const lx = PAGE.margin + 14;
   const mx = PAGE.margin + W / 2 + 8;
   let ly = y + 10;
 
   for (const [k, v] of left) {
-    doc.font(F.r).fontSize(7.5).fillColor(C.muted).text(k, lx, ly);
-    doc.font(F.b).fontSize(8.5).fillColor(C.dark).text(v || '-', lx + 65, ly, { width: W / 2 - 90 });
+    doc.font(F.r).fontSize(8).fillColor(C.medium).text(k, lx, ly);
+    doc.font(F.b).fontSize(9).fillColor(C.black).text(v || '-', lx + 70, ly, { width: W / 2 - 90 });
     ly += 16;
   }
 
   if (right) {
     let ry2 = y + 10;
     for (const [k, v] of right) {
-      doc.font(F.r).fontSize(7.5).fillColor(C.muted).text(k, mx, ry2);
-      doc.font(F.b).fontSize(8.5).fillColor(C.dark).text(v || '-', mx + 65, ry2, { width: W / 2 - 90 });
+      doc.font(F.r).fontSize(8).fillColor(C.medium).text(k, mx, ry2);
+      doc.font(F.b).fontSize(9).fillColor(C.black).text(v || '-', mx + 70, ry2, { width: W / 2 - 90 });
       ry2 += 16;
     }
   }
 
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
   return y + h + 12;
 };
 
 // ============================================
-// METRIC CARDS - Clean with accent stripe
+// METRIC CARDS - Minimalist with thin border
 // ============================================
 
 const drawMetrics = (doc, y, items) => {
   const gap = 10;
   const n = items.length;
   const bw = (W - gap * (n - 1)) / n;
-  const bh = 54;
+  const bh = 50;
 
   items.forEach((it, i) => {
     const bx = PAGE.margin + i * (bw + gap);
 
-    fillR(doc, bx, y, bw, bh, C.white);
-    strokeR(doc, bx, y, bw, bh, C.line, 0.5);
-
-    // Top accent stripe
-    doc.save();
-    doc.rect(bx + 8, y, bw - 16, 2.5).fill(it.accent || C.brand);
-    doc.restore();
+    fillR(doc, bx, y, bw, bh, C.white, 2);
+    strokeR(doc, bx, y, bw, bh, C.line, 0.5, 2);
 
     // Label
-    doc.font(F.r).fontSize(6.5).fillColor(C.muted)
-      .text(it.label.toUpperCase(), bx + 10, y + 12, { width: bw - 20, characterSpacing: 0.8 });
+    doc.font(F.r).fontSize(7).fillColor(C.medium)
+      .text(it.label.toUpperCase(), bx + 10, y + 10, { width: bw - 20, characterSpacing: 0.5 });
 
     // Value
-    doc.font(F.b).fontSize(15).fillColor(it.color || C.black)
-      .text(it.value, bx + 10, y + 28, { width: bw - 20 });
+    doc.font(F.b).fontSize(14).fillColor(C.black)
+      .text(it.value, bx + 10, y + 26, { width: bw - 20 });
   });
 
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
   return y + bh + 14;
 };
 
 // ============================================
-// TABLE - Modern minimal (no heavy backgrounds)
+// TABLE - Professional black/gray (no color fills)
 // ============================================
 
 const drawTable = (doc, startY, headers, rows, opts = {}) => {
   const {
     colWidths = null, totalRow = null,
-    fontSize = 8, headerFontSize = 7,
-    rowHeight = 22, headerHeight = 28,
+    fontSize = 8.5, headerFontSize = 7.5,
+    rowHeight = 22, headerHeight = 26,
     colAligns = null,
   } = opts;
 
@@ -260,40 +250,48 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
     return false;
   };
 
-  // Header - light background, no heavy color
+  // Header - black text on light gray background
   newPage(headerHeight);
-  fillR(doc, PAGE.margin, y, W, headerHeight, C.cloud, 4);
+  fillR(doc, PAGE.margin, y, W, headerHeight, C.cloud, 0);
 
   let x = PAGE.margin;
-  doc.font(F.b).fontSize(headerFontSize).fillColor(C.medium);
+  doc.font(F.b).fontSize(headerFontSize).fillColor(C.dark);
   headers.forEach((h, i) => {
-    doc.text(h.toUpperCase(), x + 10, y + (headerHeight - headerFontSize) / 2, {
-      width: widths[i] - 20, align: aligns[i], characterSpacing: 0.6,
+    doc.text(h.toUpperCase(), x + 8, y + (headerHeight - headerFontSize) / 2, {
+      width: widths[i] - 16, align: aligns[i], characterSpacing: 0.4,
     });
     x += widths[i];
   });
   y += headerHeight;
 
-  // Rows - clean with just bottom borders
-  rows.forEach((row) => {
+  // Bottom line after header
+  doc.strokeColor(C.black).lineWidth(0.5)
+    .moveTo(PAGE.margin, y).lineTo(PAGE.width - PAGE.margin, y).stroke();
+
+  // Rows - alternating light gray, bottom borders
+  rows.forEach((row, rowIdx) => {
     newPage(rowHeight);
 
-    // Bottom border only
+    // Alternating row background
+    if (rowIdx % 2 === 1) {
+      doc.rect(PAGE.margin, y, W, rowHeight).fill(C.snow);
+    }
+
+    // Bottom border
     doc.strokeColor(C.line).lineWidth(0.3)
-      .moveTo(PAGE.margin + 8, y + rowHeight - 0.5)
-      .lineTo(PAGE.width - PAGE.margin - 8, y + rowHeight - 0.5).stroke();
+      .moveTo(PAGE.margin, y + rowHeight - 0.5)
+      .lineTo(PAGE.width - PAGE.margin, y + rowHeight - 0.5).stroke();
 
     x = PAGE.margin;
-    doc.font(F.r).fontSize(fontSize).fillColor(C.dark);
+    doc.font(F.r).fontSize(fontSize).fillColor(C.black);
 
     row.forEach((cell, i) => {
       const str = String(cell ?? '-');
-      // First column slightly bolder
-      if (i === 0) doc.font(F.r).fillColor(C.dark);
-      else doc.font(F.r).fillColor(C.medium);
+      if (i === 0) doc.font(F.r).fillColor(C.black);
+      else doc.font(F.r).fillColor(C.dark);
 
-      doc.text(str, x + 10, y + (rowHeight - fontSize) / 2, {
-        width: widths[i] - 20, align: aligns[i],
+      doc.text(str, x + 8, y + (rowHeight - fontSize) / 2, {
+        width: widths[i] - 16, align: aligns[i],
       });
       x += widths[i];
     });
@@ -301,25 +299,25 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
     y += rowHeight;
   });
 
-  // Total row - accent background
+  // Total row - black background, white text
   if (totalRow) {
     newPage(headerHeight + 4);
     y += 4;
 
-    fillR(doc, PAGE.margin, y, W, headerHeight, C.brand, 4);
+    fillR(doc, PAGE.margin, y, W, headerHeight, C.black, 0);
 
     x = PAGE.margin;
-    doc.font(F.b).fontSize(9.5).fillColor(C.white);
+    doc.font(F.b).fontSize(10).fillColor(C.white);
     totalRow.forEach((cell, i) => {
-      doc.text(String(cell ?? ''), x + 10, y + (headerHeight - 9.5) / 2, {
-        width: widths[i] - 20, align: aligns[i],
+      doc.text(String(cell ?? ''), x + 8, y + (headerHeight - 10) / 2, {
+        width: widths[i] - 16, align: aligns[i],
       });
       x += widths[i];
     });
     y += headerHeight;
   }
 
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
   return y;
 };
 
@@ -328,11 +326,11 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
 // ============================================
 
 const drawSection = (doc, y, title) => {
-  doc.font(F.b).fontSize(10).fillColor(C.brand).text(title, PAGE.margin, y);
+  doc.font(F.b).fontSize(10).fillColor(C.black).text(title.toUpperCase(), PAGE.margin, y, { characterSpacing: 0.5 });
   y += 14;
-  doc.strokeColor(C.line).lineWidth(0.3).moveTo(PAGE.margin, y).lineTo(PAGE.width - PAGE.margin, y).stroke();
+  doc.strokeColor(C.black).lineWidth(0.5).moveTo(PAGE.margin, y).lineTo(PAGE.width - PAGE.margin, y).stroke();
   y += 10;
-  doc.fillColor(C.dark);
+  doc.fillColor(C.black);
   return y;
 };
 
@@ -343,9 +341,10 @@ const drawSection = (doc, y, title) => {
 const drawPill = (doc, x, y, label, color, bg) => {
   doc.font(F.b).fontSize(7);
   const pw = doc.widthOfString(label) + 14;
-  fillR(doc, x, y, pw, 15, bg, 7);
-  doc.fillColor(color).text(label, x + 7, y + 3.5);
-  doc.fillColor(C.dark);
+  fillR(doc, x, y, pw, 15, bg || C.cloud, 3);
+  strokeR(doc, x, y, pw, 15, C.line, 0.3, 3);
+  doc.fillColor(color || C.black).text(label, x + 7, y + 3.5);
+  doc.fillColor(C.black);
   return x + pw + 6;
 };
 
@@ -383,20 +382,19 @@ const generateLiquidacionPDF = (data) => {
       colAligns: ['left', 'right']
     });
 
-    // Total
+    // Total - black box
     y += 8;
-    const totalH = 36;
-    fillR(doc, PAGE.margin, y, W, totalH, C.brandLight);
-    strokeR(doc, PAGE.margin, y, W, totalH, C.brand, 1);
-    
-    doc.font(F.b).fontSize(11).fillColor(C.brandDark)
-      .text('TOTAL', PAGE.margin + 16, y + 11);
-    doc.text(fmt(data.total, data.currency), PAGE.margin + 16, y + 11, { width: W - 32, align: 'right' });
+    const totalH = 34;
+    fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
+
+    doc.font(F.b).fontSize(11).fillColor(C.white)
+      .text('TOTAL A PAGAR', PAGE.margin + 14, y + 10);
+    doc.text(fmt(data.total, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
     // Amount in words
     if (data.totalEnLetras) {
-      doc.font(F.r).fontSize(7.5).fillColor(C.medium)
+      doc.font(F.r).fontSize(8).fillColor(C.dark)
         .text(`Son: ${data.totalEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
       y += 18;
     }
@@ -404,48 +402,40 @@ const generateLiquidacionPDF = (data) => {
     // Payments section
     if (data.transacciones && data.transacciones.length > 0) {
       y += 12;
-      
-      // Section title
-      doc.font(F.b).fontSize(9.5).fillColor(C.black).text('Pagos Registrados', PAGE.margin, y);
-      y += 12;
-      const lw = 100;
-      doc.strokeColor(C.green).lineWidth(1.2)
-        .moveTo(PAGE.margin, y).lineTo(PAGE.margin + lw, y).stroke();
-      y += 14;
+      y = drawSection(doc, y, 'Pagos Registrados');
 
       // Payments table
       const payRows = data.transacciones.map(t => {
         const metodo = t.metodo === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo';
         return [fmtDate(t.fecha), metodo, fmt(t.monto, data.currency)];
       });
-      
+
       y = drawTable(doc, y, ['Fecha', 'Método', 'Monto'], payRows, {
         colWidths: [W * 0.3, W * 0.35, W * 0.35],
-        fontSize: 8,
+        fontSize: 8.5,
         headerFontSize: 7.5,
         colAligns: ['left', 'left', 'right']
       });
 
       // Payment summary
       y += 12;
-      fillR(doc, PAGE.margin, y, W, 56, C.snow);
-      
-      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
+      fillR(doc, PAGE.margin, y, W, 50, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, 50, C.line, 0.5, 0);
+
+      doc.font(F.b).fontSize(9).fillColor(C.black)
         .text('Total Pagado:', PAGE.margin + 12, y + 10);
-      doc.fillColor(C.green)
-        .text(fmt(data.amountPaid, data.currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
-      
+      doc.text(fmt(data.amountPaid, data.currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+
       if (data.balance !== 0) {
         const balLabel = data.balance > 0 ? 'Saldo a Favor:' : 'Saldo Pendiente:';
-        const balColor = data.balance > 0 ? C.green : C.red;
-        
+
         doc.fillColor(C.dark)
           .text(balLabel, PAGE.margin + 12, y + 28);
-        doc.fillColor(balColor)
+        doc.font(F.b).fillColor(C.black)
           .text(fmt(Math.abs(data.balance), data.currency), PAGE.margin + 12, y + 28, { width: W - 24, align: 'right' });
       }
-      
-      y += 56 + 10;
+
+      y += 50 + 10;
     }
 
     drawFooter(doc, data.empresa, 1);
@@ -465,9 +455,9 @@ const generateEstadoCuentasPDF = (data) => {
     y = drawTitle(doc, y, 'Estado de Cuentas', `${data.inquilino.nombre} · ${data.propiedad.direccion}`);
 
     y = drawMetrics(doc, y, [
-      { label: 'Total Pagado', value: fmt(data.resumen.totalPagado, data.currency), color: C.green, accent: C.green },
-      { label: 'Total Adeudado', value: fmt(data.resumen.totalAdeudado, data.currency), color: C.red, accent: C.red },
-      { label: 'Balance', value: fmt(data.resumen.balance, data.currency), color: data.resumen.balance >= 0 ? C.green : C.red, accent: C.brand },
+      { label: 'Total Pagado', value: fmt(data.resumen.totalPagado, data.currency) },
+      { label: 'Total Adeudado', value: fmt(data.resumen.totalAdeudado, data.currency) },
+      { label: 'Balance', value: fmt(data.resumen.balance, data.currency) },
     ]);
 
     const rows = data.historial.map(h => [
@@ -498,21 +488,20 @@ const generateResumenEjecutivoPDF = (data) => {
     y = drawTitle(doc, y, 'Resumen Ejecutivo', data.periodo.label);
 
     y = drawMetrics(doc, y, [
-      { label: 'Ingresos', value: fmt(data.kpis.ingresosMes, data.currency), color: C.green, accent: C.green },
-      { label: 'Facturado', value: fmt(data.kpis.totalDueMes, data.currency), color: C.brand, accent: C.brand },
-      { label: 'Cobranza', value: `${data.kpis.cobranza}%`, color: C.black, accent: C.brand },
+      { label: 'Ingresos', value: fmt(data.kpis.ingresosMes, data.currency) },
+      { label: 'Facturado', value: fmt(data.kpis.totalDueMes, data.currency) },
+      { label: 'Cobranza', value: `${data.kpis.cobranza}%` },
     ]);
     y = drawMetrics(doc, y, [
-      { label: 'Deuda Total', value: fmt(data.kpis.totalDeuda, data.currency), color: C.red, accent: C.red },
-      { label: 'Punitorios', value: fmt(data.kpis.punitoryMes, data.currency), color: C.amber, accent: C.amber },
-      { label: 'Ocupación', value: `${data.kpis.ocupacion}%`, color: C.black, accent: C.purple },
+      { label: 'Deuda Total', value: fmt(data.kpis.totalDeuda, data.currency) },
+      { label: 'Punitorios', value: fmt(data.kpis.punitoryMes, data.currency) },
+      { label: 'Ocupación', value: `${data.kpis.ocupacion}%` },
     ]);
 
     if (data.kpis.variacionIngresos !== null) {
       const v = parseFloat(data.kpis.variacionIngresos);
-      const vc = v >= 0 ? C.green : C.red;
-      doc.font(F.r).fontSize(8.5).fillColor(C.muted).text('Variación vs. mes anterior: ', PAGE.margin, y, { continued: true });
-      doc.font(F.b).fillColor(vc).text(`${v >= 0 ? '+' : ''}${data.kpis.variacionIngresos}%`);
+      doc.font(F.r).fontSize(9).fillColor(C.medium).text('Variación vs. mes anterior: ', PAGE.margin, y, { continued: true });
+      doc.font(F.b).fillColor(C.black).text(`${v >= 0 ? '+' : ''}${data.kpis.variacionIngresos}%`);
       y += 20;
     }
 
@@ -855,8 +844,8 @@ const generateImpuestosPDF = (data) => {
 
     // Metric card with grand total
     y = drawMetrics(doc, y, [
-      { label: 'Total Impuestos', value: fmt(data.grandTotal, data.currency), color: C.brand, accent: C.brand },
-      { label: 'Propiedades', value: String(data.impuestos.length), color: C.dark, accent: C.purple },
+      { label: 'Total Impuestos', value: fmt(data.grandTotal, data.currency) },
+      { label: 'Propiedades', value: String(data.impuestos.length) },
     ]);
 
     // ── Detail by property ──
@@ -872,22 +861,22 @@ const generateImpuestosPDF = (data) => {
     for (const item of data.impuestos) {
       checkNewPage(70);
 
-      // Property card header with left accent
+      // Property card - thin border, no color accent
       const itemRows = item.impuestos.length;
       const cardH = itemRows * 20 + 34;
-      fillR(doc, PAGE.margin, y, W, cardH, C.snow);
-      doc.save(); doc.rect(PAGE.margin, y + 4, 3, cardH - 8).fill(C.brand); doc.restore();
+      fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
 
       // Property - Tenant title
-      doc.font(F.b).fontSize(9).fillColor(C.dark)
-        .text(`${item.propiedad}`, PAGE.margin + 16, y + 8, { width: W * 0.6 });
-      doc.font(F.r).fontSize(8).fillColor(C.muted)
-        .text(item.inquilino, PAGE.margin + 16, y + 20, { width: W * 0.6 });
+      doc.font(F.b).fontSize(9).fillColor(C.black)
+        .text(`${item.propiedad}`, PAGE.margin + 12, y + 8, { width: W * 0.6 });
+      doc.font(F.r).fontSize(8).fillColor(C.medium)
+        .text(item.inquilino, PAGE.margin + 12, y + 20, { width: W * 0.6 });
 
       // Subtotal on right side of header
       const subtotal = item.impuestos.reduce((s, i) => s + (i.monto || 0), 0);
-      doc.font(F.b).fontSize(10).fillColor(C.brand)
-        .text(fmt(subtotal, data.currency), PAGE.margin + 16, y + 8, { width: W - 32, align: 'right' });
+      doc.font(F.b).fontSize(10).fillColor(C.black)
+        .text(fmt(subtotal, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
 
       let iy = y + 36;
 
@@ -906,18 +895,17 @@ const generateImpuestosPDF = (data) => {
     // ── Total ──
     checkNewPage(60);
     y += 4;
-    const totalH = 36;
-    fillR(doc, PAGE.margin, y, W, totalH, C.brandLight);
-    strokeR(doc, PAGE.margin, y, W, totalH, C.brand, 1);
+    const totalH = 34;
+    fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
-    doc.font(F.b).fontSize(11).fillColor(C.brandDark)
-      .text('TOTAL', PAGE.margin + 16, y + 11);
-    doc.text(fmt(data.grandTotal, data.currency), PAGE.margin + 16, y + 11, { width: W - 32, align: 'right' });
+    doc.font(F.b).fontSize(11).fillColor(C.white)
+      .text('TOTAL', PAGE.margin + 14, y + 10);
+    doc.text(fmt(data.grandTotal, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
     // Amount in words
     if (data.grandTotalEnLetras) {
-      doc.font(F.r).fontSize(7.5).fillColor(C.medium)
+      doc.font(F.r).fontSize(8).fillColor(C.dark)
         .text(`Son: ${data.grandTotalEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
       y += 20;
     }
@@ -991,12 +979,13 @@ const generateVencimientosPDF = (data) => {
 
     if (data.vencimientos.length === 0) {
       y += 16;
-      fillR(doc, PAGE.margin, y, W, 44, C.greenBg);
-      doc.font(F.r).fontSize(10).fillColor(C.green)
+      fillR(doc, PAGE.margin, y, W, 44, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, 44, C.line, 0.5, 0);
+      doc.font(F.r).fontSize(10).fillColor(C.dark)
         .text('No hay contratos por vencer en los próximos 2 meses.', PAGE.margin, y + 15, { width: W, align: 'center' });
     } else {
       y = drawMetrics(doc, y, [
-        { label: 'Contratos por Vencer', value: String(data.vencimientos.length), color: C.amber, accent: C.amber },
+        { label: 'Contratos por Vencer', value: String(data.vencimientos.length) },
       ]);
 
       const rows = data.vencimientos.map(v => [v.inquilino, v.propiedad, fmtDate(v.inicio), fmtDate(v.vencimiento), fmt(v.alquiler, data.currency)]);
@@ -1039,8 +1028,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
     // Metric cards
     y = drawMetrics(doc, y, [
-      { label: 'Propiedades', value: String(dataArray.length), color: C.dark, accent: C.purple },
-      { label: 'Total Liquidación', value: fmt(grandTotal, currency), color: C.brand, accent: C.brand },
+      { label: 'Propiedades', value: String(dataArray.length) },
+      { label: 'Total Liquidación', value: fmt(grandTotal, currency) },
     ]);
 
     const checkNewPage = (need) => {
@@ -1063,20 +1052,20 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const cardH = cardRows * 18 + 46;
       checkNewPage(cardH + 10);
 
-      // Property card with left accent
-      fillR(doc, PAGE.margin, y, W, cardH, C.snow);
-      doc.save(); doc.rect(PAGE.margin, y + 4, 3, cardH - 8).fill(C.brand); doc.restore();
+      // Property card - thin border, no color accent
+      fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
 
       // Property address + tenant
       const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
-      doc.font(F.b).fontSize(9).fillColor(C.dark)
-        .text(addr, PAGE.margin + 16, y + 8, { width: W * 0.6 });
-      doc.font(F.r).fontSize(8).fillColor(C.muted)
-        .text(data.inquilino.nombre, PAGE.margin + 16, y + 20, { width: W * 0.6 });
+      doc.font(F.b).fontSize(9).fillColor(C.black)
+        .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.6 });
+      doc.font(F.r).fontSize(8).fillColor(C.medium)
+        .text(data.inquilino.nombre, PAGE.margin + 12, y + 20, { width: W * 0.6 });
 
       // Subtotal on right
-      doc.font(F.b).fontSize(10).fillColor(C.brand)
-        .text(fmt(data.total, currency), PAGE.margin + 16, y + 10, { width: W - 32, align: 'right' });
+      doc.font(F.b).fontSize(10).fillColor(C.black)
+        .text(fmt(data.total, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
 
       let iy = y + 38;
 
@@ -1096,18 +1085,17 @@ const generateLiquidacionAllPDF = (dataArray) => {
     // ── TOTAL ──
     checkNewPage(60);
     y += 4;
-    const totalH = 36;
-    fillR(doc, PAGE.margin, y, W, totalH, C.brandLight);
-    strokeR(doc, PAGE.margin, y, W, totalH, C.brand, 1);
+    const totalH = 34;
+    fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
-    doc.font(F.b).fontSize(11).fillColor(C.brandDark)
-      .text('TOTAL', PAGE.margin + 16, y + 11);
-    doc.text(fmt(grandTotal, currency), PAGE.margin + 16, y + 11, { width: W - 32, align: 'right' });
+    doc.font(F.b).fontSize(11).fillColor(C.white)
+      .text('TOTAL', PAGE.margin + 14, y + 10);
+    doc.text(fmt(grandTotal, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
     // Amount in words
     const totalLetras = numeroATexto(grandTotal);
-    doc.font(F.r).fontSize(7.5).fillColor(C.medium)
+    doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 24;
 
@@ -1143,21 +1131,20 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const saldo = grandTotal - totalPagado;
 
       y += 12;
-      const summaryH = Math.abs(saldo) > 0.01 ? 56 : 38;
-      fillR(doc, PAGE.margin, y, W, summaryH, C.snow);
+      const summaryH = Math.abs(saldo) > 0.01 ? 50 : 34;
+      fillR(doc, PAGE.margin, y, W, summaryH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, summaryH, C.line, 0.5, 0);
 
-      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
+      doc.font(F.b).fontSize(9).fillColor(C.black)
         .text('Total Pagado:', PAGE.margin + 12, y + 10);
-      doc.fillColor(C.green)
-        .text(fmt(totalPagado, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+      doc.text(fmt(totalPagado, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
 
       if (Math.abs(saldo) > 0.01) {
         const balLabel = saldo > 0 ? 'Saldo Pendiente:' : 'Saldo a Favor:';
-        const balColor = saldo > 0 ? C.red : C.green;
 
         doc.fillColor(C.dark)
           .text(balLabel, PAGE.margin + 12, y + 28);
-        doc.fillColor(balColor)
+        doc.font(F.b).fillColor(C.black)
           .text(fmt(Math.abs(saldo), currency), PAGE.margin + 12, y + 28, { width: W - 24, align: 'right' });
       }
 

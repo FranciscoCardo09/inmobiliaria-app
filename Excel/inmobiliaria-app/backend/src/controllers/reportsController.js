@@ -32,6 +32,14 @@ const {
   generateAjustesMesExcel,
   generateControlMensualExcel,
 } = require('../services/excelTemplates');
+const {
+  generateLiquidacionDOCX,
+  generateLiquidacionAllDOCX,
+} = require('../services/docxTemplates');
+const {
+  generateLiquidacionHTML,
+  generateLiquidacionAllHTML,
+} = require('../services/htmlTemplates');
 const emailService = require('../services/emailService');
 
 // ============================================
@@ -606,6 +614,112 @@ const sendReportEmail = async (req, res, next) => {
   }
 };
 
+// ============================================
+// DOCX DOWNLOAD ENDPOINTS
+// ============================================
+
+const downloadLiquidacionDOCX = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, contractId } = req.query;
+
+    if (!month || !year || !contractId) {
+      return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    if (!data) return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
+
+    const docxBuffer = await generateLiquidacionDOCX(data);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', docxBuffer.length);
+    res.send(docxBuffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadLiquidacionAllDOCX = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year } = req.query;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
+
+    const docxBuffer = await generateLiquidacionAllDOCX(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', docxBuffer.length);
+    res.send(docxBuffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// HTML DOWNLOAD ENDPOINTS
+// ============================================
+
+const downloadLiquidacionHTMLEndpoint = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, contractId } = req.query;
+
+    if (!month || !year || !contractId) {
+      return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    if (!data) return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
+
+    const html = generateLiquidacionHTML(data);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.html`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadLiquidacionAllHTMLEndpoint = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year } = req.query;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
+
+    const html = generateLiquidacionAllHTML(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.html`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getLiquidacion,
   getLiquidacionAll,
@@ -629,5 +743,9 @@ module.exports = {
   downloadEstadoCuentasExcel,
   downloadAjustesMesExcel,
   downloadControlMensualExcel,
+  downloadLiquidacionDOCX,
+  downloadLiquidacionAllDOCX,
+  downloadLiquidacionHTMLEndpoint,
+  downloadLiquidacionAllHTMLEndpoint,
   sendReportEmail,
 };
