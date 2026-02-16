@@ -108,21 +108,25 @@ export const Login = () => {
             <p className="text-base-content/60">Sistema de Gestion</p>
           </div>
 
-          {/* Google Login Button */}
-          <button
-            onClick={handleGoogleLogin}
-            disabled={googleLoading}
-            className="btn btn-outline w-full gap-3 mb-4 hover:bg-base-200"
-          >
-            {googleLoading ? (
-              <span className="loading loading-spinner loading-sm"></span>
-            ) : (
-              <GoogleIcon />
-            )}
-            Continuar con Google
-          </button>
+          {/* Google Login Button - only show if configured */}
+          {import.meta.env.VITE_GOOGLE_AUTH_ENABLED === 'true' && (
+            <>
+              <button
+                onClick={handleGoogleLogin}
+                disabled={googleLoading}
+                className="btn btn-outline w-full gap-3 mb-4 hover:bg-base-200"
+              >
+                {googleLoading ? (
+                  <span className="loading loading-spinner loading-sm"></span>
+                ) : (
+                  <GoogleIcon />
+                )}
+                Continuar con Google
+              </button>
 
-          <div className="divider text-sm text-base-content/40">o con email</div>
+              <div className="divider text-sm text-base-content/40">o con email</div>
+            </>
+          )}
 
           {/* Email/Password Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -172,15 +176,6 @@ export const Login = () => {
             </Link>
           </p>
 
-          {/* Test credentials */}
-          <div className="mt-4 p-3 bg-base-200 rounded-lg">
-            <p className="text-xs font-medium text-base-content/60 mb-2">
-              Credenciales de prueba:
-            </p>
-            <code className="text-xs">
-              admin@hh.com / Password123
-            </code>
-          </div>
         </div>
       </div>
     </div>

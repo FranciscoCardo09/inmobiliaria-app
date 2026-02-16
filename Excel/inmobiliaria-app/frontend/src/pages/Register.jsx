@@ -147,21 +147,25 @@ export const Register = () => {
             <p className="text-base-content/60">Registrate para comenzar</p>
           </div>
 
-          {/* Google Signup Button */}
-          <button
-            onClick={handleGoogleSignup}
-            disabled={googleLoading}
-            className="btn btn-outline w-full gap-3 mb-4 hover:bg-base-200"
-          >
-            {googleLoading ? (
-              <span className="loading loading-spinner loading-sm"></span>
-            ) : (
-              <GoogleIcon />
-            )}
-            Registrarse con Google
-          </button>
+          {/* Google Signup Button - only show if configured */}
+          {import.meta.env.VITE_GOOGLE_AUTH_ENABLED === 'true' && (
+            <>
+              <button
+                onClick={handleGoogleSignup}
+                disabled={googleLoading}
+                className="btn btn-outline w-full gap-3 mb-4 hover:bg-base-200"
+              >
+                {googleLoading ? (
+                  <span className="loading loading-spinner loading-sm"></span>
+                ) : (
+                  <GoogleIcon />
+                )}
+                Registrarse con Google
+              </button>
 
-          <div className="divider text-sm text-base-content/40">o con email</div>
+              <div className="divider text-sm text-base-content/40">o con email</div>
+            </>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
