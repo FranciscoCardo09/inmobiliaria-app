@@ -17,8 +17,9 @@ module.exports = {
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
 
-  // CORS
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  // Frontend URL (first URL is used for redirects, all URLs are used for CORS)
+  frontendUrl: (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim(),
+  corsOrigins: process.env.FRONTEND_URL || 'http://localhost:5173',
 
   // Resend Email Configuration (production)
   resend: {

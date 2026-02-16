@@ -19,8 +19,8 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 // CORS - support multiple origins (production + local dev)
-const allowedOrigins = config.frontendUrl
-  ? config.frontendUrl.split(',').map(url => url.trim())
+const allowedOrigins = config.corsOrigins
+  ? config.corsOrigins.split(',').map(url => url.trim())
   : ['http://localhost:5173'];
 
 app.use(cors({
