@@ -64,7 +64,7 @@ export const GroupCreator = () => {
           <Input
             label="Nombre del Grupo"
             name="name"
-            placeholder="Ej: H&H Inmobiliaria"
+            placeholder="Ej: Gestion Alquileres"
             value={formData.name}
             onChange={handleChange}
             error={errors.name}

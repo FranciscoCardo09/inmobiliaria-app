@@ -1,4 +1,4 @@
-// Production Seed - Creates admin user and H&H group for gestionarg.com
+// Production Seed - Creates admin user and group for gestionalquileres.com.ar
 // Run manually once: DATABASE_URL="postgresql://..." node prisma/seed-prod.js
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
@@ -13,14 +13,14 @@ async function main() {
   console.log('Seeding production database...');
 
   // Create admin user
-  const adminPassword = await hashPassword('GestionArg123');
+  const adminPassword = await hashPassword('GestionAlq123');
 
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@gestionarg.com' },
+    where: { email: 'admin@gestionalquileres.com.ar' },
     update: {},
     create: {
-      email: 'admin@gestionarg.com',
-      name: 'Admin GestionArg',
+      email: 'admin@gestionalquileres.com.ar',
+      name: 'Admin Gestion Alquileres',
       passwordHash: adminPassword,
       globalRole: 'SUPERADMIN',
       isEmailVerified: true,
@@ -29,14 +29,14 @@ async function main() {
 
   console.log('Admin user created:', admin.email);
 
-  // Create H&H group
+  // Create main group
   const group = await prisma.group.upsert({
-    where: { slug: 'hh-inmobiliaria' },
+    where: { slug: 'gestion-alquileres' },
     update: {},
     create: {
-      name: 'H&H Inmobiliaria',
-      slug: 'hh-inmobiliaria',
-      description: 'Grupo principal de H&H',
+      name: 'Gestion Alquileres',
+      slug: 'gestion-alquileres',
+      description: 'Grupo principal de Gestion Alquileres',
       punitoryRate: 0.006,
       currency: 'ARS',
     },
@@ -189,8 +189,8 @@ async function main() {
   =============================================
      PRODUCTION SEED COMPLETED
   =============================================
-     Login: admin@gestionarg.com / GestionArg123
-     Group: H&H Inmobiliaria
+     Login: admin@gestionalquileres.com.ar / GestionAlq123
+     Group: Gestion Alquileres
      Categories: VARIOS, MATIENZO, LOCAL
      Service Categories: 5 defaults
      Concept Types: 6 defaults

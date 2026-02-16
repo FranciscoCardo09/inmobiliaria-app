@@ -21,7 +21,7 @@ async function main() {
     update: {},
     create: {
       email: 'admin@hh.com',
-      name: 'Admin H&H',
+      name: 'Admin Gestion Alquileres',
       passwordHash: adminPassword,
       globalRole: 'SUPERADMIN',
       isEmailVerified: true,
@@ -52,14 +52,14 @@ async function main() {
 
   console.log('Users created:', { admin: admin.email, paco: paco.email, pedro: pedro.email });
 
-  // Create H&H group
+  // Create main group
   const group = await prisma.group.upsert({
-    where: { slug: 'hh-inmobiliaria' },
+    where: { slug: 'gestion-alquileres' },
     update: {},
     create: {
-      name: 'H&H Inmobiliaria',
-      slug: 'hh-inmobiliaria',
-      description: 'Grupo principal de H&H',
+      name: 'Gestion Alquileres',
+      slug: 'gestion-alquileres',
+      description: 'Grupo principal de Gestion Alquileres',
       punitoryRate: 0.006,
       currency: 'ARS',
     },
@@ -508,7 +508,7 @@ async function main() {
        • paco@hh.com / Password123 (OPERATOR)
        • pedro@hh.com / Password123 (VIEWER)
 
-     Group: H&H Inmobiliaria
+     Group: Gestion Alquileres
 
      📁 Categories: VARIOS, MATIENZO, LOCAL
      👤 Owners: María García, Carlos López

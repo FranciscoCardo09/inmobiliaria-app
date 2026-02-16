@@ -112,7 +112,7 @@ enum InviteStatus {
 
 Una vez desplegado:
 
-- Frontend: `https://inmobiliaria-hh.vercel.app`
+- Frontend: `https://gestionalquileres.vercel.app`
 - Backend: `https://inmobiliaria-api.onrender.com`
 - API Health: `https://inmobiliaria-api.onrender.com/api/health`
 
