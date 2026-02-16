@@ -9,6 +9,22 @@ const MONTH_NAMES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
+// Helper: get tenant name(s) from contract (supports multi-tenant)
+const getTenantsName = (contract) => {
+  if (contract.contractTenants && contract.contractTenants.length > 0) {
+    return contract.contractTenants.map((ct) => ct.tenant.name).join(' / ');
+  }
+  return contract.tenant?.name || 'Sin inquilino';
+};
+
+// Helper: get tenant data from contract (primary tenant)
+const getPrimaryTenant = (contract) => {
+  if (contract.contractTenants && contract.contractTenants.length > 0) {
+    return contract.contractTenants[0].tenant;
+  }
+  return contract.tenant || null;
+};
+
 // ============================================
 // EMPRESA DATA HELPER
 // ============================================
@@ -39,6 +55,7 @@ const getEmpresaData = async (groupId) => {
       bankAccountType: true,
       bankAccountNumber: true,
       bankCbu: true,
+      bankAlias: true,
     },
   });
 
@@ -62,6 +79,7 @@ const getEmpresaData = async (groupId) => {
       tipoCuenta: group?.bankAccountType || '',
       numeroCuenta: group?.bankAccountNumber || '',
       cbu: group?.bankCbu || '',
+      alias: group?.bankAlias || '',
     },
   };
 };
@@ -73,8 +91,8 @@ const getEmpresaData = async (groupId) => {
 /**
  * Obtiene datos de liquidación para un contrato en un mes/año
  */
-const getLiquidacionData = async (groupId, contractId, month, year) => {
-  const monthlyRecord = await prisma.monthlyRecord.findFirst({
+const getLiquidacionData = async (groupId, contractId, month, year, options = {}) => {
+  let monthlyRecord = await prisma.monthlyRecord.findFirst({
     where: {
       groupId,
       contractId,
@@ -85,6 +103,7 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
       contract: {
         include: {
           tenant: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
             include: { owner: true },
           },
@@ -99,6 +118,30 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
       },
     },
   });
+
+  // If no record exists, try to auto-create records for that period
+  if (!monthlyRecord) {
+    try {
+      const { getOrCreateMonthlyRecords } = require('./monthlyRecordService');
+      await getOrCreateMonthlyRecords(groupId, month, year);
+      monthlyRecord = await prisma.monthlyRecord.findFirst({
+        where: { groupId, contractId, periodMonth: month, periodYear: year },
+        include: {
+          contract: {
+            include: {
+              tenant: true,
+              contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+              property: { include: { owner: true } },
+            },
+          },
+          services: { include: { conceptType: true } },
+          transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
+        },
+      });
+    } catch (e) {
+      // silently fail - record may not be applicable
+    }
+  }
 
   if (!monthlyRecord) return null;
 
@@ -150,10 +193,10 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
   return {
     empresa,
     inquilino: {
-      nombre: contract.tenant.name,
-      dni: contract.tenant.dni,
-      email: contract.tenant.email,
-      telefono: contract.tenant.phone,
+      nombre: getTenantsName(contract),
+      dni: (getPrimaryTenant(contract))?.dni || '',
+      email: (getPrimaryTenant(contract))?.email || '',
+      telefono: (getPrimaryTenant(contract))?.phone || '',
     },
     propiedad: {
       direccion: contract.property.address,
@@ -170,6 +213,7 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
         tipoCuenta: owner.bankAccountType || '',
         numeroCuenta: owner.bankAccountNumber || '',
         cbu: owner.bankCbu || '',
+        alias: owner.bankAlias || '',
       } : null,
     },
     periodo: {
@@ -189,11 +233,21 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
     estado: monthlyRecord.status,
     isPaid: monthlyRecord.isPaid,
     fechaPago: monthlyRecord.fullPaymentDate,
+    // Honorarios (calculated on rent only)
+    honorarios: options.honorariosPercent > 0 ? (() => {
+      const pct = options.honorariosPercent;
+      const monto = Math.round(monthlyRecord.rentAmount * pct / 100 * 100) / 100;
+      return {
+        porcentaje: pct,
+        monto,
+        netoTransferir: Math.round((monthlyRecord.totalDue - monto) * 100) / 100,
+      };
+    })() : null,
     transacciones: monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate,
       monto: t.amount,
       metodo: t.paymentMethod,
-      inquilino: contract.tenant.name,
+      inquilino: getTenantsName(contract),
       propiedad: contract.property.address,
       conceptos: t.concepts.map((c) => ({
         tipo: c.type,
@@ -214,9 +268,17 @@ const getLiquidacionData = async (groupId, contractId, month, year) => {
  * @param {number} year
  * @param {string[]} propertyIds - Opcional: IDs de propiedades para filtrar
  */
-const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null) => {
+const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}) => {
+  // Auto-create monthly records for the period before querying
+  try {
+    const { getOrCreateMonthlyRecords } = require('./monthlyRecordService');
+    await getOrCreateMonthlyRecords(groupId, month, year);
+  } catch (e) {
+    // silently fail
+  }
+
   const where = { groupId, active: true };
-  
+
   // Si se proporcionan propertyIds, filtrar por ellos
   if (propertyIds && propertyIds.length > 0) {
     where.propertyId = { in: propertyIds };
@@ -229,7 +291,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   const liquidaciones = [];
   for (const contract of contracts) {
-    const data = await getLiquidacionData(groupId, contract.id, month, year);
+    const data = await getLiquidacionData(groupId, contract.id, month, year, options);
     if (data) liquidaciones.push(data);
   }
 
@@ -245,6 +307,7 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     where: { id: contractId, groupId },
     include: {
       tenant: true,
+      contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
       property: { include: { owner: true } },
     },
   });
@@ -291,8 +354,8 @@ const getEstadoCuentasData = async (groupId, contractId) => {
   return {
     empresa,
     inquilino: {
-      nombre: contract.tenant.name,
-      dni: contract.tenant.dni,
+      nombre: getTenantsName(contract),
+      dni: (getPrimaryTenant(contract))?.dni || '',
     },
     propiedad: {
       direccion: contract.property.address,
@@ -415,6 +478,7 @@ const getCartaDocumentoData = async (groupId, contractId) => {
     where: { id: contractId, groupId },
     include: {
       tenant: true,
+      contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
       property: { include: { owner: true } },
     },
   });
@@ -427,13 +491,14 @@ const getCartaDocumentoData = async (groupId, contractId) => {
   });
 
   const empresa = await getEmpresaData(groupId);
+  const primaryTenant = getPrimaryTenant(contract);
 
   return {
     empresa,
     deudor: {
-      nombre: contract.tenant.name,
-      dni: contract.tenant.dni,
-      email: contract.tenant.email,
+      nombre: getTenantsName(contract),
+      dni: primaryTenant?.dni || '',
+      email: primaryTenant?.email || '',
     },
     propiedad: {
       direccion: contract.property.address,
@@ -497,7 +562,10 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
       contract: {
         include: {
           tenant: true,
-          property: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+          property: {
+            include: { owner: true },
+          },
         },
       },
       services: {
@@ -547,12 +615,15 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     receiptNumber,
     fecha: lastTransaction?.paymentDate || new Date(),
     inquilino: {
-      nombre: contract.tenant.name,
-      dni: contract.tenant.dni,
+      nombre: getTenantsName(contract),
+      dni: (getPrimaryTenant(contract))?.dni || '',
     },
     propiedad: {
       direccion: contract.property.address,
       codigo: contract.property.code,
+    },
+    propietario: {
+      nombre: contract.property.owner?.name || '',
     },
     periodo: {
       mes: record.periodMonth,
@@ -589,7 +660,7 @@ const getAjustesMesData = async (groupId, month, year) => {
       const lastHistory = contract.rentHistory[0]; // ya viene ordenado desc
       ajustes.push({
         contractId: contract.id,
-        inquilino: contract.tenant.name,
+        inquilino: getTenantsName(contract),
         propiedad: contract.property.address,
         alquilerAnterior: contract.rentBeforeAdjustment,
         indice: contract.adjustmentIndex.name,
@@ -602,10 +673,10 @@ const getAjustesMesData = async (groupId, month, year) => {
       // Si no tiene historial, mostrar el ajuste pendiente
       const porcentajeAjuste = contract.adjustmentIndex.currentValue;
       const alquilerNuevo = Math.round(contract.rentBeforeAdjustment * (1 + porcentajeAjuste / 100));
-      
+
       ajustes.push({
         contractId: contract.id,
-        inquilino: contract.tenant.name,
+        inquilino: getTenantsName(contract),
         propiedad: contract.property.address,
         alquilerAnterior: contract.rentBeforeAdjustment,
         indice: contract.adjustmentIndex.name,
@@ -642,6 +713,7 @@ const getControlMensualData = async (groupId, month, year) => {
       contract: {
         include: {
           tenant: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: true,
         },
       },
@@ -650,13 +722,13 @@ const getControlMensualData = async (groupId, month, year) => {
       },
     },
     orderBy: [
-      { contract: { tenant: { name: 'asc' } } },
+      { contract: { property: { address: 'asc' } } },
     ],
   });
 
   const registros = records.map((r) => ({
     monthlyRecordId: r.id,
-    inquilino: r.contract.tenant.name,
+    inquilino: getTenantsName(r.contract),
     propiedad: r.contract.property.address,
     mesContrato: r.monthNumber,
     alquiler: r.rentAmount,
@@ -725,6 +797,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       contract: {
         include: {
           tenant: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
             include: { owner: true },
           },
@@ -752,7 +825,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
 
     const owner = record.contract.property.owner;
     impuestos.push({
-      inquilino: record.contract.tenant.name,
+      inquilino: getTenantsName(record.contract),
       propiedad: record.contract.property.address,
       propietario: owner?.name || 'Sin propietario',
       impuestos: taxServices.map((s) => ({
@@ -768,6 +841,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
         tipoCuenta: owner.bankAccountType || '',
         numeroCuenta: owner.bankAccountNumber || '',
         cbu: owner.bankCbu || '',
+        alias: owner.bankAlias || '',
       } : empresa.banco,
     });
   }
@@ -802,6 +876,7 @@ const getVencimientosData = async (groupId) => {
     where: { groupId, active: true },
     include: {
       tenant: true,
+      contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
       property: true,
     },
   });
@@ -819,7 +894,7 @@ const getVencimientosData = async (groupId) => {
     if (endDate <= twoMonthsFromNow) {
       vencimientos.push({
         contractId: contract.id,
-        inquilino: contract.tenant.name,
+        inquilino: getTenantsName(contract),
         propiedad: contract.property.address,
         inicio: contract.startDate,
         vencimiento: endDate,

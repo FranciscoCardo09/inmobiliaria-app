@@ -399,6 +399,25 @@ const generateLiquidacionPDF = (data) => {
       y += 18;
     }
 
+    // Honorarios section
+    if (data.honorarios) {
+      y += 4;
+      const honH = 50;
+      fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
+
+      doc.font(F.r).fontSize(9).fillColor(C.dark)
+        .text(`Honorarios (${data.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 10);
+      doc.font(F.b).fillColor(C.black)
+        .text(fmt(data.honorarios.monto, data.currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+
+      doc.font(F.b).fontSize(10).fillColor(C.black)
+        .text('Neto a transferir:', PAGE.margin + 12, y + 30);
+      doc.text(fmt(data.honorarios.netoTransferir, data.currency), PAGE.margin + 12, y + 30, { width: W - 24, align: 'right' });
+
+      y += honH + 10;
+    }
+
     // Payments section
     if (data.transacciones && data.transacciones.length > 0) {
       y += 12;
@@ -575,11 +594,13 @@ const generateCartaDocumentoPDF = (data, customMessage) => {
 
 const generatePagoEfectivoPDF = (data) => {
   return new Promise((resolve, reject) => {
-    // Compact receipt - half A4 height
+    // Compact receipt - dynamic height based on content
     const rW = 420; // receipt width
-    const rH = 420; // half A4 height
     const rMargin = 20;
     const rContent = rW - rMargin * 2;
+    // Estimate height: base ~280 + ~15 per concept row
+    const estimatedH = 280 + (data.conceptos.length * 15);
+    const rH = Math.max(320, Math.min(estimatedH, 520));
     const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
     const buf = [];
     doc.on('data', (c) => buf.push(c));
@@ -588,10 +609,6 @@ const generatePagoEfectivoPDF = (data) => {
 
     const emp = data.empresa;
     let y = rMargin;
-
-    // ── Outer border ──
-    doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, rH - rMargin * 2 + 8, 6)
-      .strokeColor(C.black).lineWidth(1.2).stroke();
 
     // ── TOP ROW: Left (logo + company info) | Right (receipt box) ──
     const leftW = rContent * 0.58;
@@ -670,7 +687,14 @@ const generatePagoEfectivoPDF = (data) => {
     doc.font(F.r).fontSize(8).fillColor(C.dark);
     doc.text('Período:', rMargin + 4, y, { continued: true });
     doc.font(F.b).text(` ${data.periodo.label}`);
-    y += 16;
+    y += 13;
+    if (data.propietario?.nombre) {
+      doc.font(F.r).fontSize(8).fillColor(C.dark);
+      doc.text('Por cuenta y orden de:', rMargin + 4, y, { continued: true });
+      doc.font(F.b).text(` ${data.propietario.nombre}`);
+      y += 13;
+    }
+    y += 3;
 
     // ── Detail table ──
     const tblX = rMargin + 4;
@@ -710,19 +734,26 @@ const generatePagoEfectivoPDF = (data) => {
     // ── Amount in words ──
     doc.font(F.r).fontSize(7.5).fillColor(C.dark)
       .text(`Son: ${data.totalEnLetras}`, rMargin + 4, y, { width: rContent });
+    y += 14;
+
+    // ── Outer border (drawn last, wraps content tightly) ──
+    const borderBottom = y + 4;
+    doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, borderBottom - rMargin + 8, 6)
+      .strokeColor(C.black).lineWidth(1.2).stroke();
 
     doc.end();
   });
 };
 
 const generateMultiPagoEfectivoPDF = (dataArray) => {
-  // For multi receipts, we generate individual receipt buffers and combine them
-  // But since PDFKit can't easily merge, we'll put them on separate pages with same format
+  // For multi receipts, put them on separate pages with same format
   return new Promise((resolve, reject) => {
     const rW = 420;
-    const rH = 420;
     const rMargin = 20;
     const rContent = rW - rMargin * 2;
+    // Use max estimated height across all receipts
+    const maxConcepts = Math.max(...dataArray.map(d => d.conceptos.length), 2);
+    const rH = Math.max(320, Math.min(280 + maxConcepts * 15, 520));
     const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
     const buf = [];
     doc.on('data', (c) => buf.push(c));
@@ -734,10 +765,6 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
 
       const emp = data.empresa;
       let y = rMargin;
-
-      // Outer border
-      doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, rH - rMargin * 2 + 8, 6)
-        .strokeColor(C.black).lineWidth(1.2).stroke();
 
       const leftW = rContent * 0.58;
       const rightW = rContent * 0.38;
@@ -791,7 +818,12 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
       doc.font(F.r).fontSize(8).fillColor(C.dark);
       doc.text('Domicilio:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.propiedad.direccion}`); y += 13;
       doc.font(F.r).fontSize(8).fillColor(C.dark);
-      doc.text('Período:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.periodo.label}`); y += 16;
+      doc.text('Período:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.periodo.label}`); y += 13;
+      if (data.propietario?.nombre) {
+        doc.font(F.r).fontSize(8).fillColor(C.dark);
+        doc.text('Por cuenta y orden de:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.propietario.nombre}`); y += 13;
+      }
+      y += 3;
 
       const tblX = rMargin + 4;
       const tblW = rContent - 8;
@@ -824,6 +856,12 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
       y += 10;
 
       doc.font(F.r).fontSize(7.5).fillColor(C.dark).text(`Son: ${data.totalEnLetras}`, rMargin + 4, y, { width: rContent });
+      y += 14;
+
+      // Outer border (wraps content tightly)
+      const borderBottom = y + 4;
+      doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, borderBottom - rMargin + 8, 6)
+        .strokeColor(C.black).lineWidth(1.2).stroke();
     });
 
     doc.end();
@@ -936,6 +974,7 @@ const generateImpuestosPDF = (data) => {
           banco.tipoCuenta ? ['Tipo Cuenta', banco.tipoCuenta] : null,
           banco.numeroCuenta ? ['N° Cuenta', banco.numeroCuenta] : null,
           banco.cbu ? ['CBU', banco.cbu] : null,
+          banco.alias ? ['Alias', banco.alias] : null,
         ].filter(Boolean);
 
         // Owner name badge
@@ -1098,6 +1137,29 @@ const generateLiquidacionAllPDF = (dataArray) => {
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 24;
+
+    // ── Honorarios (if any contract has them) ──
+    const firstHon = dataArray.find(d => d.honorarios);
+    if (firstHon) {
+      checkNewPage(70);
+      const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+      const totalNeto = dataArray.reduce((s, d) => s + (d.honorarios?.netoTransferir || d.total), 0);
+
+      const honH = 50;
+      fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
+
+      doc.font(F.r).fontSize(9).fillColor(C.dark)
+        .text(`Honorarios (${firstHon.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 10);
+      doc.font(F.b).fillColor(C.black)
+        .text(fmt(totalHon, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+
+      doc.font(F.b).fontSize(10).fillColor(C.black)
+        .text('Neto a transferir:', PAGE.margin + 12, y + 30);
+      doc.text(fmt(totalNeto, currency), PAGE.margin + 12, y + 30, { width: W - 24, align: 'right' });
+
+      y += honH + 10;
+    }
 
     // ── SECTION: Payments ──
     const allTransactions = [];

@@ -117,7 +117,7 @@ export default function MonthlyControlPage() {
     if (searchFilter.trim()) {
       const term = searchFilter.toLowerCase().trim()
       filtered = filtered.filter((r) => {
-        const tenant = (r.tenant?.name || '').toLowerCase()
+        const tenant = (r.tenants?.length > 0 ? r.tenants.map(t => t.name).join(' / ') : r.tenant?.name || '').toLowerCase()
         const address = (r.property?.address || '').toLowerCase()
         const code = (r.property?.code || '').toLowerCase()
         const owner = (r.owner?.name || '').toLowerCase()
@@ -448,7 +448,9 @@ export default function MonthlyControlPage() {
                           {record.owner?.name || '-'}
                         </td>
                         <td className="text-xs font-medium">
-                          {record.tenant?.name}
+                          {record.tenants?.length > 0
+                            ? record.tenants.map(t => t.name).join(' / ')
+                            : record.tenant?.name || 'Sin inquilino'}
                         </td>
                         <td className="text-xs whitespace-nowrap">
                           {record.periodLabel}
@@ -709,7 +711,7 @@ function ServiceManagerInline({ record, groupId }) {
   const { data: conceptTypes = [] } = useQuery({
     queryKey: ['conceptTypes', groupId],
     queryFn: async () => {
-      const response = await api.get(`/groups/${groupId}/concept-types`)
+      const response = await api.get(`/groups/${groupId}/payments/concept-types`)
       return response.data.data.filter(ct => ct.isActive)
     },
     enabled: !!groupId,

@@ -12,6 +12,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import DateInput from '../../components/ui/DateInput'
 import SearchableSelect from '../../components/ui/SearchableSelect'
+import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 
 export const ContractForm = () => {
   const navigate = useNavigate()
@@ -29,7 +30,7 @@ export const ContractForm = () => {
   const { data: contract, isLoading: isLoadingContract } = isEditing ? useContract(id) : { data: null, isLoading: false }
 
   const [formData, setFormData] = useState({
-    tenantId: searchParams.get('tenantId') || '',
+    tenantIds: searchParams.get('tenantId') ? [searchParams.get('tenantId')] : [],
     propertyId: searchParams.get('propertyId') || '',
     startDate: '',
     durationMonths: '24',
@@ -37,7 +38,7 @@ export const ContractForm = () => {
     baseRent: '',
     adjustmentIndexId: '',
     punitoryStartDay: '10',
-    punitoryPercent: '0.006',
+    punitoryPercent: '0.6',
     active: true,
     observations: '',
   })
@@ -47,15 +48,18 @@ export const ContractForm = () => {
   useEffect(() => {
     if (contract) {
       setFormData({
-        tenantId: contract.tenantId || '',
+        tenantIds: contract.contractTenants?.length > 0
+          ? contract.contractTenants.map((ct) => ct.tenantId || ct.tenant?.id).filter(Boolean)
+          : contract.tenantId ? [contract.tenantId] : [],
         propertyId: contract.propertyId || '',
         startDate: contract.startDate ? contract.startDate.split('T')[0] : '',
         durationMonths: contract.durationMonths?.toString() || '24',
         currentMonth: contract.currentMonth?.toString() || '1',
         baseRent: contract.baseRent?.toString() || '',
+        baseRentDisplay: contract.baseRent ? contract.baseRent.toLocaleString('es-AR', { minimumFractionDigits: contract.baseRent % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 }) : '',
         adjustmentIndexId: contract.adjustmentIndexId || '',
         punitoryStartDay: contract.punitoryStartDay?.toString() || '10',
-        punitoryPercent: contract.punitoryPercent?.toString() || '0.006',
+        punitoryPercent: contract.punitoryPercent ? (contract.punitoryPercent * 100).toString() : '0.6',
         active: contract.active ?? true,
         observations: contract.observations || '',
       })
@@ -64,15 +68,32 @@ export const ContractForm = () => {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
-    setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value })
+    let newValue = type === 'checkbox' ? checked : value
+
+    // Format baseRent: only digits, display with thousand separators
+    if (name === 'baseRent') {
+      newValue = value.replace(/\D/g, '')
+    }
+
+    setFormData({ ...formData, [name]: newValue })
     if (errors[name]) {
       setErrors({ ...errors, [name]: '' })
     }
   }
 
+  // Format number with thousand separators for display
+  const formatNumber = (num) => {
+    if (!num) return ''
+    return Number(num).toLocaleString('es-AR')
+  }
+
+  // Parse formatted number back to raw digits
+  const parseFormattedNumber = (str) => {
+    return str.replace(/\D/g, '')
+  }
+
   const validate = () => {
     const newErrors = {}
-    if (!formData.tenantId) newErrors.tenantId = 'Seleccione un inquilino'
     if (!formData.propertyId) newErrors.propertyId = 'Seleccione una propiedad'
     if (!formData.startDate) newErrors.startDate = 'Fecha de inicio es requerida'
     if (!formData.baseRent || parseFloat(formData.baseRent) <= 0) {
@@ -94,12 +115,13 @@ export const ContractForm = () => {
 
     const data = {
       ...formData,
+      tenantIds: formData.tenantIds,
       baseRent: parseFloat(formData.baseRent),
       durationMonths: parseInt(formData.durationMonths, 10),
       currentMonth: parseInt(formData.currentMonth, 10),
       adjustmentIndexId: formData.adjustmentIndexId || null,
       punitoryStartDay: parseInt(formData.punitoryStartDay, 10),
-      punitoryPercent: parseFloat(formData.punitoryPercent),
+      punitoryPercent: parseFloat(formData.punitoryPercent) / 100,
     }
 
     if (isEditing) {
@@ -142,17 +164,15 @@ export const ContractForm = () => {
             <h2 className="text-xl font-semibold">Partes del Contrato</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <SearchableSelect
-                label="Inquilino *"
-                name="tenantId"
+              <MultiSearchableSelect
+                label="Inquilinos (opcional)"
                 options={tenants.map((t) => ({
                   value: t.id,
                   label: `${t.name} - DNI: ${t.dni}`,
                 }))}
-                value={formData.tenantId}
-                onChange={handleChange}
-                placeholder="Buscar inquilino..."
-                error={errors.tenantId}
+                value={formData.tenantIds}
+                onChange={(ids) => setFormData({ ...formData, tenantIds: ids })}
+                placeholder="Buscar inquilinos..."
                 disabled={isEditing}
               />
 
@@ -223,40 +243,62 @@ export const ContractForm = () => {
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Condiciones Económicas</h2>
 
-            <Input
-              label="Alquiler Mensual Base ($) *"
-              name="baseRent"
-              type="number"
-              step="0.01"
-              min="0"
-              value={formData.baseRent}
-              onChange={handleChange}
-              placeholder="150000"
-              error={errors.baseRent}
-            />
+            <div className="form-control w-full">
+              <label className="label">
+                <span className="label-text font-medium">Alquiler Mensual Base *</span>
+              </label>
+              <label className="input input-bordered flex items-center gap-2">
+                <span className="text-base-content/60">$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  name="baseRent"
+                  className="grow bg-transparent outline-none"
+                  value={formData.baseRentDisplay ?? (formData.baseRent ? formatNumber(formData.baseRent) : '')}
+                  onChange={(e) => {
+                    const display = e.target.value.replace(/[^\d.,]/g, '')
+                    // Parse: remove dots (thousands), replace comma with dot (decimal)
+                    const raw = display.replace(/\./g, '').replace(',', '.')
+                    setFormData({ ...formData, baseRent: raw, baseRentDisplay: display })
+                    if (errors.baseRent) setErrors({ ...errors, baseRent: '' })
+                  }}
+                  onBlur={() => {
+                    // On blur, reformat nicely
+                    if (formData.baseRent) {
+                      const num = parseFloat(formData.baseRent)
+                      if (!isNaN(num)) {
+                        const formatted = num.toLocaleString('es-AR', { minimumFractionDigits: num % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })
+                        setFormData((prev) => ({ ...prev, baseRentDisplay: formatted }))
+                      }
+                    }
+                  }}
+                  placeholder="1.250.000,50"
+                />
+              </label>
+              {errors.baseRent && (
+                <label className="label">
+                  <span className="label-text-alt text-error">{errors.baseRent}</span>
+                </label>
+              )}
+            </div>
           </div>
 
           {/* Ajustes */}
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Índice de Ajuste</h2>
 
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">Índice de ajuste periódico</span>
-              </label>
-              <select
+            <div className="form-control max-w-md">
+              <SearchableSelect
+                label="Índice de ajuste periódico"
                 name="adjustmentIndexId"
-                className="select select-bordered w-full max-w-md"
+                options={(indices || []).map((idx) => ({
+                  value: idx.id,
+                  label: `${idx.name} (cada ${idx.frequencyMonths} ${idx.frequencyMonths === 1 ? 'mes' : 'meses'})`,
+                }))}
                 value={formData.adjustmentIndexId}
                 onChange={handleChange}
-              >
-                <option value="">Sin ajuste automático</option>
-                {indices?.map((idx) => (
-                  <option key={idx.id} value={idx.id}>
-                    {idx.name} (cada {idx.frequencyMonths} {idx.frequencyMonths === 1 ? 'mes' : 'meses'})
-                  </option>
-                ))}
-              </select>
+                placeholder="Sin ajuste automático"
+              />
               <label className="label">
                 <span className="label-text-alt text-base-content/60">
                   El sistema calculará automáticamente el próximo mes de ajuste
@@ -281,17 +323,27 @@ export const ContractForm = () => {
                 placeholder="10"
                 helperText="Después de este día del mes se aplican recargos"
               />
-              <Input
-                label="Porcentaje diario punitorio"
-                name="punitoryPercent"
-                type="number"
-                step="0.0001"
-                min="0"
-                value={formData.punitoryPercent}
-                onChange={handleChange}
-                placeholder="0.006"
-                helperText="Ej: 0.006 = 0.6% por día de atraso"
-              />
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text font-medium">Porcentaje diario punitorio</span>
+                </label>
+                <label className="input input-bordered flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="punitoryPercent"
+                    className="grow bg-transparent outline-none"
+                    value={formData.punitoryPercent}
+                    onChange={handleChange}
+                    placeholder="0.6"
+                  />
+                  <span className="text-base-content/60">%</span>
+                </label>
+                <label className="label">
+                  <span className="label-text-alt text-base-content/60">Ej: 0.6 = 0.6% por día de atraso</span>
+                </label>
+              </div>
             </div>
           </div>
 

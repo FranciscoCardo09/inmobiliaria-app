@@ -29,6 +29,7 @@ const previewCloseMonth = async (groupId, month, year) => {
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
+          contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
           property: { select: { id: true, address: true, code: true } },
         },
       },
@@ -50,7 +51,10 @@ const previewCloseMonth = async (groupId, month, year) => {
 
     return {
       monthlyRecordId: record.id,
-      tenant: record.contract.tenant,
+      tenant: record.contract.tenant || null,
+      tenants: record.contract.contractTenants?.length > 0
+        ? record.contract.contractTenants.map((ct) => ct.tenant)
+        : record.contract.tenant ? [record.contract.tenant] : [],
       property: record.contract.property,
       periodLabel: `${monthNames[periodMonth]} ${periodYear}`,
       status: record.status,

@@ -19,7 +19,7 @@ export const OwnerForm = () => {
   const { createOwner, updateOwner, isCreating, isUpdating, useOwner } = useOwners(currentGroup?.id)
   const { data: owner, isLoading } = isEditing ? useOwner(id) : { data: null, isLoading: false }
 
-  const [formData, setFormData] = useState({ name: '', dni: '', phone: '', email: '', bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '' })
+  const [formData, setFormData] = useState({ name: '', dni: '', phone: '', email: '', bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '', bankAlias: '' })
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
@@ -35,21 +35,41 @@ export const OwnerForm = () => {
         bankAccountType: owner.bankAccountType || '',
         bankAccountNumber: owner.bankAccountNumber || '',
         bankCbu: owner.bankCbu || '',
+        bankAlias: owner.bankAlias || '',
       })
     }
   }, [owner])
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData({ ...formData, [name]: value })
+    let processed = value
+
+    // Filter/format specific fields
+    if (name === 'bankCbu') {
+      processed = value.replace(/\D/g, '').slice(0, 22)
+    } else if (name === 'bankAccountNumber') {
+      processed = value.replace(/\D/g, '')
+    } else if (name === 'dni') {
+      processed = value.replace(/[^0-9-]/g, '')
+    } else if (name === 'bankCuit') {
+      // Auto-format XX-XXXXXXXX-X
+      const digits = value.replace(/\D/g, '').slice(0, 11)
+      if (digits.length > 10) processed = `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`
+      else if (digits.length > 2) processed = `${digits.slice(0, 2)}-${digits.slice(2)}`
+      else processed = digits
+    }
+
+    setFormData({ ...formData, [name]: processed })
     if (errors[name]) setErrors({ ...errors, [name]: '' })
   }
 
   const validate = () => {
     const newErrors = {}
     if (!formData.name || formData.name.trim().length < 2) newErrors.name = 'Nombre requerido'
-    if (!formData.dni || formData.dni.trim().length < 7) newErrors.dni = 'DNI requerido (mín. 7 dígitos)'
+    if (!formData.dni || formData.dni.replace(/-/g, '').length < 7) newErrors.dni = 'DNI requerido (mín. 7 dígitos)'
     if (!formData.phone || formData.phone.trim().length < 6) newErrors.phone = 'Teléfono requerido'
+    if (formData.bankCbu && formData.bankCbu.length !== 22) newErrors.bankCbu = 'El CBU debe tener 22 dígitos'
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = 'Email inválido'
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -84,9 +104,9 @@ export const OwnerForm = () => {
             <h2 className="text-xl font-semibold">Datos del Dueño</h2>
             <Input label="Nombre Completo *" name="name" value={formData.name} onChange={handleChange} placeholder="María García" error={errors.name} />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input label="DNI / CUIT *" name="dni" value={formData.dni} onChange={handleChange} placeholder="20123456789" error={errors.dni} />
+              <Input label="DNI / CUIT *" name="dni" value={formData.dni} onChange={handleChange} placeholder="20-12345678-9 o 12345678" error={errors.dni} />
               <PhoneInput label="Teléfono *" name="phone" value={formData.phone} onChange={handleChange} error={errors.phone} />
-              <Input label="Email" name="email" type="email" value={formData.email} onChange={handleChange} placeholder="maria@email.com" />
+              <Input label="Email" name="email" type="email" value={formData.email} onChange={handleChange} placeholder="maria@email.com" error={errors.email} />
             </div>
           </div>
 
@@ -96,10 +116,18 @@ export const OwnerForm = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label="Banco" name="bankName" value={formData.bankName} onChange={handleChange} placeholder="Banco Nacion" />
               <Input label="Titular" name="bankHolder" value={formData.bankHolder} onChange={handleChange} placeholder="Nombre del titular" />
-              <Input label="CUIT Titular" name="bankCuit" value={formData.bankCuit} onChange={handleChange} placeholder="20-12345678-9" />
-              <Input label="Tipo de Cuenta" name="bankAccountType" value={formData.bankAccountType} onChange={handleChange} placeholder="Caja de Ahorro" />
-              <Input label="N° de Cuenta" name="bankAccountNumber" value={formData.bankAccountNumber} onChange={handleChange} placeholder="1234567890" />
-              <Input label="CBU" name="bankCbu" value={formData.bankCbu} onChange={handleChange} placeholder="0000000000000000000000" />
+              <Input label="CUIT Titular" name="bankCuit" value={formData.bankCuit} onChange={handleChange} placeholder="20-12345678-9" maxLength={13} />
+              <div className="form-control w-full">
+                <label className="label"><span className="label-text font-medium">Tipo de Cuenta</span></label>
+                <select name="bankAccountType" className="select select-bordered w-full" value={formData.bankAccountType} onChange={handleChange}>
+                  <option value="">Seleccionar...</option>
+                  <option value="Caja de Ahorro">Caja de Ahorro</option>
+                  <option value="Cuenta Corriente">Cuenta Corriente</option>
+                </select>
+              </div>
+              <Input label="N° de Cuenta" name="bankAccountNumber" value={formData.bankAccountNumber} onChange={handleChange} placeholder="1234567890" inputMode="numeric" />
+              <Input label="CBU" name="bankCbu" value={formData.bankCbu} onChange={handleChange} placeholder="0000000000000000000000" inputMode="numeric" maxLength={22} error={errors.bankCbu} />
+              <Input label="Alias" name="bankAlias" value={formData.bankAlias} onChange={handleChange} placeholder="mi.alias.bancario" />
             </div>
           </div>
 

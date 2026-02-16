@@ -49,13 +49,18 @@ const emailService = require('../services/emailService');
 const getLiquidacion = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, contractId } = req.query;
+    const { month, year, contractId, honorariosPercent } = req.query;
 
     if (!month || !year || !contractId) {
       return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
     }
 
-    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year), options);
 
     if (!data) {
       return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
@@ -70,13 +75,18 @@ const getLiquidacion = async (req, res, next) => {
 const getLiquidacionAll = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, honorariosPercent } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const data = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const data = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), null, options);
     return ApiResponse.success(res, data);
   } catch (error) {
     next(error);
@@ -201,13 +211,18 @@ const getVencimientos = async (req, res, next) => {
 const downloadLiquidacionPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, contractId } = req.query;
+    const { month, year, contractId, honorariosPercent } = req.query;
 
     if (!month || !year || !contractId) {
       return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
     }
 
-    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year), options);
 
     if (!data) {
       return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
@@ -230,13 +245,18 @@ const downloadLiquidacionPDF = async (req, res, next) => {
 const downloadLiquidacionAllPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, honorariosPercent } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), null, options);
 
     if (dataArray.length === 0) {
       return ApiResponse.notFound(res, 'No se encontraron liquidaciones para ese período');
@@ -621,13 +641,18 @@ const sendReportEmail = async (req, res, next) => {
 const downloadLiquidacionDOCX = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, contractId } = req.query;
+    const { month, year, contractId, honorariosPercent } = req.query;
 
     if (!month || !year || !contractId) {
       return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
     }
 
-    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year), options);
     if (!data) return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
 
     const docxBuffer = await generateLiquidacionDOCX(data);
@@ -646,13 +671,18 @@ const downloadLiquidacionDOCX = async (req, res, next) => {
 const downloadLiquidacionAllDOCX = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, honorariosPercent } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), null, options);
     if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
 
     const docxBuffer = await generateLiquidacionAllDOCX(dataArray);
@@ -675,13 +705,18 @@ const downloadLiquidacionAllDOCX = async (req, res, next) => {
 const downloadLiquidacionHTMLEndpoint = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, contractId } = req.query;
+    const { month, year, contractId, honorariosPercent } = req.query;
 
     if (!month || !year || !contractId) {
       return ApiResponse.badRequest(res, 'Se requiere month, year y contractId');
     }
 
-    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const data = await getLiquidacionData(groupId, contractId, parseInt(month), parseInt(year), options);
     if (!data) return ApiResponse.notFound(res, 'No se encontró registro mensual para ese período');
 
     const html = generateLiquidacionHTML(data);
@@ -699,13 +734,18 @@ const downloadLiquidacionHTMLEndpoint = async (req, res, next) => {
 const downloadLiquidacionAllHTMLEndpoint = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, honorariosPercent } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year));
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), null, options);
     if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
 
     const html = generateLiquidacionAllHTML(dataArray);

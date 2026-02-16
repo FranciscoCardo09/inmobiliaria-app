@@ -22,13 +22,16 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
   }
 }
 
-export const useLiquidacionAll = (groupId, { month, year, propertyIds } = {}) => {
+export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent } = {}) => {
   const query = useQuery({
-    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds],
+    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
       if (propertyIds && propertyIds.length > 0) {
         params.append('propertyIds', propertyIds.join(','))
+      }
+      if (honorariosPercent) {
+        params.append('honorariosPercent', honorariosPercent)
       }
       const response = await api.get(`/groups/${groupId}/reports/liquidacion-all?${params}`)
       return response.data.data

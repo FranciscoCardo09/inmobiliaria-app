@@ -61,7 +61,11 @@ export const TenantForm = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData({ ...formData, [name]: value })
+    let processed = value
+    if (name === 'dni') {
+      processed = value.replace(/[^0-9-]/g, '')
+    }
+    setFormData({ ...formData, [name]: processed })
     if (errors[name]) {
       setErrors({ ...errors, [name]: '' })
     }
@@ -69,7 +73,8 @@ export const TenantForm = () => {
 
   const handleGuarantorChange = (index, field, value) => {
     const updated = [...guarantors]
-    updated[index] = { ...updated[index], [field]: value }
+    const processed = field === 'dni' ? value.replace(/[^0-9-]/g, '') : value
+    updated[index] = { ...updated[index], [field]: processed }
     setGuarantors(updated)
     // Clear guarantor-specific errors
     if (errors[`guarantor_${index}_${field}`]) {
@@ -173,7 +178,7 @@ export const TenantForm = () => {
                 name="dni"
                 value={formData.dni}
                 onChange={handleChange}
-                placeholder="12345678"
+                placeholder="20-12345678-9 o 12345678"
                 error={errors.dni}
               />
               <PhoneInput

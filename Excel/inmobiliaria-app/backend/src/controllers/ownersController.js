@@ -66,7 +66,7 @@ const getOwnerById = async (req, res, next) => {
 const createOwner = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias } = req.body;
 
     if (!name || !dni || !phone) {
       return ApiResponse.badRequest(res, 'Nombre, DNI y teléfono son requeridos');
@@ -81,7 +81,7 @@ const createOwner = async (req, res, next) => {
     }
 
     const owner = await prisma.owner.create({
-      data: { groupId, name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu },
+      data: { groupId, name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias },
       include: { _count: { select: { properties: true } } },
     });
 
@@ -95,7 +95,7 @@ const createOwner = async (req, res, next) => {
 const updateOwner = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias } = req.body;
 
     const owner = await prisma.owner.findUnique({ where: { id } });
     if (!owner || owner.groupId !== groupId) {
@@ -124,6 +124,7 @@ const updateOwner = async (req, res, next) => {
         ...(bankAccountType !== undefined && { bankAccountType }),
         ...(bankAccountNumber !== undefined && { bankAccountNumber }),
         ...(bankCbu !== undefined && { bankCbu }),
+        ...(bankAlias !== undefined && { bankAlias }),
       },
       include: { _count: { select: { properties: true } } },
     });

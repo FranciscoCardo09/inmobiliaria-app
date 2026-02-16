@@ -71,6 +71,7 @@ model Group {
   bankAccountType String?  @map("bank_account_type")
   bankAccountNumber String? @map("bank_account_number")
   bankCbu         String?  @map("bank_cbu")
+  bankAlias       String?  @map("bank_alias")
 
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -210,6 +211,7 @@ model Owner {
   bankAccountType String?  @map("bank_account_type")
   bankAccountNumber String? @map("bank_account_number")
   bankCbu         String?  @map("bank_cbu")
+  bankAlias       String?  @map("bank_alias")
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -288,6 +290,7 @@ model Tenant {
   // Relations
   group           Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   contracts       Contract[]
+  contractTenants ContractTenant[]
   guarantors      Guarantor[]
 
   @@unique([groupId, dni])
@@ -318,7 +321,7 @@ model Guarantor {
 model Contract {
   id                  String   @id @default(uuid())
   groupId             String   @map("group_id")
-  tenantId            String   @map("tenant_id")
+  tenantId            String?  @map("tenant_id")
   propertyId          String   @map("property_id")
   startDate           DateTime @map("start_date")          // Fecha inicio
   startMonth          Int      @default(1) @map("start_month") // Mes de inicio del contrato (para calcular ajustes)
@@ -342,9 +345,10 @@ model Contract {
 
   // Relations
   group               Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant              Tenant?          @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   property            Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   adjustmentIndex     AdjustmentIndex? @relation(fields: [adjustmentIndexId], references: [id], onDelete: SetNull)
+  contractTenants     ContractTenant[]
   payments            Payment[]
   monthlyRecords      MonthlyRecord[]
   debts               Debt[]
@@ -626,4 +630,24 @@ model DebtPayment {
   debt                Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
 
   @@map("debt_payments")
+}
+
+// ============================================
+// FASE 6+: Múltiples inquilinos por contrato
+// ============================================
+
+// ContractTenant - Tabla intermedia contrato-inquilino
+model ContractTenant {
+  id          String   @id @default(uuid())
+  contractId  String   @map("contract_id")
+  tenantId    String   @map("tenant_id")
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([contractId, tenantId])
+  @@map("contract_tenants")
 }

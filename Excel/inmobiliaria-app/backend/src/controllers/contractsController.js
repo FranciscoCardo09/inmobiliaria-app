@@ -99,11 +99,14 @@ const getContracts = async (req, res, next) => {
     else if (status === 'INACTIVE') where.active = false;
 
     if (propertyId) where.propertyId = propertyId;
-    if (tenantId) where.tenantId = tenantId;
+    if (tenantId) {
+      where.contractTenants = { some: { tenantId } };
+    }
 
     if (search) {
       where.OR = [
-        { tenant: { name: { contains: search } } },
+        { contractTenants: { some: { tenant: { name: { contains: search } } } } },
+        { tenant: { is: { name: { contains: search } } } },
         { property: { address: { contains: search } } },
         { observations: { contains: search } },
       ];
@@ -113,13 +116,22 @@ const getContracts = async (req, res, next) => {
       where,
       include: {
         tenant: { select: { id: true, name: true, dni: true, phone: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { id: true, address: true, code: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
     });
 
-    return ApiResponse.success(res, contracts.map(enrichContract));
+    // Enrich with tenants array
+    const enriched = contracts.map((c) => {
+      const tenants = c.contractTenants.length > 0
+        ? c.contractTenants.map((ct) => ct.tenant)
+        : c.tenant ? [c.tenant] : [];
+      return { ...enrichContract(c), tenants };
+    });
+
+    return ApiResponse.success(res, enriched);
   } catch (error) {
     next(error);
   }
@@ -134,6 +146,7 @@ const getExpiringContracts = async (req, res, next) => {
       where: { groupId, active: true },
       include: {
         tenant: { select: { id: true, name: true, dni: true, phone: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
         property: {
           select: {
             id: true, address: true, code: true,
@@ -147,7 +160,12 @@ const getExpiringContracts = async (req, res, next) => {
 
     // Filter: remaining months <= 2
     const expiring = contracts
-      .map(enrichContract)
+      .map((c) => {
+        const tenants = c.contractTenants.length > 0
+          ? c.contractTenants.map((ct) => ct.tenant)
+          : c.tenant ? [c.tenant] : [];
+        return { ...enrichContract(c), tenants };
+      })
       .filter((c) => c.isExpiringSoon);
 
     return ApiResponse.success(res, expiring);
@@ -188,6 +206,7 @@ const getContractById = async (req, res, next) => {
       where: { id },
       include: {
         tenant: true,
+        contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
         property: {
           include: {
             category: { select: { id: true, name: true, color: true } },
@@ -202,7 +221,11 @@ const getContractById = async (req, res, next) => {
       return ApiResponse.notFound(res, 'Contrato no encontrado');
     }
 
-    return ApiResponse.success(res, enrichContract(contract));
+    const tenants = contract.contractTenants.length > 0
+      ? contract.contractTenants.map((ct) => ct.tenant)
+      : contract.tenant ? [contract.tenant] : [];
+
+    return ApiResponse.success(res, { ...enrichContract(contract), tenants });
   } catch (error) {
     next(error);
   }
@@ -214,6 +237,7 @@ const createContract = async (req, res, next) => {
     const { groupId } = req.params;
     const {
       tenantId,
+      tenantIds,
       propertyId,
       startDate,
       durationMonths,
@@ -225,17 +249,24 @@ const createContract = async (req, res, next) => {
       observations,
     } = req.body;
 
-    if (!tenantId || !propertyId || !startDate || !baseRent || !durationMonths) {
+    if (!propertyId || !startDate || !baseRent || !durationMonths) {
       return ApiResponse.badRequest(
         res,
-        'Inquilino, propiedad, fecha inicio, duración y monto son requeridos'
+        'Propiedad, fecha inicio, duración y monto son requeridos'
       );
     }
 
-    // Verify tenant belongs to group
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant || tenant.groupId !== groupId) {
-      return ApiResponse.badRequest(res, 'Inquilino invalido');
+    // Resolve tenant IDs: prefer tenantIds array, fallback to single tenantId
+    const resolvedTenantIds = tenantIds && tenantIds.length > 0
+      ? tenantIds
+      : tenantId ? [tenantId] : [];
+
+    // Verify all tenants belong to group
+    for (const tid of resolvedTenantIds) {
+      const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
+      if (!tenant || tenant.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Inquilino invalido');
+      }
     }
 
     // Verify property belongs to group
@@ -272,10 +303,12 @@ const createContract = async (req, res, next) => {
       );
     }
 
+    const primaryTenantId = resolvedTenantIds.length > 0 ? resolvedTenantIds[0] : null;
+
     const contract = await prisma.contract.create({
       data: {
         groupId,
-        tenantId,
+        tenantId: primaryTenantId,
         propertyId,
         startDate: parseLocalDate(startDate),
         startMonth: startMonthVal,
@@ -287,9 +320,16 @@ const createContract = async (req, res, next) => {
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
         observations,
+        contractTenants: resolvedTenantIds.length > 0 ? {
+          create: resolvedTenantIds.map((tid, i) => ({
+            tenantId: tid,
+            isPrimary: i === 0,
+          })),
+        } : undefined,
       },
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { id: true, address: true, code: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
@@ -306,7 +346,11 @@ const createContract = async (req, res, next) => {
       },
     });
 
-    return ApiResponse.created(res, enrichContract(contract), 'Contrato creado exitosamente');
+    const tenants = contract.contractTenants.length > 0
+      ? contract.contractTenants.map((ct) => ct.tenant)
+      : contract.tenant ? [contract.tenant] : [];
+
+    return ApiResponse.created(res, { ...enrichContract(contract), tenants }, 'Contrato creado exitosamente');
   } catch (error) {
     next(error);
   }
@@ -326,6 +370,7 @@ const updateContract = async (req, res, next) => {
       punitoryPercent,
       active,
       observations,
+      tenantIds,
     } = req.body;
 
     const contract = await prisma.contract.findUnique({ where: { id } });
@@ -342,6 +387,30 @@ const updateContract = async (req, res, next) => {
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
     if (active !== undefined) data.active = active;
     if (observations !== undefined) data.observations = observations;
+
+    // Handle tenantIds update
+    if (tenantIds !== undefined) {
+      // Verify all tenants belong to group
+      for (const tid of tenantIds) {
+        const t = await prisma.tenant.findUnique({ where: { id: tid } });
+        if (!t || t.groupId !== groupId) {
+          return ApiResponse.badRequest(res, 'Inquilino invalido');
+        }
+      }
+      // Update primary tenantId for backward compat
+      data.tenantId = tenantIds.length > 0 ? tenantIds[0] : null;
+      // Replace contractTenants
+      await prisma.contractTenant.deleteMany({ where: { contractId: id } });
+      if (tenantIds.length > 0) {
+        await prisma.contractTenant.createMany({
+          data: tenantIds.map((tid, i) => ({
+            contractId: id,
+            tenantId: tid,
+            isPrimary: i === 0,
+          })),
+        });
+      }
+    }
 
     // Handle adjustment index change - LÓGICA CORREGIDA
     if (adjustmentIndexId !== undefined) {
@@ -365,12 +434,17 @@ const updateContract = async (req, res, next) => {
       data,
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { id: true, address: true, code: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
     });
 
-    return ApiResponse.success(res, enrichContract(updated), 'Contrato actualizado');
+    const tenants = updated.contractTenants.length > 0
+      ? updated.contractTenants.map((ct) => ct.tenant)
+      : updated.tenant ? [updated.tenant] : [];
+
+    return ApiResponse.success(res, { ...enrichContract(updated), tenants }, 'Contrato actualizado');
   } catch (error) {
     next(error);
   }
@@ -386,6 +460,7 @@ const deleteContract = async (req, res, next) => {
       include: {
         debts: { where: { status: { in: ['OPEN', 'PARTIAL'] } } },
         tenant: { select: { name: true } },
+        contractTenants: { include: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { address: true } },
       },
     });
@@ -402,13 +477,17 @@ const deleteContract = async (req, res, next) => {
       );
     }
 
+    const tenantName = contract.contractTenants.length > 0
+      ? contract.contractTenants.map((ct) => ct.tenant.name).join(' / ')
+      : contract.tenant?.name || 'Sin inquilino';
+
     // Cascade will delete payments, monthly records, closed debts, etc.
     await prisma.contract.delete({ where: { id } });
 
     return ApiResponse.success(
       res,
       { id },
-      `Contrato de ${contract.tenant?.name} en ${contract.property?.address} eliminado`
+      `Contrato de ${tenantName} en ${contract.property?.address} eliminado`
     );
   } catch (error) {
     next(error);
@@ -475,15 +554,21 @@ const assignTenantToProperty = async (req, res, next) => {
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
         observations,
+        contractTenants: {
+          create: { tenantId, isPrimary: true },
+        },
       },
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { id: true, address: true, code: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
     });
 
-    return ApiResponse.created(res, enrichContract(contract), 'Inquilino asignado a propiedad exitosamente');
+    const tenants = contract.contractTenants.map((ct) => ct.tenant);
+
+    return ApiResponse.created(res, { ...enrichContract(contract), tenants }, 'Inquilino asignado a propiedad exitosamente');
   } catch (error) {
     next(error);
   }

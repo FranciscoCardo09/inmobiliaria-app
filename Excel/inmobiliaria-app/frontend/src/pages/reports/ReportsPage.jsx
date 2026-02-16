@@ -17,6 +17,7 @@ import {
   useSendReportEmail,
 } from '../../hooks/useReports'
 import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 import api from '../../services/api'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
@@ -133,12 +134,14 @@ function LiquidacionTab({ groupId }) {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
   const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
+  const [honorariosPercent, setHonorariosPercent] = useState('')
 
   const { properties } = useProperties(groupId, { isActive: true })
-  const { data: allData, isLoading } = useLiquidacionAll(groupId, { 
-    month: String(month), 
+  const { data: allData, isLoading } = useLiquidacionAll(groupId, {
+    month: String(month),
     year: String(year),
-    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined
+    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined,
+    honorariosPercent: honorariosPercent || undefined,
   })
   const { downloadPDF, downloadExcel, downloadDOCX, downloadHTML } = useReportDownload(groupId)
 
@@ -157,7 +160,8 @@ function LiquidacionTab({ groupId }) {
 
   const buildParams = () => {
     const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
-    return `month=${month}&year=${year}${propertyIdsParam}`
+    const honorariosParam = honorariosPercent ? `&honorariosPercent=${honorariosPercent}` : ''
+    return `month=${month}&year=${year}${propertyIdsParam}${honorariosParam}`
   }
 
   const handleDownloadPDF = () => {
@@ -215,10 +219,23 @@ function LiquidacionTab({ groupId }) {
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
             <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-              {[2024, 2025, 2026, 2027].map((y) => (
+              {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="label"><span className="label-text text-xs">Honorarios %</span></label>
+            <input
+              type="number"
+              className="input input-bordered input-sm w-full"
+              placeholder="Ej: 5"
+              value={honorariosPercent}
+              onChange={(e) => setHonorariosPercent(e.target.value)}
+              min="0"
+              max="100"
+              step="0.5"
+            />
           </div>
         </div>
         <div className="mt-4">
@@ -379,15 +396,17 @@ function EstadoCuentasTab({ groupId }) {
       <Card title="Filtros">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
           <div className="sm:col-span-2">
-            <label className="label"><span className="label-text text-xs">Contrato / Inquilino</span></label>
-            <select className="select select-bordered select-sm w-full" value={contractId} onChange={(e) => setContractId(e.target.value)}>
-              <option value="">Seleccionar contrato...</option>
-              {contracts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.tenant?.name} - {c.property?.address}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              label="Contrato / Inquilino"
+              name="contractId"
+              options={contracts.map((c) => ({
+                value: c.id,
+                label: `${c.tenants?.length > 0 ? c.tenants.map(t => t.name).join(' / ') : c.tenant?.name || 'Sin inquilino'} - ${c.property?.address}`,
+              }))}
+              value={contractId}
+              onChange={(e) => setContractId(e.target.value)}
+              placeholder="Buscar contrato..."
+            />
           </div>
           <div className="flex items-end gap-2">
             {contractId && (
@@ -544,15 +563,17 @@ function CartaDocumentoTab({ groupId }) {
       <Card title="Carta Documento - Intimación de Pago">
         <div className="space-y-4 mt-2">
           <div>
-            <label className="label"><span className="label-text text-xs">Contrato / Inquilino (con deuda)</span></label>
-            <select className="select select-bordered select-sm w-full" value={contractId} onChange={(e) => setContractId(e.target.value)}>
-              <option value="">Seleccionar contrato...</option>
-              {contracts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.tenant?.name} - {c.property?.address}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              label="Contrato / Inquilino (con deuda)"
+              name="contractId"
+              options={contracts.map((c) => ({
+                value: c.id,
+                label: `${c.tenants?.length > 0 ? c.tenants.map(t => t.name).join(' / ') : c.tenant?.name || 'Sin inquilino'} - ${c.property?.address}`,
+              }))}
+              value={contractId}
+              onChange={(e) => setContractId(e.target.value)}
+              placeholder="Buscar contrato..."
+            />
           </div>
           <div>
             <label className="label"><span className="label-text text-xs">Mensaje personalizado (opcional)</span></label>
@@ -602,12 +623,12 @@ function PagoEfectivoTab({ groupId }) {
 
   const recordOptions = records.map((r) => ({
     value: r.id,
-    label: `${r.tenant?.name || 'Sin inquilino'} - ${r.property?.address || 'Sin propiedad'}`,
+    label: `${r.tenants?.length > 0 ? r.tenants.map(t => t.name).join(' / ') : r.tenant?.name || 'Sin inquilino'} - ${r.property?.address || 'Sin propiedad'}`,
   }))
 
   const handleDownloadSingle = (recordId) => {
     const rec = records.find((r) => r.id === recordId)
-    const name = rec?.tenant?.name || 'recibo'
+    const name = rec?.tenants?.length > 0 ? rec.tenants[0].name : rec?.tenant?.name || 'recibo'
     downloadPDF(`pago-efectivo/pdf?monthlyRecordId=${recordId}`, `recibo-${name.toLowerCase().replace(/\s/g, '-')}.pdf`)
   }
 
@@ -648,7 +669,7 @@ function PagoEfectivoTab({ groupId }) {
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
             <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => { setYear(parseInt(e.target.value)); setSelectedIds([]) }}>
-              {[2024, 2025, 2026, 2027].map((y) => (
+              {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -704,7 +725,7 @@ function PagoEfectivoTab({ groupId }) {
                   
                   return (
                     <tr key={r.id}>
-                      <td className="font-medium">{r.tenant?.name || '-'}</td>
+                      <td className="font-medium">{r.tenants?.length > 0 ? r.tenants.map(t => t.name).join(' / ') : r.tenant?.name || '-'}</td>
                       <td>{r.property?.address || '-'}</td>
                       <td className="text-right font-medium">{formatCurrency(r.liveTotalDue || r.totalDue)}</td>
                       <td><StatusBadge status={displayStatus} isPaid={isFullyPaid} /></td>
@@ -751,7 +772,7 @@ function AjustesTab({ groupId }) {
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
             <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-              {[2024, 2025, 2026, 2027].map((y) => (
+              {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -842,7 +863,7 @@ function ControlMensualTab({ groupId }) {
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
             <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-              {[2024, 2025, 2026, 2027].map((y) => (
+              {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -990,7 +1011,7 @@ function ImpuestosTab({ groupId }) {
           <div>
             <label className="label"><span className="label-text text-xs">Año</span></label>
             <select className="select select-bordered select-sm w-full" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-              {[2024, 2025, 2026, 2027].map((y) => (
+              {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -1015,17 +1036,17 @@ function ImpuestosTab({ groupId }) {
             )}
           </div>
           <div>
-            <label className="label"><span className="label-text text-xs">Filtrar por dueño (opcional)</span></label>
-            <select 
-              className="select select-bordered select-sm w-full" 
-              value={selectedOwnerId} 
+            <SearchableSelect
+              label="Filtrar por dueño (opcional)"
+              name="ownerId"
+              options={(owners || []).map((owner) => ({
+                value: owner.id,
+                label: owner.name,
+              }))}
+              value={selectedOwnerId}
               onChange={(e) => setSelectedOwnerId(e.target.value)}
-            >
-              <option value="">Todos los dueños</option>
-              {(owners || []).map((owner) => (
-                <option key={owner.id} value={owner.id}>{owner.name}</option>
-              ))}
-            </select>
+              placeholder="Todos los dueños..."
+            />
           </div>
         </div>
       </Card>

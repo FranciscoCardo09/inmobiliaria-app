@@ -146,8 +146,14 @@ export const ContractList = () => {
               {contracts.map((contract) => (
                 <tr key={contract.id} className={`hover ${contract.isExpiringSoon ? 'bg-warning/10' : ''}`}>
                   <td>
-                    <div className="font-semibold">{contract.tenant?.name}</div>
-                    <div className="text-xs text-base-content/60">DNI: {contract.tenant?.dni}</div>
+                    <div className="font-semibold">
+                      {contract.tenants?.length > 0
+                        ? contract.tenants.map((t) => t.name).join(' / ')
+                        : contract.tenant?.name || 'Sin inquilino'}
+                    </div>
+                    {(contract.tenants?.[0]?.dni || contract.tenant?.dni) && (
+                      <div className="text-xs text-base-content/60">DNI: {contract.tenants?.[0]?.dni || contract.tenant?.dni}</div>
+                    )}
                   </td>
                   <td>
                     <div className="text-sm">{contract.property?.address}</div>
@@ -171,7 +177,7 @@ export const ContractList = () => {
                     />
                   </td>
                   <td className="font-semibold">
-                    ${contract.rentAmount?.toLocaleString('es-AR')}
+                    ${Math.round(contract.rentAmount || 0).toLocaleString('es-AR')}
                   </td>
                   <td>{getStatusBadge(contract)}</td>
                   <td>
@@ -226,7 +232,11 @@ export const ContractList = () => {
             <h3 className="font-bold text-lg text-error">Eliminar Contrato</h3>
             <p className="py-4">
               ¿Estás seguro de eliminar el contrato de{' '}
-              <span className="font-semibold">{confirmDelete.tenant?.name}</span>{' '}
+              <span className="font-semibold">
+                {confirmDelete.tenants?.length > 0
+                  ? confirmDelete.tenants.map((t) => t.name).join(' / ')
+                  : confirmDelete.tenant?.name || 'Sin inquilino'}
+              </span>{' '}
               en <span className="font-semibold">{confirmDelete.property?.address}</span>?
             </p>
             <p className="text-sm text-base-content/60">

@@ -11,6 +11,7 @@ import {
   PhotoIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import PhoneInput from '../../components/ui/PhoneInput'
 
 const MAX_LOGO_SIZE = 2 * 1024 * 1024 // 2MB
 
@@ -36,6 +37,7 @@ export default function SettingsPage() {
     bankAccountType: '',
     bankAccountNumber: '',
     bankCbu: '',
+    bankAlias: '',
   })
   const [logoPreview, setLogoPreview] = useState('')
   const [logoError, setLogoError] = useState('')
@@ -61,6 +63,7 @@ export default function SettingsPage() {
         bankAccountType: settings.bankAccountType || '',
         bankAccountNumber: settings.bankAccountNumber || '',
         bankCbu: settings.bankCbu || '',
+        bankAlias: settings.bankAlias || '',
       })
       if (settings.logo) {
         setLogoPreview(settings.logo)
@@ -70,7 +73,29 @@ export default function SettingsPage() {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setForm((prev) => ({ ...prev, [name]: value }))
+    let processed = value
+
+    if (name === 'bankCbu') {
+      processed = value.replace(/\D/g, '').slice(0, 22)
+    } else if (name === 'bankAccountNumber') {
+      processed = value.replace(/\D/g, '')
+    } else if (name === 'bankCuit' || name === 'cuit') {
+      const digits = value.replace(/\D/g, '').slice(0, 11)
+      if (digits.length > 10) processed = `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`
+      else if (digits.length > 2) processed = `${digits.slice(0, 2)}-${digits.slice(2)}`
+      else processed = digits
+    } else if (name === 'fechaInicioAct') {
+      // Auto-format as DD/MM/YYYY
+      const digits = value.replace(/\D/g, '').slice(0, 8)
+      if (digits.length > 4) processed = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+      else if (digits.length > 2) processed = `${digits.slice(0, 2)}/${digits.slice(2)}`
+      else processed = digits
+    } else if (name === 'ingBrutos') {
+      // Only digits and hyphens
+      processed = value.replace(/[^\d\-]/g, '')
+    }
+
+    setForm((prev) => ({ ...prev, [name]: processed }))
   }
 
   const handleLogoChange = (e) => {
@@ -150,6 +175,7 @@ export default function SettingsPage() {
                 value={form.cuit}
                 onChange={handleChange}
                 placeholder="20-12345678-9"
+                maxLength={13}
               />
             </div>
             <div>
@@ -175,14 +201,11 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="label"><span className="label-text font-medium">Telefono</span></label>
-              <input
-                type="text"
+              <PhoneInput
+                label="Telefono"
                 name="phone"
-                className="input input-bordered w-full"
                 value={form.phone}
                 onChange={handleChange}
-                placeholder="+54 11 1234-5678"
               />
             </div>
             <div>
@@ -222,6 +245,7 @@ export default function SettingsPage() {
                 value={form.ingBrutos}
                 onChange={handleChange}
                 placeholder="N° Ingresos Brutos"
+                inputMode="numeric"
               />
             </div>
             <div>
@@ -232,19 +256,28 @@ export default function SettingsPage() {
                 className="input input-bordered w-full"
                 value={form.fechaInicioAct}
                 onChange={handleChange}
-                placeholder="01/01/2020"
+                placeholder="DD/MM/AAAA"
+                maxLength={10}
+                inputMode="numeric"
               />
             </div>
             <div className="sm:col-span-2">
               <label className="label"><span className="label-text font-medium">Condicion IVA</span></label>
-              <input
-                type="text"
+              <select
                 name="ivaCondicion"
-                className="input input-bordered w-full"
+                className="select select-bordered w-full"
                 value={form.ivaCondicion}
                 onChange={handleChange}
-                placeholder="IVA Responsable Monotributo"
-              />
+              >
+                <option value="">Seleccionar...</option>
+                <option value="IVA Responsable Inscripto">IVA Responsable Inscripto</option>
+                <option value="IVA Responsable No Inscripto">IVA Responsable No Inscripto</option>
+                <option value="IVA Sujeto Exento">IVA Sujeto Exento</option>
+                <option value="Responsable Monotributo">Responsable Monotributo</option>
+                <option value="Consumidor Final">Consumidor Final</option>
+                <option value="Monotributista Social">Monotributista Social</option>
+                <option value="IVA No Alcanzado">IVA No Alcanzado</option>
+              </select>
             </div>
           </div>
         </Card>
@@ -284,18 +317,21 @@ export default function SettingsPage() {
                 value={form.bankCuit}
                 onChange={handleChange}
                 placeholder="20-12345678-9"
+                maxLength={13}
               />
             </div>
             <div>
               <label className="label"><span className="label-text font-medium">Tipo de Cuenta</span></label>
-              <input
-                type="text"
+              <select
                 name="bankAccountType"
-                className="input input-bordered w-full"
+                className="select select-bordered w-full"
                 value={form.bankAccountType}
                 onChange={handleChange}
-                placeholder="Caja de Ahorro"
-              />
+              >
+                <option value="">Seleccionar...</option>
+                <option value="Caja de Ahorro">Caja de Ahorro</option>
+                <option value="Cuenta Corriente">Cuenta Corriente</option>
+              </select>
             </div>
             <div>
               <label className="label"><span className="label-text font-medium">N° de Cuenta</span></label>
@@ -306,6 +342,7 @@ export default function SettingsPage() {
                 value={form.bankAccountNumber}
                 onChange={handleChange}
                 placeholder="1234567890"
+                inputMode="numeric"
               />
             </div>
             <div>
@@ -317,6 +354,19 @@ export default function SettingsPage() {
                 value={form.bankCbu}
                 onChange={handleChange}
                 placeholder="0000000000000000000000"
+                inputMode="numeric"
+                maxLength={22}
+              />
+            </div>
+            <div>
+              <label className="label"><span className="label-text font-medium">Alias</span></label>
+              <input
+                type="text"
+                name="bankAlias"
+                className="input input-bordered w-full"
+                value={form.bankAlias}
+                onChange={handleChange}
+                placeholder="mi.alias.bancario"
               />
             </div>
           </div>

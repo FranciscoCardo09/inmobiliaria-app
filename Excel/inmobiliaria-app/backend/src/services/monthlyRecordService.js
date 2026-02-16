@@ -75,6 +75,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     where: { groupId, active: true },
     include: {
       tenant: { select: { id: true, name: true, dni: true } },
+      contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
       property: {
         select: {
           id: true,
@@ -418,7 +419,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         nextAdjustmentMonth: contract.nextAdjustmentMonth,
         adjustmentIndex: contract.adjustmentIndex,
       },
-      tenant: contract.tenant,
+      tenant: contract.tenant || null,
+      tenants: contract.contractTenants?.length > 0
+        ? contract.contractTenants.map((ct) => ct.tenant)
+        : contract.tenant ? [contract.tenant] : [],
       property: contract.property,
       owner: contract.property?.owner,
       periodLabel: `${monthNames[month]} - Mes ${monthNumber}`,
@@ -563,6 +567,7 @@ const getMonthlyRecordById = async (groupId, id) => {
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
+          contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
           property: {
             select: {
               id: true,

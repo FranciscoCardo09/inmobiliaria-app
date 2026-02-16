@@ -6,6 +6,14 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+// Helper: get tenant name(s) from contract (supports multi-tenant)
+const getTenantsNameAdj = (contract) => {
+  if (contract.contractTenants && contract.contractTenants.length > 0) {
+    return contract.contractTenants.map((ct) => ct.tenant.name).join(' / ');
+  }
+  return contract.tenant?.name || 'Sin inquilino';
+};
+
 /**
  * Calculate the next adjustment month based on start month and frequency
  * LÓGICA CORREGIDA:
@@ -76,6 +84,7 @@ const calculateContractMonthFromCalendar = (contractStartDate, calendarMonth, ca
 const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, calendarYear) => {
   const contractInclude = {
     tenant: { select: { id: true, name: true, dni: true } },
+    contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
     property: {
       select: {
         id: true,
@@ -160,6 +169,7 @@ const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, cale
 const getContractsWithAdjustmentThisMonth = async (groupId) => {
   const contractInclude = {
     tenant: { select: { id: true, name: true, dni: true } },
+    contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
     property: {
       select: {
         id: true,
@@ -192,6 +202,7 @@ const getContractsWithAdjustmentThisMonth = async (groupId) => {
 const getContractsWithAdjustmentNextMonth = async (groupId) => {
   const contractInclude = {
     tenant: { select: { id: true, name: true, dni: true } },
+    contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
     property: {
       select: {
         id: true,
@@ -226,6 +237,7 @@ const getContractsWithAdjustmentNextMonth = async (groupId) => {
 const getContractsWithAdjustmentInMonth = async (groupId, targetMonth) => {
   const contractInclude = {
     tenant: { select: { id: true, name: true, dni: true } },
+    contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
     property: {
       select: {
         id: true,
@@ -307,13 +319,14 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
       },
       include: {
         tenant: { select: { name: true } },
+        contractTenants: { include: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { address: true } },
       },
     });
 
     results.push({
       contractId: updated.id,
-      tenant: updated.tenant.name,
+      tenant: getTenantsNameAdj(updated),
       property: updated.property.address,
       oldRent: contract.baseRent,
       newRent: newRent,
@@ -378,13 +391,14 @@ const applyAdjustmentToSpecificMonth = async (groupId, indexId, percentageIncrea
       },
       include: {
         tenant: { select: { name: true } },
+        contractTenants: { include: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { address: true } },
       },
     });
 
     results.push({
       contractId: updated.id,
-      tenant: updated.tenant.name,
+      tenant: getTenantsNameAdj(updated),
       property: updated.property.address,
       oldRent: contract.baseRent,
       newRent: newRent,
@@ -421,6 +435,7 @@ const undoAdjustmentForMonth = async (groupId, indexId, targetMonth) => {
         include: {
           adjustmentIndex: { select: { frequencyMonths: true } },
           tenant: { select: { name: true } },
+        contractTenants: { include: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
           property: { select: { address: true } },
         },
       },
@@ -463,7 +478,7 @@ const undoAdjustmentForMonth = async (groupId, indexId, targetMonth) => {
 
     results.push({
       contractId: updated.id,
-      tenant: contract.tenant.name,
+      tenant: getTenantsNameAdj(contract),
       property: contract.property.address,
       currentRent: history.rentAmount,
       restoredRent: previousRent,
@@ -561,7 +576,7 @@ const applyAdjustmentToCalendar = async (groupId, indexId, percentageIncrease, c
 
     results.push({
       contractId: updated.id,
-      tenant: contract.tenant.name,
+      tenant: getTenantsNameAdj(contract),
       property: contract.property.address,
       oldRent: currentRent,
       newRent: newRent,
@@ -646,7 +661,7 @@ const undoAdjustmentForCalendar = async (groupId, indexId, calendarMonth, calend
 
     results.push({
       contractId: contract.id,
-      tenant: contract.tenant.name,
+      tenant: getTenantsNameAdj(contract),
       property: contract.property.address,
       currentRent: history.rentAmount,
       restoredRent: previousRent,
