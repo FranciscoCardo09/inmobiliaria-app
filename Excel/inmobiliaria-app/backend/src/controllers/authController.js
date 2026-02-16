@@ -60,8 +60,9 @@ const register = async (req, res, next) => {
       },
     });
 
-    // Send verification email
-    await emailService.sendVerificationEmail(user, verificationToken);
+    // Send verification email (don't block registration if email fails)
+    emailService.sendVerificationEmail(user, verificationToken)
+      .catch(err => console.error('Failed to send verification email:', err.message));
 
     return ApiResponse.created(res, {
       user,
