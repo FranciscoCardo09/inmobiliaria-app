@@ -10,8 +10,15 @@ import {
   Cog6ToothIcon,
   PhotoIcon,
   XMarkIcon,
+  PlusIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline'
 import PhoneInput from '../../components/ui/PhoneInput'
+
+// Helper: split semicolon-delimited values into array, filter empty
+const splitMulti = (val) => (val || '').split(';').map(v => v.trim()).filter(Boolean)
+// Helper: join array into semicolon-delimited string
+const joinMulti = (arr) => arr.filter(Boolean).join('; ')
 
 const MAX_LOGO_SIZE = 2 * 1024 * 1024 // 2MB
 
@@ -22,8 +29,8 @@ export default function SettingsPage() {
   const [form, setForm] = useState({
     companyName: '',
     address: '',
-    phone: '',
-    email: '',
+    phones: [''],
+    emails: [''],
     cuit: '',
     localidad: '',
     logo: '',
@@ -48,8 +55,8 @@ export default function SettingsPage() {
       setForm({
         companyName: settings.companyName || '',
         address: settings.address || '',
-        phone: settings.phone || '',
-        email: settings.email || '',
+        phones: splitMulti(settings.phone).length > 0 ? splitMulti(settings.phone) : [''],
+        emails: splitMulti(settings.email).length > 0 ? splitMulti(settings.email) : [''],
         cuit: settings.cuit || '',
         localidad: settings.localidad || '',
         logo: settings.logo || '',
@@ -98,6 +105,31 @@ export default function SettingsPage() {
     setForm((prev) => ({ ...prev, [name]: processed }))
   }
 
+  // Multi-value handlers for phones
+  const handlePhoneChange = (index, e) => {
+    const val = typeof e === 'string' ? e : e?.target?.value || ''
+    const updated = [...form.phones]
+    updated[index] = val
+    setForm(prev => ({ ...prev, phones: updated }))
+  }
+  const addPhone = () => setForm(prev => ({ ...prev, phones: [...prev.phones, ''] }))
+  const removePhone = (index) => {
+    const updated = form.phones.filter((_, i) => i !== index)
+    setForm(prev => ({ ...prev, phones: updated.length > 0 ? updated : [''] }))
+  }
+
+  // Multi-value handlers for emails
+  const handleEmailChange = (index, value) => {
+    const updated = [...form.emails]
+    updated[index] = value
+    setForm(prev => ({ ...prev, emails: updated }))
+  }
+  const addEmail = () => setForm(prev => ({ ...prev, emails: [...prev.emails, ''] }))
+  const removeEmail = (index) => {
+    const updated = form.emails.filter((_, i) => i !== index)
+    setForm(prev => ({ ...prev, emails: updated.length > 0 ? updated : [''] }))
+  }
+
   const handleLogoChange = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -131,7 +163,11 @@ export default function SettingsPage() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    updateSettings(form)
+    updateSettings({
+      ...form,
+      phone: joinMulti(form.phones),
+      email: joinMulti(form.emails),
+    })
   }
 
   if (!currentGroupId) {
@@ -200,24 +236,56 @@ export default function SettingsPage() {
                 placeholder="Av. Ejemplo 1234, Piso 2"
               />
             </div>
-            <div>
-              <PhoneInput
-                label="Telefono"
-                name="phone"
-                value={form.phone}
-                onChange={handleChange}
-              />
+            <div className="sm:col-span-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="label-text font-medium">Telefonos</label>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={addPhone}>
+                  <PlusIcon className="w-3 h-3" /> Agregar
+                </button>
+              </div>
+              {form.phones.map((phone, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <PhoneInput
+                      name={`phone_${idx}`}
+                      value={phone}
+                      onChange={(e) => handlePhoneChange(idx, e)}
+                    />
+                  </div>
+                  {form.phones.length > 1 && (
+                    <button type="button" className="btn btn-ghost btn-sm text-error mt-1" onClick={() => removePhone(idx)}>
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="label"><span className="label-text font-medium">Email</span></label>
-              <input
-                type="email"
-                name="email"
-                className="input input-bordered w-full"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="contacto@inmobiliaria.com"
-              />
+            <div className="sm:col-span-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="label-text font-medium">Emails</label>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={addEmail}>
+                  <PlusIcon className="w-3 h-3" /> Agregar
+                </button>
+              </div>
+              {form.emails.map((email, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <input
+                      type="email"
+                      name={`email_${idx}`}
+                      className="input input-bordered w-full"
+                      value={email}
+                      onChange={(e) => handleEmailChange(idx, e.target.value)}
+                      placeholder="contacto@inmobiliaria.com"
+                    />
+                  </div>
+                  {form.emails.length > 1 && (
+                    <button type="button" className="btn btn-ghost btn-sm text-error mt-1" onClick={() => removeEmail(idx)}>
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
             <div className="sm:col-span-2">
               <label className="label"><span className="label-text font-medium">Subtitulo (para reportes)</span></label>
@@ -263,21 +331,14 @@ export default function SettingsPage() {
             </div>
             <div className="sm:col-span-2">
               <label className="label"><span className="label-text font-medium">Condicion IVA</span></label>
-              <select
+              <input
+                type="text"
                 name="ivaCondicion"
-                className="select select-bordered w-full"
+                className="input input-bordered w-full"
                 value={form.ivaCondicion}
                 onChange={handleChange}
-              >
-                <option value="">Seleccionar...</option>
-                <option value="IVA Responsable Inscripto">IVA Responsable Inscripto</option>
-                <option value="IVA Responsable No Inscripto">IVA Responsable No Inscripto</option>
-                <option value="IVA Sujeto Exento">IVA Sujeto Exento</option>
-                <option value="Responsable Monotributo">Responsable Monotributo</option>
-                <option value="Consumidor Final">Consumidor Final</option>
-                <option value="Monotributista Social">Monotributista Social</option>
-                <option value="IVA No Alcanzado">IVA No Alcanzado</option>
-              </select>
+                placeholder="Ej: IVA Responsable Inscripto, Monotributo, etc."
+              />
             </div>
           </div>
         </Card>

@@ -113,13 +113,19 @@ const drawHeader = (doc, emp) => {
     doc.font(F.r).fontSize(8).fillColor(C.dark).text(parts, tx, 30, { width: 260 });
   }
 
-  // Right side - CUIT, phone, email
+  // Right side - CUIT, phones, emails
   const rx = PAGE.width - PAGE.margin - 160;
   let ry = 12;
   doc.font(F.r).fontSize(8).fillColor(C.dark);
   if (emp.cuit) { doc.text(`CUIT ${emp.cuit}`, rx, ry, { width: 160, align: 'right' }); ry += 12; }
-  if (emp.telefono) { doc.text(emp.telefono, rx, ry, { width: 160, align: 'right' }); ry += 12; }
-  if (emp.email) { doc.text(emp.email, rx, ry, { width: 160, align: 'right' }); ry += 12; }
+  if (emp.telefono) {
+    const phones = emp.telefono.split(';').map(p => p.trim()).filter(Boolean);
+    for (const p of phones) { doc.text(p, rx, ry, { width: 160, align: 'right' }); ry += 10; }
+  }
+  if (emp.email) {
+    const emails = emp.email.split(';').map(e => e.trim()).filter(Boolean);
+    for (const e of emails) { doc.text(e, rx, ry, { width: 160, align: 'right' }); ry += 10; }
+  }
 
   doc.fillColor(C.black);
   return 84;
@@ -631,8 +637,14 @@ const generatePagoEfectivoPDF = (data) => {
     y += 12;
     doc.font(F.r).fontSize(7).fillColor(C.dark);
     if (emp.direccion) { doc.text(emp.direccion, lx, y, { width: leftW - 40 }); y += 9; }
-    if (emp.telefono) { doc.text(emp.telefono, lx, y, { width: leftW - 40 }); y += 9; }
-    if (emp.email) { doc.text(emp.email, lx, y, { width: leftW - 40 }); y += 9; }
+    if (emp.telefono) {
+      const phones = emp.telefono.split(';').map(p => p.trim()).filter(Boolean);
+      for (const p of phones) { doc.text(p, lx, y, { width: leftW - 40 }); y += 9; }
+    }
+    if (emp.email) {
+      const emails = emp.email.split(';').map(e => e.trim()).filter(Boolean);
+      for (const e of emails) { doc.text(e, lx, y, { width: leftW - 40 }); y += 9; }
+    }
 
     // Right: Receipt number box
     const boxY = rMargin;
@@ -783,8 +795,14 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
       y += 12;
       doc.font(F.r).fontSize(7).fillColor(C.dark);
       if (emp.direccion) { doc.text(emp.direccion, lx, y, { width: leftW - 40 }); y += 9; }
-      if (emp.telefono) { doc.text(emp.telefono, lx, y, { width: leftW - 40 }); y += 9; }
-      if (emp.email) { doc.text(emp.email, lx, y, { width: leftW - 40 }); y += 9; }
+      if (emp.telefono) {
+        const phones = emp.telefono.split(';').map(p => p.trim()).filter(Boolean);
+        for (const p of phones) { doc.text(p, lx, y, { width: leftW - 40 }); y += 9; }
+      }
+      if (emp.email) {
+        const emails = emp.email.split(';').map(e => e.trim()).filter(Boolean);
+        for (const e of emails) { doc.text(e, lx, y, { width: leftW - 40 }); y += 9; }
+      }
 
       const boxY = rMargin;
       const boxH = 48;
