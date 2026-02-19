@@ -16,8 +16,8 @@ export const PropertyForm = () => {
   const { id } = useParams()
   const isEditing = !!id
 
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
   const { createProperty, updateProperty, isCreating, isUpdating, useProperty } = useProperties(currentGroup?.id)
   const { categories } = useCategories(currentGroup?.id)
