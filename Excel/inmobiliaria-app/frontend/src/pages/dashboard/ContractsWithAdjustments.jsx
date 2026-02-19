@@ -13,8 +13,8 @@ import toast from 'react-hot-toast'
 
 export const ContractsWithAdjustments = () => {
   const navigate = useNavigate()
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
   const {
     indices,
     isLoading,

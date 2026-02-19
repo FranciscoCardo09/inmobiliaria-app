@@ -8,8 +8,8 @@ import Button from './ui/Button'
 
 export const ContractAlerts = () => {
   const navigate = useNavigate()
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
   const { adjustments, isLoadingAdjustments } = useAdjustmentIndices(currentGroup?.id)
 

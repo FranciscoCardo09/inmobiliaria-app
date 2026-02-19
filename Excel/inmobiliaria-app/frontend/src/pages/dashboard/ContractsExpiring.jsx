@@ -10,8 +10,8 @@ import { LoadingPage } from '../../components/ui/Loading'
 
 export const ContractsExpiring = () => {
   const navigate = useNavigate()
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
   const { expiringContracts, isLoadingExpiring } = useContracts(currentGroup?.id)
 
   if (isLoadingExpiring) return <LoadingPage />

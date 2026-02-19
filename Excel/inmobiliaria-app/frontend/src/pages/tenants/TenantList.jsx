@@ -16,8 +16,8 @@ import EmptyState from '../../components/ui/EmptyState'
 
 export const TenantList = () => {
   const navigate = useNavigate()
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
   const [filters, setFilters] = useState({
     search: '',

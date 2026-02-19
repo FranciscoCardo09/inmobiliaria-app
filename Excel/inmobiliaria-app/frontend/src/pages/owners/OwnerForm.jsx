@@ -19,8 +19,8 @@ export const OwnerForm = () => {
   const { id } = useParams()
   const isEditing = !!id
 
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
   const { createOwner, updateOwner, isCreating, isUpdating, useOwner } = useOwners(currentGroup?.id)
   const { data: owner, isLoading } = isEditing ? useOwner(id) : { data: null, isLoading: false }
 
