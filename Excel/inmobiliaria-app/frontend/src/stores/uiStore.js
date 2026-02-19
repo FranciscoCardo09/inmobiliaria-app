@@ -4,8 +4,10 @@ import { create } from 'zustand'
 export const useUIStore = create((set) => ({
   // Sidebar state
   sidebarOpen: false,
+  sidebarCollapsed: false,
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   closeSidebar: () => set({ sidebarOpen: false }),
+  toggleSidebarCollapsed: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
   // Modal state
   modalOpen: false,

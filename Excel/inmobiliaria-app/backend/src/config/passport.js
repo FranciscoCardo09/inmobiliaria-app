@@ -6,7 +6,8 @@ const config = require('./index');
 
 const prisma = new PrismaClient();
 
-// Google OAuth Strategy
+// Google OAuth Strategy - only initialize if credentials are configured
+if (config.google.clientId && config.google.clientSecret) {
 passport.use(
   new GoogleStrategy(
     {
@@ -74,6 +75,9 @@ passport.use(
     }
   )
 );
+} else {
+  console.log('Google OAuth not configured - skipping strategy initialization');
+}
 
 // Serialize user for session
 passport.serializeUser((user, done) => {

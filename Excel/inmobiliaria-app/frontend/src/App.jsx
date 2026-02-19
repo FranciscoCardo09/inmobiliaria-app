@@ -18,6 +18,27 @@ import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
 import PropertyList from './pages/properties/PropertyList'
 import PropertyForm from './pages/properties/PropertyForm'
+import OwnerList from './pages/owners/OwnerList'
+import OwnerForm from './pages/owners/OwnerForm'
+import TenantList from './pages/tenants/TenantList'
+import TenantForm from './pages/tenants/TenantForm'
+import ContractList from './pages/contracts/ContractList'
+import ContractForm from './pages/contracts/ContractForm'
+import { AdjustmentIndexList } from './pages/adjustments/AdjustmentIndexList'
+import AdjustmentIndexForm from './pages/adjustments/AdjustmentIndexForm'
+import ContractsWithAdjustments from './pages/dashboard/ContractsWithAdjustments'
+import ContractsExpiring from './pages/dashboard/ContractsExpiring'
+
+// Phase 5: Monthly Control + Debts
+import MonthlyControlPage from './pages/monthly-control/MonthlyControlPage'
+import PaymentHistoryList from './pages/payment-history/PaymentHistoryList'
+import ServiceTypeList from './pages/services/ServiceTypeList'
+
+// Phase 6: Reports
+import ReportsPage from './pages/reports/ReportsPage'
+
+// Phase 7: Settings
+import SettingsPage from './pages/settings/SettingsPage'
 
 // Loading
 import { LoadingPage } from './components/ui/Loading'
@@ -68,17 +89,45 @@ function App() {
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="dashboard/contracts-adjustments" element={<ContractsWithAdjustments />} />
+        <Route path="dashboard/contracts-expiring" element={<ContractsExpiring />} />
 
         {/* Phase 2: Properties */}
         <Route path="properties" element={<PropertyList />} />
         <Route path="properties/new" element={<PropertyForm />} />
         <Route path="properties/:id" element={<PropertyForm />} />
 
-        {/* Placeholder routes for future phases */}
-        <Route path="tenants" element={<PlaceholderPage title="Inquilinos" phase={3} />} />
-        <Route path="payments" element={<PlaceholderPage title="Pagos" phase={4} />} />
-        <Route path="reports" element={<PlaceholderPage title="Reportes" phase={6} />} />
-        <Route path="settings" element={<PlaceholderPage title="Configuracion" phase={7} />} />
+        {/* Phase 3: Owners */}
+        <Route path="owners" element={<OwnerList />} />
+        <Route path="owners/new" element={<OwnerForm />} />
+        <Route path="owners/:id" element={<OwnerForm />} />
+
+        {/* Phase 3: Tenants */}
+        <Route path="tenants" element={<TenantList />} />
+        <Route path="tenants/new" element={<TenantForm />} />
+        <Route path="tenants/:id" element={<TenantForm />} />
+
+        {/* Phase 3: Contracts */}
+        <Route path="contracts" element={<ContractList />} />
+        <Route path="contracts/new" element={<ContractForm />} />
+        <Route path="contracts/:id" element={<ContractForm />} />
+
+        {/* Phase 3: Adjustment Indices */}
+        <Route path="adjustments" element={<AdjustmentIndexList />} />
+        <Route path="adjustments/new" element={<AdjustmentIndexForm />} />
+        <Route path="adjustments/:id" element={<AdjustmentIndexForm />} />
+
+        {/* Phase 5: Monthly Control + Debts */}
+        <Route path="monthly-control" element={<MonthlyControlPage />} />
+        <Route path="debts" element={<Navigate to="/monthly-control" replace />} />
+        <Route path="payment-history" element={<PaymentHistoryList />} />
+        <Route path="services" element={<ServiceTypeList />} />
+
+        {/* Phase 6: Reports */}
+        <Route path="reports" element={<ReportsPage />} />
+
+        {/* Phase 7: Settings */}
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
 
       {/* 404 */}
@@ -86,19 +135,5 @@ function App() {
     </Routes>
   )
 }
-
-// Placeholder for future phases
-const PlaceholderPage = ({ title, phase }) => (
-  <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-    <div className="w-24 h-24 bg-base-300 rounded-full flex items-center justify-center mb-6">
-      <span className="text-4xl">🚧</span>
-    </div>
-    <h1 className="text-2xl font-bold mb-2">{title}</h1>
-    <p className="text-base-content/60 mb-4">
-      Este modulo estara disponible en la Fase {phase}
-    </p>
-    <div className="badge badge-lg badge-outline">Proximamente</div>
-  </div>
-)
 
 export default App

@@ -1,25 +1,16 @@
-// Email Service - Nodemailer with HTML Templates
+// Email Service - Resend (production) + Nodemailer (development fallback)
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const config = require('../config');
 
-// Create transporter based on environment
-const createTransporter = () => {
-  // For development, use Mailtrap or Ethereal
-  if (config.nodeEnv === 'development') {
-    return nodemailer.createTransport({
-      host: config.smtp.host || 'sandbox.smtp.mailtrap.io',
-      port: config.smtp.port || 2525,
-      auth: {
-        user: config.smtp.user,
-        pass: config.smtp.pass,
-      },
-    });
-  }
+// Initialize Resend if API key is available
+const resend = config.resend.apiKey ? new Resend(config.resend.apiKey) : null;
 
-  // For production, use configured SMTP
+// Nodemailer transporter for development/fallback
+const createTransporter = () => {
   return nodemailer.createTransport({
-    host: config.smtp.host,
-    port: config.smtp.port,
+    host: config.smtp.host || 'sandbox.smtp.mailtrap.io',
+    port: config.smtp.port || 2525,
     secure: config.smtp.secure,
     auth: {
       user: config.smtp.user,
@@ -143,11 +134,11 @@ const baseTemplate = (content, title) => `
   <div class="container">
     <div class="card">
       <div class="logo">
-        <div class="logo-icon">H</div>
+        <div class="logo-icon">G</div>
       </div>
       ${content}
       <div class="footer">
-        <p>Este email fue enviado por <strong>Inmobiliaria H&H</strong></p>
+        <p>Este email fue enviado por <strong>Gestion Alquileres</strong></p>
         <p>Si no solicitaste este email, puedes ignorarlo.</p>
       </div>
     </div>
@@ -160,7 +151,7 @@ const baseTemplate = (content, title) => `
 const verificationEmailTemplate = (name, verificationLink) => {
   const content = `
     <h1>Confirma tu email</h1>
-    <p class="subtitle">Bienvenido a Inmobiliaria H&H</p>
+    <p class="subtitle">Bienvenido a Gestion Alquileres</p>
     <div class="content">
       <p>Hola <strong>${name}</strong>,</p>
       <p>Gracias por registrarte. Para completar tu registro y acceder a tu cuenta, confirma tu email haciendo clic en el boton de abajo:</p>
@@ -176,7 +167,7 @@ const verificationEmailTemplate = (name, verificationLink) => {
       Este link expira en 24 horas. Si no solicitaste esta cuenta, ignora este email.
     </div>
   `;
-  return baseTemplate(content, 'Confirma tu Email - Inmobiliaria H&H');
+  return baseTemplate(content, 'Confirma tu Email - Gestion Alquileres');
 };
 
 // Password Reset Template
@@ -199,13 +190,13 @@ const passwordResetTemplate = (name, resetLink) => {
       Este link expira en 1 hora. Si no solicitaste este cambio, ignora este email y tu contrasena permanecera igual.
     </div>
   `;
-  return baseTemplate(content, 'Restablecer Contrasena - Inmobiliaria H&H');
+  return baseTemplate(content, 'Restablecer Contrasena - Gestion Alquileres');
 };
 
 // Welcome Email Template (after verification)
 const welcomeEmailTemplate = (name) => {
   const content = `
-    <h1>Bienvenido a Inmobiliaria H&H</h1>
+    <h1>Bienvenido a Gestion Alquileres</h1>
     <p class="subtitle">Tu cuenta ha sido verificada</p>
     <div class="content">
       <p>Hola <strong>${name}</strong>,</p>
@@ -221,24 +212,66 @@ const welcomeEmailTemplate = (name) => {
       <a href="${config.frontendUrl}/dashboard" class="btn">Ir al Dashboard</a>
     </div>
   `;
-  return baseTemplate(content, 'Bienvenido - Inmobiliaria H&H');
+  return baseTemplate(content, 'Bienvenido - Gestion Alquileres');
 };
 
-// Send email function
-const sendEmail = async ({ to, subject, html }) => {
+// Send email via Resend
+const sendWithResend = async ({ to, subject, html, attachments }) => {
+  const emailData = {
+    from: config.emailFrom,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+  };
+
+  if (attachments && attachments.length > 0) {
+    emailData.attachments = attachments.map(att => ({
+      filename: att.filename,
+      content: att.content,
+    }));
+  }
+
+  const { data, error } = await resend.emails.send(emailData);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+};
+
+// Send email via Nodemailer (fallback)
+const sendWithNodemailer = async ({ to, subject, html, attachments }) => {
+  const transporter = createTransporter();
+
+  const mailOptions = {
+    from: config.emailFrom,
+    to,
+    subject,
+    html,
+  };
+
+  if (attachments) {
+    mailOptions.attachments = attachments;
+  }
+
+  return transporter.sendMail(mailOptions);
+};
+
+// Unified send email function
+const sendEmail = async ({ to, subject, html, attachments }) => {
   try {
-    const transporter = createTransporter();
+    let result;
 
-    const mailOptions = {
-      from: config.smtp.from || '"Inmobiliaria H&H" <no-reply@inmobiliaria-hh.com>',
-      to,
-      subject,
-      html,
-    };
+    if (resend) {
+      result = await sendWithResend({ to, subject, html, attachments });
+      console.log(`Email sent via Resend to ${to}: ${result.id}`);
+    } else {
+      result = await sendWithNodemailer({ to, subject, html, attachments });
+      console.log(`Email sent via Nodemailer to ${to}: ${result.messageId}`);
+    }
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${to}: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: result.id || result.messageId };
   } catch (error) {
     console.error('Email send error:', error);
     return { success: false, error: error.message };
@@ -254,7 +287,7 @@ const emailService = {
 
     return sendEmail({
       to: user.email,
-      subject: 'Confirma tu email - Inmobiliaria H&H',
+      subject: 'Confirma tu email - Gestion Alquileres',
       html,
     });
   },
@@ -266,7 +299,7 @@ const emailService = {
 
     return sendEmail({
       to: user.email,
-      subject: 'Restablecer contrasena - Inmobiliaria H&H',
+      subject: 'Restablecer contrasena - Gestion Alquileres',
       html,
     });
   },
@@ -277,8 +310,32 @@ const emailService = {
 
     return sendEmail({
       to: user.email,
-      subject: 'Bienvenido a Inmobiliaria H&H',
+      subject: 'Bienvenido a Gestion Alquileres',
       html,
+    });
+  },
+
+  // Send report email with PDF attachment
+  sendReportEmail: async ({ to, subject, pdfBuffer, filename }) => {
+    const content = `
+      <h1>Reporte Adjunto</h1>
+      <p class="subtitle">Gestion Alquileres</p>
+      <div class="content">
+        <p>Adjuntamos el reporte solicitado: <strong>${filename}</strong></p>
+        <p>Este archivo ha sido generado automaticamente por el sistema de gestion inmobiliaria.</p>
+      </div>
+    `;
+    const html = baseTemplate(content, 'Reporte - Gestion Alquileres');
+
+    return sendEmail({
+      to,
+      subject,
+      html,
+      attachments: [{
+        filename,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      }],
     });
   },
 };

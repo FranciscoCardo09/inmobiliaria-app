@@ -1,0 +1,399 @@
+// ContractsWithAdjustments - Dashboard detail page
+// Muestra índices para aplicar ajustes + contratos con ajuste este mes Y próximo mes
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowLeftIcon, CalendarIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
+import { useAuthStore } from '../../stores/authStore'
+import { useAdjustmentIndices } from '../../hooks/useAdjustmentIndices'
+import Card from '../../components/ui/Card'
+import Button from '../../components/ui/Button'
+import EmptyState from '../../components/ui/EmptyState'
+import { LoadingPage } from '../../components/ui/Loading'
+import toast from 'react-hot-toast'
+
+export const ContractsWithAdjustments = () => {
+  const navigate = useNavigate()
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
+  const {
+    indices,
+    isLoading,
+    adjustments,
+    isLoadingAdjustments,
+    applyIndexAdjustment,
+    isApplying,
+  } = useAdjustmentIndices(currentGroup?.id)
+
+  const [indexValues, setIndexValues] = useState({})
+  const [showModal, setShowModal] = useState(false)
+  const [confirmData, setConfirmData] = useState(null)
+
+  // Inicializar valores cuando se cargan los índices
+  useEffect(() => {
+    if (indices.length > 0) {
+      const values = {}
+      indices.forEach((idx) => {
+        values[idx.id] = idx.currentValue || 0
+      })
+      setIndexValues(values)
+    }
+  }, [indices])
+
+  const handleValueChange = (indexId, value) => {
+    setIndexValues({ ...indexValues, [indexId]: value })
+  }
+
+  const handleApplyAdjustment = async (index) => {
+    const value = parseFloat(indexValues[index.id])
+
+    if (isNaN(value) || value <= 0) {
+      toast.error('Ingrese un porcentaje válido mayor a 0')
+      return
+    }
+
+    // Contar contratos afectados para este índice
+    const affectedContracts = adjustments.nextMonth.filter(
+      (c) => c.adjustmentIndex?.id === index.id
+    )
+    const count = affectedContracts.length
+
+    if (count === 0) {
+      toast.error(`No hay contratos con "${index.name}" que ajusten el próximo mes`)
+      return
+    }
+
+    // Preparar datos para el modal
+    const contractsWithCalculations = affectedContracts.map((contract) => {
+      const currentRent = contract.baseRent
+      const newRent = Math.round(currentRent * (1 + value / 100))
+      const increase = newRent - currentRent
+
+      return {
+        ...contract,
+        currentRent,
+        newRent,
+        increase,
+      }
+    })
+
+    setConfirmData({
+      index,
+      value,
+      count,
+      contracts: contractsWithCalculations,
+    })
+    setShowModal(true)
+  }
+
+  const confirmApply = () => {
+    if (!confirmData) return
+
+    applyIndexAdjustment(
+      { indexId: confirmData.index.id, percentageIncrease: confirmData.value },
+      {
+        onSuccess: (data) => {
+          toast.success(
+            `Ajuste del ${confirmData.value}% aplicado a ${data.contractsAdjusted} contrato(s)`,
+            { duration: 4000 }
+          )
+          setShowModal(false)
+          setConfirmData(null)
+        },
+      }
+    )
+  }
+
+  const cancelApply = () => {
+    setShowModal(false)
+    setConfirmData(null)
+  }
+
+  if (isLoading || isLoadingAdjustments) return <LoadingPage />
+
+  const thisMonth = adjustments.thisMonth || []
+  const nextMonth = adjustments.nextMonth || []
+  const totalCount = thisMonth.length + nextMonth.length
+
+  // Filtrar índices que tienen contratos en próximo mes
+  const indicesWithNextMonth = indices.filter((idx) =>
+    nextMonth.some((c) => c.adjustmentIndex?.id === idx.id)
+  )
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mb-4">
+          <ArrowLeftIcon className="w-4 h-4" /> Volver al Dashboard
+        </Button>
+        <h1 className="text-3xl font-bold">Contratos con Ajustes</h1>
+        <p className="text-base-content/60 mt-1">
+          {totalCount} contrato(s) con ajuste programado
+        </p>
+      </div>
+
+      {totalCount === 0 ? (
+        <Card>
+          <EmptyState
+            icon={CalendarIcon}
+            title="Sin ajustes programados"
+            description="No hay contratos con ajustes este mes o el próximo"
+          />
+        </Card>
+      ) : (
+        <>
+          {/* Sección de Índices para Aplicar (solo si hay contratos próximo mes) */}
+          {indicesWithNextMonth.length > 0 && (
+            <Card>
+              <div className="p-6">
+                <h2 className="text-xl font-semibold mb-4">Aplicar Ajustes del Próximo Mes</h2>
+                <p className="text-sm text-base-content/60 mb-6">
+                  Ingresa el porcentaje de ajuste y confirma para aplicar a los contratos del próximo mes
+                </p>
+
+                <div className="space-y-4">
+                  {indicesWithNextMonth.map((index) => {
+                    const contractsCount = nextMonth.filter(
+                      (c) => c.adjustmentIndex?.id === index.id
+                    ).length
+
+                    return (
+                      <div
+                        key={index.id}
+                        className="flex items-center gap-4 p-4 bg-base-200 rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-lg">{index.name}</h3>
+                          <p className="text-sm text-base-content/60">
+                            Cada {index.frequencyMonths}{' '}
+                            {index.frequencyMonths === 1 ? 'mes' : 'meses'} • {contractsCount}{' '}
+                            contrato(s) próximo mes
+                          </p>
+                          {index.lastUpdated && (
+                            <p className="text-xs text-base-content/50 mt-1">
+                              Último ajuste:{' '}
+                              {new Date(index.lastUpdated).toLocaleDateString('es-AR')}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="form-control">
+                            <label className="label">
+                              <span className="label-text text-xs">Porcentaje (%)</span>
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="input input-bordered w-32"
+                              value={indexValues[index.id] || ''}
+                              onChange={(e) => handleValueChange(index.id, e.target.value)}
+                              placeholder="15.5"
+                            />
+                          </div>
+
+                          <Button
+                            variant="success"
+                            onClick={() => handleApplyAdjustment(index)}
+                            loading={isApplying}
+                            className="mt-6"
+                          >
+                            <CheckCircleIcon className="w-5 h-5" />
+                            Confirmar Ajuste
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Ajustes Este Mes */}
+          {thisMonth.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <span className="badge badge-warning">Este Mes</span>
+                <span className="text-base-content/60 text-sm font-normal">
+                  {thisMonth.length} contrato(s)
+                </span>
+              </h2>
+              {thisMonth.map((contract) => (
+                <Card key={contract.id}>
+                  <div className="flex items-center justify-between p-4">
+                    <div>
+                      <h3 className="font-semibold text-lg">{contract.tenant?.name}</h3>
+                      <p className="text-sm text-base-content/60">
+                        {contract.property?.address}{' '}
+                        {contract.property?.code && `(${contract.property.code})`}
+                      </p>
+                      <div className="flex gap-3 mt-2">
+                        <span className="text-xs text-base-content/60">
+                          Mes {contract.currentMonth}/{contract.durationMonths}
+                        </span>
+                        {contract.adjustmentIndex && (
+                          <span className="badge badge-warning badge-sm">
+                            {contract.adjustmentIndex.name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold">
+                        ${contract.baseRent?.toLocaleString('es-AR')}
+                      </div>
+                      <div className="text-xs text-base-content/60">Alquiler actual</div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Ajustes Próximo Mes */}
+          {nextMonth.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <span className="badge badge-info">Próximo Mes</span>
+                <span className="text-base-content/60 text-sm font-normal">
+                  {nextMonth.length} contrato(s)
+                </span>
+              </h2>
+              {nextMonth.map((contract) => (
+                <Card key={contract.id}>
+                  <div className="flex items-center justify-between p-4">
+                    <div>
+                      <h3 className="font-semibold text-lg">{contract.tenant?.name}</h3>
+                      <p className="text-sm text-base-content/60">
+                        {contract.property?.address}{' '}
+                        {contract.property?.code && `(${contract.property.code})`}
+                      </p>
+                      <div className="flex gap-3 mt-2">
+                        <span className="text-xs text-base-content/60">
+                          Mes {contract.currentMonth}/{contract.durationMonths}
+                        </span>
+                        {contract.adjustmentIndex && (
+                          <span className="badge badge-info badge-sm">
+                            {contract.adjustmentIndex.name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold">
+                        ${contract.baseRent?.toLocaleString('es-AR')}
+                      </div>
+                      <div className="text-xs text-base-content/60">Alquiler actual</div>
+                      {indexValues[contract.adjustmentIndex?.id] > 0 && (
+                        <div className="text-sm text-success mt-1">
+                          +{indexValues[contract.adjustmentIndex.id]}% →{' '}
+                          ${(contract.baseRent * (1 + parseFloat(indexValues[contract.adjustmentIndex.id]) / 100)).toLocaleString('es-AR')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Modal de Confirmación */}
+      {showModal && confirmData && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-3xl">
+            <h3 className="font-bold text-2xl mb-4">
+              ¿Seguro de aplicar el ajuste del {confirmData.value}%?
+            </h3>
+
+            <div className="space-y-4">
+              {/* Info del índice */}
+              <div className="bg-base-200 p-4 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-base-content/60">Índice</p>
+                    <p className="font-semibold text-lg">{confirmData.index.name}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-base-content/60">Contratos afectados</p>
+                    <p className="font-bold text-2xl text-success">{confirmData.count}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detalle de contratos */}
+              <div>
+                <h4 className="font-semibold mb-3">Detalle de cambios:</h4>
+                <div className="max-h-96 overflow-y-auto space-y-3">
+                  {confirmData.contracts.map((contract) => (
+                    <div key={contract.id} className="bg-base-100 border border-base-300 p-4 rounded-lg">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-semibold">
+                            📍 {contract.property?.address || 'Sin dirección'}
+                            {contract.property?.code && (
+                              <span className="text-base-content/60 ml-2">({contract.property.code})</span>
+                            )}
+                          </p>
+                          <p className="text-sm text-base-content/60 mt-1">
+                            Inquilino: {contract.tenant?.name || 'Sin nombre'}
+                          </p>
+                        </div>
+                        <div className="text-right ml-4">
+                          <div className="text-sm text-base-content/60">Actual</div>
+                          <div className="font-bold">${contract.currentRent.toLocaleString('es-AR')}</div>
+                          <div className="text-sm text-success mt-1">↓ Nuevo</div>
+                          <div className="font-bold text-success text-lg">
+                            ${contract.newRent.toLocaleString('es-AR')}
+                          </div>
+                          <div className="text-xs text-base-content/60 mt-1">
+                            +${contract.increase.toLocaleString('es-AR')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Advertencia */}
+              <div className="alert alert-warning">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <p className="font-semibold">Esta acción NO se puede deshacer</p>
+                  <p className="text-sm">Los alquileres se actualizarán inmediatamente</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Botones */}
+            <div className="modal-action">
+              <Button variant="ghost" onClick={cancelApply} disabled={isApplying}>
+                Cancelar
+              </Button>
+              <Button variant="success" onClick={confirmApply} loading={isApplying}>
+                <CheckCircleIcon className="w-5 h-5" />
+                Confirmar Ajuste
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default ContractsWithAdjustments

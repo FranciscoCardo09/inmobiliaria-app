@@ -1,30 +1,41 @@
-// Dashboard Page
+// Dashboard Page - Phase 5
+import { useNavigate } from 'react-router-dom'
 import {
   BuildingOfficeIcon,
   UserGroupIcon,
-  CurrencyDollarIcon,
+  CalendarIcon,
   ExclamationTriangleIcon,
-  ArrowTrendingUpIcon,
+  ChevronRightIcon,
+  ClipboardDocumentListIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  TableCellsIcon,
+  NoSymbolIcon,
+  BanknotesIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../stores/authStore'
+import { useDashboard } from '../hooks/useDashboard'
 import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import GroupCreator from '../components/GroupCreator'
 import InviteUser from '../components/InviteUser'
 import PendingInvites from '../components/PendingInvites'
+import { LoadingPage } from '../components/ui/Loading'
 
-// Stats card component
-const StatCard = ({ icon: Icon, label, value, change, color = 'primary' }) => {
+// Stats card component with optional click
+const StatCard = ({ icon: Icon, label, value, color = 'primary', onClick }) => {
   const colors = {
     primary: 'bg-primary/10 text-primary',
     success: 'bg-success/10 text-success',
     warning: 'bg-warning/10 text-warning',
     error: 'bg-error/10 text-error',
+    info: 'bg-info/10 text-info',
   }
 
   return (
-    <Card compact>
-      <div className="flex items-center gap-4">
+    <Card compact className={onClick ? 'cursor-pointer hover:shadow-lg transition-shadow' : ''}>
+      <div className="flex items-center gap-4" onClick={onClick}>
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${colors[color]}`}>
           <Icon className="w-6 h-6" />
         </div>
@@ -32,10 +43,9 @@ const StatCard = ({ icon: Icon, label, value, change, color = 'primary' }) => {
           <p className="text-sm text-base-content/60">{label}</p>
           <p className="text-2xl font-bold">{value}</p>
         </div>
-        {change && (
-          <div className="flex items-center gap-1 text-sm text-success">
-            <ArrowTrendingUpIcon className="w-4 h-4" />
-            {change}
+        {onClick && (
+          <div className="text-base-content/30">
+            <ChevronRightIcon className="w-5 h-5" />
           </div>
         )}
       </div>
@@ -44,8 +54,10 @@ const StatCard = ({ icon: Icon, label, value, change, color = 'primary' }) => {
 }
 
 export const Dashboard = () => {
+  const navigate = useNavigate()
   const { user, groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find((g) => g.id === currentGroupId)
+  const { summary, isLoading } = useDashboard(currentGroup?.id)
 
   return (
     <div className="space-y-6">
@@ -81,46 +93,114 @@ export const Dashboard = () => {
           />
         </Card>
       ) : currentGroup ? (
-        <>
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              icon={BuildingOfficeIcon}
-              label="Propiedades"
-              value="0"
-              color="primary"
-            />
-            <StatCard
-              icon={UserGroupIcon}
-              label="Inquilinos"
-              value="0"
-              color="success"
-            />
-            <StatCard
-              icon={CurrencyDollarIcon}
-              label="Ingresos Mes"
-              value="$0"
-              color="primary"
-            />
-            <StatCard
-              icon={ExclamationTriangleIcon}
-              label="Deudas"
-              value="$0"
-              color="warning"
-            />
+        isLoading ? (
+          <div className="flex justify-center py-12">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
           </div>
-
-          {/* Main content area */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Recent activity */}
-            <Card title="Actividad Reciente" className="lg:col-span-2">
-              <EmptyState
-                title="Sin actividad"
-                description="Las acciones recientes apareceran aqui"
+        ) : (
+          <>
+            {/* Stats Grid - Row 1: Entities */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <StatCard
+                icon={BuildingOfficeIcon}
+                label="Propiedades"
+                value={summary.propertiesCount}
+                color="primary"
               />
+              <StatCard
+                icon={UserGroupIcon}
+                label="Inquilinos"
+                value={summary.tenantsCount}
+                color="success"
+              />
+              <StatCard
+                icon={ClipboardDocumentListIcon}
+                label="Contratos Activos"
+                value={summary.activeContracts}
+                color="primary"
+              />
+            </div>
+
+            {/* Stats Grid - Row 2: Payments + Alerts (clickable) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                icon={CheckCircleIcon}
+                label="Pagos del Mes"
+                value={
+                  summary.paymentsThisMonth
+                    ? `${summary.paymentsThisMonth.paid} / ${summary.paymentsThisMonth.total}`
+                    : '0 / 0'
+                }
+                color="success"
+                onClick={() => navigate('/monthly-control')}
+              />
+              {(summary.pendingDebts > 0) && (
+                <StatCard
+                  icon={ExclamationCircleIcon}
+                  label="Pendientes Mes"
+                  value={summary.pendingDebts}
+                  color="warning"
+                  onClick={() => navigate('/monthly-control?status=PENDING')}
+                />
+              )}
+              {(summary.totalDebt > 0) && (
+                <StatCard
+                  icon={BanknotesIcon}
+                  label="Deudas Totales"
+                  value={`$${Math.round(summary.totalDebt).toLocaleString('es-AR')}`}
+                  color="error"
+                  onClick={() => navigate('/monthly-control')}
+                />
+              )}
+              {(summary.blockedContracts > 0) && (
+                <StatCard
+                  icon={NoSymbolIcon}
+                  label="Inquilinos Bloqueados"
+                  value={summary.blockedContracts}
+                  color="error"
+                  onClick={() => navigate('/monthly-control')}
+                />
+              )}
+              <StatCard
+                icon={CalendarIcon}
+                label="Contratos con Ajustes"
+                value={summary.adjustmentsThisMonth + summary.adjustmentsNextMonth}
+                color="warning"
+                onClick={() => navigate('/adjustments')}
+              />
+              <StatCard
+                icon={ExclamationTriangleIcon}
+                label="Contratos por Vencer"
+                value={summary.contractsExpiring}
+                color="error"
+                onClick={() => navigate('/dashboard/contracts-expiring')}
+              />
+            </div>
+
+            {/* Quick action card */}
+            <Card>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <TableCellsIcon className="w-6 h-6 text-primary" />
+                  <div>
+                    <h3 className="font-semibold">Control Mensual</h3>
+                    <p className="text-sm text-base-content/60">
+                      Ver planilla completa de pagos del mes actual
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate('/monthly-control')}
+                >
+                  Ver Control
+                  <ChevronRightIcon className="w-4 h-4" />
+                </Button>
+              </div>
             </Card>
 
-            {/* Quick actions / Group info */}
+            {/* Group info */}
             <Card title="Informacion del Grupo">
               <div className="space-y-4">
                 <div className="flex justify-between items-center py-2 border-b border-base-200">
@@ -141,27 +221,8 @@ export const Dashboard = () => {
                 </div>
               </div>
             </Card>
-          </div>
-
-          {/* Upcoming / Alerts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card title="Pagos Pendientes">
-              <EmptyState
-                icon={CurrencyDollarIcon}
-                title="Sin pagos pendientes"
-                description="Los pagos del mes actual apareceran aqui"
-              />
-            </Card>
-
-            <Card title="Contratos por Vencer">
-              <EmptyState
-                icon={ExclamationTriangleIcon}
-                title="Sin alertas"
-                description="Los contratos proximos a vencer apareceran aqui"
-              />
-            </Card>
-          </div>
-        </>
+          </>
+        )
       ) : (
         <Card className="py-12">
           <EmptyState
@@ -171,17 +232,6 @@ export const Dashboard = () => {
           />
         </Card>
       )}
-
-      {/* Phase indicator */}
-      <div className="alert alert-info">
-        <div>
-          <h3 className="font-bold">Fase 1 Completada</h3>
-          <p className="text-sm">
-            Setup + Autenticacion + Grupos. Las siguientes fases agregaran
-            Propiedades, Inquilinos, Pagos, Deudas y Reportes.
-          </p>
-        </div>
-      </div>
     </div>
   )
 }

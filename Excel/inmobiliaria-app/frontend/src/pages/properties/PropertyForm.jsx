@@ -5,20 +5,23 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useProperties } from '../../hooks/useProperties'
 import { useCategories } from '../../hooks/useCategories'
+import { useOwners } from '../../hooks/useOwners'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 
 export const PropertyForm = () => {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEditing = !!id
 
-  const { groups } = useAuthStore()
-  const currentGroup = groups[0]
+  const { groups, currentGroupId } = useAuthStore()
+  const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
   const { createProperty, updateProperty, isCreating, isUpdating, useProperty } = useProperties(currentGroup?.id)
   const { categories } = useCategories(currentGroup?.id)
+  const { owners } = useOwners(currentGroup?.id)
 
   const { data: property, isLoading: isLoadingProperty } = isEditing ? useProperty(id) : { data: null, isLoading: false }
 
@@ -26,6 +29,7 @@ export const PropertyForm = () => {
     address: '',
     code: '',
     categoryId: '',
+    ownerId: '',
     squareMeters: '',
     rooms: '',
     bathrooms: '',
@@ -42,6 +46,7 @@ export const PropertyForm = () => {
         address: property.address || '',
         code: property.code || '',
         categoryId: property.categoryId || '',
+        ownerId: property.ownerId || '',
         squareMeters: property.squareMeters || '',
         rooms: property.rooms || '',
         bathrooms: property.bathrooms || '',
@@ -76,6 +81,7 @@ export const PropertyForm = () => {
     const data = {
       ...formData,
       categoryId: formData.categoryId || null,
+      ownerId: formData.ownerId || null,
       squareMeters: formData.squareMeters ? parseFloat(formData.squareMeters) : null,
       rooms: formData.rooms ? parseInt(formData.rooms, 10) : null,
       bathrooms: formData.bathrooms ? parseInt(formData.bathrooms, 10) : null,
@@ -131,7 +137,7 @@ export const PropertyForm = () => {
               error={errors.address}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input
                 label="Código"
                 name="code"
@@ -158,6 +164,18 @@ export const PropertyForm = () => {
                   ))}
                 </select>
               </div>
+
+              <SearchableSelect
+                label="Dueño"
+                name="ownerId"
+                options={owners.map((owner) => ({
+                  value: owner.id,
+                  label: `${owner.name} - DNI: ${owner.dni}`,
+                }))}
+                value={formData.ownerId}
+                onChange={handleChange}
+                placeholder="Buscar dueño por nombre, DNI..."
+              />
             </div>
           </div>
 

@@ -1,10 +1,12 @@
 // Header Component
+import { useNavigate } from 'react-router-dom'
 import { Bars3Icon, BellIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useAuth } from '../../hooks/useAuth'
 
 export const Header = () => {
+  const navigate = useNavigate()
   const { user, groups, currentGroupId } = useAuthStore()
   const { toggleSidebar } = useUIStore()
   const { logout } = useAuth()
@@ -108,7 +110,7 @@ export const Header = () => {
             </li>
             <div className="divider my-1"></div>
             <li>
-              <a>
+              <a onClick={() => navigate('/settings')}>
                 <UserCircleIcon className="w-5 h-5" />
                 Mi Perfil
               </a>

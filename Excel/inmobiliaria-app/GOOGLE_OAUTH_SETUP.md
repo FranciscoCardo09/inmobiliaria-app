@@ -17,7 +17,7 @@
 1. Ir a **APIs & Services** > **OAuth consent screen**
 2. Seleccionar **External** (para usuarios fuera de tu organizacion)
 3. Completar:
-   - **App name**: `Inmobiliaria H&H`
+   - **App name**: `Gestion Alquileres`
    - **User support email**: tu email
    - **Developer contact**: tu email
 4. En Scopes, agregar:
