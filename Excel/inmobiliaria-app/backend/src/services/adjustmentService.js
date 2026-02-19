@@ -31,14 +31,12 @@ const calculateNextAdjustmentMonth = (startMonth, currentMonth, frequencyMonths,
   // Los ajustes ocurren en: startMonth + (n * frequencyMonths) donde n >= 0
   // Encontrar el siguiente n tal que startMonth + (n * frequencyMonths) > currentMonth
 
-  let nextAdjustment = startMonth;
+  // First adjustment is at startMonth + frequencyMonths (never at startMonth itself)
+  let nextAdjustment = startMonth + frequencyMonths;
 
-  // Si ya pasamos el startMonth, calcular el siguiente
-  if (currentMonth >= startMonth) {
-    // Calcular cuántos períodos han pasado desde startMonth
+  // If we've passed that, find the next one
+  if (currentMonth >= nextAdjustment) {
     const periodsPassed = Math.floor((currentMonth - startMonth) / frequencyMonths);
-
-    // Siguiente ajuste
     nextAdjustment = startMonth + ((periodsPassed + 1) * frequencyMonths);
   }
 
@@ -53,7 +51,7 @@ const calculateNextAdjustmentMonth = (startMonth, currentMonth, frequencyMonths,
  * - Y currentMonth >= startMonth
  */
 const isAdjustmentMonth = (startMonth, currentMonth, frequencyMonths) => {
-  if (currentMonth < startMonth) return false;
+  if (currentMonth <= startMonth) return false; // No adjustment on first month
   return (currentMonth - startMonth) % frequencyMonths === 0;
 };
 

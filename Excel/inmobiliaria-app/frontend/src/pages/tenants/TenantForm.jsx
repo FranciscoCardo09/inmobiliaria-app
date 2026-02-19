@@ -13,6 +13,11 @@ const MAX_GUARANTORS = 5
 
 const emptyGuarantor = () => ({ name: '', dni: '', phone: '', email: '', address: '', observations: '' })
 
+// Helper: split semicolon-delimited values into array, filter empty
+const splitMulti = (val) => (val || '').split(';').map(v => v.trim()).filter(Boolean)
+// Helper: join array into semicolon-delimited string
+const joinMulti = (arr) => arr.filter(Boolean).join('; ')
+
 export const TenantForm = () => {
   const navigate = useNavigate()
   const { id } = useParams()
@@ -27,8 +32,8 @@ export const TenantForm = () => {
   const [formData, setFormData] = useState({
     name: '',
     dni: '',
-    phone: '',
-    email: '',
+    phones: [''],
+    emails: [''],
     observations: '',
   })
   const [guarantors, setGuarantors] = useState([])
@@ -40,8 +45,8 @@ export const TenantForm = () => {
       setFormData({
         name: tenant.name || '',
         dni: tenant.dni || '',
-        phone: tenant.phone || '',
-        email: tenant.email || '',
+        phones: splitMulti(tenant.phone).length > 0 ? splitMulti(tenant.phone) : [''],
+        emails: splitMulti(tenant.email).length > 0 ? splitMulti(tenant.email) : [''],
         observations: tenant.observations || '',
       })
       if (tenant.guarantors?.length > 0) {
@@ -71,12 +76,37 @@ export const TenantForm = () => {
     }
   }
 
+  // Multi-value handlers
+  const handlePhoneChange = (index, e) => {
+    const val = typeof e === 'string' ? e : e?.target?.value || ''
+    const updated = [...formData.phones]
+    updated[index] = val
+    setFormData({ ...formData, phones: updated })
+  }
+
+  const addPhone = () => setFormData({ ...formData, phones: [...formData.phones, ''] })
+  const removePhone = (index) => {
+    const updated = formData.phones.filter((_, i) => i !== index)
+    setFormData({ ...formData, phones: updated.length > 0 ? updated : [''] })
+  }
+
+  const handleEmailChange = (index, value) => {
+    const updated = [...formData.emails]
+    updated[index] = value
+    setFormData({ ...formData, emails: updated })
+  }
+
+  const addEmail = () => setFormData({ ...formData, emails: [...formData.emails, ''] })
+  const removeEmail = (index) => {
+    const updated = formData.emails.filter((_, i) => i !== index)
+    setFormData({ ...formData, emails: updated.length > 0 ? updated : [''] })
+  }
+
   const handleGuarantorChange = (index, field, value) => {
     const updated = [...guarantors]
     const processed = field === 'dni' ? value.replace(/[^0-9-]/g, '') : value
     updated[index] = { ...updated[index], [field]: processed }
     setGuarantors(updated)
-    // Clear guarantor-specific errors
     if (errors[`guarantor_${index}_${field}`]) {
       const newErrors = { ...errors }
       delete newErrors[`guarantor_${index}_${field}`]
@@ -120,7 +150,11 @@ export const TenantForm = () => {
     if (!validate()) return
 
     const payload = {
-      ...formData,
+      name: formData.name,
+      dni: formData.dni,
+      phone: joinMulti(formData.phones),
+      email: joinMulti(formData.emails),
+      observations: formData.observations,
       guarantors: guarantors.filter(g => g.name && g.dni),
     }
 
@@ -172,29 +206,67 @@ export const TenantForm = () => {
               error={errors.name}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="DNI / CUIT *"
-                name="dni"
-                value={formData.dni}
-                onChange={handleChange}
-                placeholder="20-12345678-9 o 12345678"
-                error={errors.dni}
-              />
-              <PhoneInput
-                label="Teléfono"
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-              />
-              <Input
-                label="Email"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                placeholder="juan@email.com"
-              />
+            <Input
+              label="DNI / CUIT *"
+              name="dni"
+              value={formData.dni}
+              onChange={handleChange}
+              placeholder="20-12345678-9 o 12345678"
+              error={errors.dni}
+            />
+
+            {/* Multiple phones */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="label-text font-medium">Teléfonos</label>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={addPhone}>
+                  <PlusIcon className="w-3 h-3" /> Agregar
+                </button>
+              </div>
+              {formData.phones.map((phone, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <PhoneInput
+                      name={`phone_${idx}`}
+                      value={phone}
+                      onChange={(e) => handlePhoneChange(idx, e)}
+                    />
+                  </div>
+                  {formData.phones.length > 1 && (
+                    <button type="button" className="btn btn-ghost btn-sm text-error mt-1" onClick={() => removePhone(idx)}>
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Multiple emails */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="label-text font-medium">Emails</label>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={addEmail}>
+                  <PlusIcon className="w-3 h-3" /> Agregar
+                </button>
+              </div>
+              {formData.emails.map((email, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <Input
+                      name={`email_${idx}`}
+                      type="email"
+                      value={email}
+                      onChange={(e) => handleEmailChange(idx, e.target.value)}
+                      placeholder="juan@email.com"
+                    />
+                  </div>
+                  {formData.emails.length > 1 && (
+                    <button type="button" className="btn btn-ghost btn-sm text-error mt-1" onClick={() => removeEmail(idx)}>
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 

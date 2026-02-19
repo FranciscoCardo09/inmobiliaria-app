@@ -479,7 +479,7 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
 
   let servicesTotal = 0;
   for (const s of services) {
-    if (s.conceptType.category === 'DESCUENTO') {
+    if (s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION') {
       servicesTotal -= Math.abs(s.amount);
     } else {
       servicesTotal += s.amount;

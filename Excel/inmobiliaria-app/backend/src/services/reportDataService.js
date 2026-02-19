@@ -161,10 +161,11 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
 
   // Services (expensas, IVA, servicios, etc.)
   for (const svc of monthlyRecord.services) {
+    const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     conceptos.push({
       concepto: svc.conceptType?.label || svc.description || 'Servicio',
       base: null,
-      importe: svc.amount,
+      importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
     });
   }
 
@@ -206,6 +207,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     },
     propietario: {
       nombre: owner?.name || 'Sin propietario',
+      dni: owner?.dni || '',
       banco: owner?.bankName ? {
         nombre: owner.bankName,
         titular: owner.bankHolder || '',
@@ -233,13 +235,19 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     estado: monthlyRecord.status,
     isPaid: monthlyRecord.isPaid,
     fechaPago: monthlyRecord.fullPaymentDate,
-    // Honorarios (calculated on rent only)
+    // Honorarios: base = (alquiler + punitorios) - bonificaciones
     honorarios: options.honorariosPercent > 0 ? (() => {
       const pct = options.honorariosPercent;
-      const monto = Math.round(monthlyRecord.rentAmount * pct / 100 * 100) / 100;
+      const bonificaciones = monthlyRecord.services
+        .filter(s => s.conceptType?.category === 'BONIFICACION' || s.conceptType?.category === 'DESCUENTO')
+        .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+      const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
+      const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
+      const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
       return {
         porcentaje: pct,
         monto,
+        baseHonorarios,
         netoTransferir: Math.round((monthlyRecord.totalDue - monto) * 100) / 100,
       };
     })() : null,
@@ -591,9 +599,10 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
   });
 
   for (const svc of record.services) {
+    const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     conceptos.push({
       concepto: svc.conceptType?.label || svc.description || 'Servicio',
-      importe: svc.amount,
+      importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
     });
   }
 
@@ -624,6 +633,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     },
     propietario: {
       nombre: contract.property.owner?.name || '',
+      dni: contract.property.owner?.dni || '',
     },
     periodo: {
       mes: record.periodMonth,
