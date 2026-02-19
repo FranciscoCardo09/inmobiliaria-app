@@ -9,6 +9,7 @@ import { useOwners } from '../../hooks/useOwners'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 
 export const PropertyForm = () => {
   const navigate = useNavigate()
@@ -164,24 +165,17 @@ export const PropertyForm = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="label">
-                  <span className="label-text">Dueño</span>
-                </label>
-                <select
-                  name="ownerId"
-                  className="select select-bordered w-full"
-                  value={formData.ownerId}
-                  onChange={handleChange}
-                >
-                  <option value="">Sin dueño asignado</option>
-                  {owners.map((owner) => (
-                    <option key={owner.id} value={owner.id}>
-                      {owner.name} - DNI: {owner.dni}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <SearchableSelect
+                label="Dueño"
+                name="ownerId"
+                options={owners.map((owner) => ({
+                  value: owner.id,
+                  label: `${owner.name} - DNI: ${owner.dni}`,
+                }))}
+                value={formData.ownerId}
+                onChange={handleChange}
+                placeholder="Buscar dueño por nombre, DNI..."
+              />
             </div>
           </div>
 

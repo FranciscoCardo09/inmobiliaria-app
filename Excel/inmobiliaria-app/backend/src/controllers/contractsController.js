@@ -7,11 +7,12 @@ const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services
 
 const prisma = new PrismaClient();
 
-// Helper: parse a date string as local midnight (avoids UTC shift)
+// Helper: parse a date string as noon UTC (avoids timezone shift issues)
 const parseLocalDate = (dateStr) => {
   if (!dateStr) return null;
   const parts = String(dateStr).replace(/T.*/, '').split('-');
-  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  // Use noon UTC to avoid any timezone-related day shift
+  return new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12, 0, 0));
 };
 
 // Helper: compute period label from startDate + currentMonth

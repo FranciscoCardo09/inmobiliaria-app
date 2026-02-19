@@ -127,6 +127,7 @@ const seedDefaultServiceCategories = async (req, res, next) => {
       { name: 'GASTO', label: 'Gasto', color: 'badge-warning' },
       { name: 'MANTENIMIENTO', label: 'Mantenimiento', color: 'badge-accent' },
       { name: 'DESCUENTO', label: 'Descuento', color: 'badge-success' },
+      { name: 'BONIFICACION', label: 'Bonificación', color: 'badge-success' },
       { name: 'OTROS', label: 'Otros', color: 'badge-ghost' },
     ];
 

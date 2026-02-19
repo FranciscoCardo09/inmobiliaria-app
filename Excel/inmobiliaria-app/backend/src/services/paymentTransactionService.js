@@ -118,7 +118,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   // 2. Services (if any are still owed)
   if (servicesTotal > 0 && servicesStillOwed > 0) {
     for (const s of record.services) {
-      const isDiscount = s.conceptType.category === 'DESCUENTO';
+      const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
       const serviceAmount = isDiscount ? -Math.abs(s.amount) : s.amount;
 
       // Calculate this service's share of what's still owed

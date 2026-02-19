@@ -24,6 +24,7 @@ const fallbackLabels = {
   GASTO: 'Gasto',
   MANTENIMIENTO: 'Mantenimiento',
   DESCUENTO: 'Descuento',
+  BONIFICACION: 'Bonificación',
   OTROS: 'Otros',
 }
 
@@ -33,6 +34,7 @@ const fallbackColors = {
   GASTO: 'badge-warning',
   MANTENIMIENTO: 'badge-accent',
   DESCUENTO: 'badge-success',
+  BONIFICACION: 'badge-success',
   OTROS: 'badge-ghost',
 }
 
@@ -91,7 +93,7 @@ export default function ServiceManagerModal({ record, groupId, onClose }) {
   }
 
   const total = services.reduce((sum, s) => {
-    const isDiscount = s.conceptType?.category === 'DESCUENTO'
+    const isDiscount = s.conceptType?.category === 'DESCUENTO' || s.conceptType?.category === 'BONIFICACION'
     return sum + (isDiscount ? -Math.abs(s.amount) : s.amount)
   }, 0)
 
