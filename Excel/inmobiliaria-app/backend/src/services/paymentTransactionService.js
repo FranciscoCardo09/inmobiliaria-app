@@ -359,7 +359,6 @@ const getPaymentHistory = async (groupId, filters = {}) => {
                   select: {
                     id: true,
                     address: true,
-                    code: true,
                     category: { select: { id: true, name: true, color: true } },
                   },
                 },
@@ -395,7 +394,6 @@ const getTransactionById = async (groupId, id) => {
                 select: {
                   id: true,
                   address: true,
-                  code: true,
                   category: { select: { id: true, name: true, color: true } },
                 },
               },

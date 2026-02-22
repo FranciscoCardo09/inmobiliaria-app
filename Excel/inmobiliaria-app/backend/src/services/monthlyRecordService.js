@@ -80,7 +80,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         select: {
           id: true,
           address: true,
-          code: true,
           category: { select: { id: true, name: true, color: true } },
           owner: { select: { id: true, name: true } },
         },
@@ -572,7 +571,6 @@ const getMonthlyRecordById = async (groupId, id) => {
             select: {
               id: true,
               address: true,
-              code: true,
               category: { select: { id: true, name: true, color: true } },
               owner: { select: { id: true, name: true } },
             },

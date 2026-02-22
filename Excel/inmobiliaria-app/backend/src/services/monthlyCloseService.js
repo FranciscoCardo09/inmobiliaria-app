@@ -30,7 +30,7 @@ const previewCloseMonth = async (groupId, month, year) => {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
           contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
       services: {

@@ -87,7 +87,6 @@ const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, cale
       select: {
         id: true,
         address: true,
-        code: true,
         owner: { select: { id: true, name: true } }
       }
     },
@@ -172,7 +171,6 @@ const getContractsWithAdjustmentThisMonth = async (groupId) => {
       select: {
         id: true,
         address: true,
-        code: true,
         owner: { select: { id: true, name: true } }
       }
     },
@@ -205,7 +203,6 @@ const getContractsWithAdjustmentNextMonth = async (groupId) => {
       select: {
         id: true,
         address: true,
-        code: true,
         owner: { select: { id: true, name: true } }
       }
     },
@@ -240,7 +237,6 @@ const getContractsWithAdjustmentInMonth = async (groupId, targetMonth) => {
       select: {
         id: true,
         address: true,
-        code: true,
         owner: { select: { id: true, name: true } }
       }
     },

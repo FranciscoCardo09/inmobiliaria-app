@@ -44,7 +44,6 @@ const getPayments = async (req, res, next) => {
       contractWhere.OR = [
         { tenant: { name: { contains: search } } },
         { property: { address: { contains: search } } },
-        { property: { code: { contains: search } } },
       ];
     }
 
@@ -62,7 +61,6 @@ const getPayments = async (req, res, next) => {
               select: {
                 id: true,
                 address: true,
-                code: true,
                 categoryId: true,
                 category: { select: { id: true, name: true, color: true } },
               },
@@ -97,7 +95,6 @@ const getPaymentById = async (req, res, next) => {
               select: {
                 id: true,
                 address: true,
-                code: true,
                 category: { select: { id: true, name: true, color: true } },
               },
             },
@@ -133,7 +130,7 @@ const calculatePayment = async (req, res, next) => {
       where: { id: contractId },
       include: {
         tenant: { select: { id: true, name: true } },
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: true,
       },
     });
@@ -256,7 +253,6 @@ const createPayment = async (req, res, next) => {
                 select: {
                   id: true,
                   address: true,
-                  code: true,
                   category: { select: { id: true, name: true, color: true } },
                 },
               },
@@ -334,7 +330,6 @@ const updatePayment = async (req, res, next) => {
                   select: {
                     id: true,
                     address: true,
-                    code: true,
                     category: { select: { id: true, name: true, color: true } },
                   },
                 },
@@ -373,7 +368,6 @@ const updatePayment = async (req, res, next) => {
               select: {
                 id: true,
                 address: true,
-                code: true,
                 category: { select: { id: true, name: true, color: true } },
               },
             },

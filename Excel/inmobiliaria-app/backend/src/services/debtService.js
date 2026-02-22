@@ -216,7 +216,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
     },
@@ -513,7 +513,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
       payments: { orderBy: { createdAt: 'asc' } },
@@ -581,7 +581,7 @@ const getOpenDebts = async (groupId, contractId = null) => {
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
       payments: { orderBy: { createdAt: 'asc' } },
@@ -620,7 +620,7 @@ const getDebts = async (groupId, filters = {}) => {
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
       payments: { orderBy: { createdAt: 'asc' } },
@@ -870,7 +870,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
       contract: {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true, code: true } },
+          property: { select: { id: true, address: true } },
         },
       },
       payments: { orderBy: { createdAt: 'asc' } },
