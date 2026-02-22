@@ -181,7 +181,7 @@ export const PropertyForm = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input
-                label="Unidad de Facturación (Agua)"
+                label="Unid. Facturación (Agua)"
                 name="billingUnit"
                 value={formData.billingUnit}
                 onChange={handleChange}
@@ -189,7 +189,7 @@ export const PropertyForm = () => {
               />
 
               <Input
-                label="Nomenclatura Catastral (Municipalidad)"
+                label="Nomenclatura Catastral"
                 name="cadastralNomenclature"
                 value={formData.cadastralNomenclature}
                 onChange={handleChange}
@@ -197,7 +197,7 @@ export const PropertyForm = () => {
               />
 
               <Input
-                label="Número de Cuenta (Rentas)"
+                label="Nro. Cuenta (Rentas)"
                 name="accountNumber"
                 value={formData.accountNumber}
                 onChange={handleChange}
