@@ -181,7 +181,7 @@ export const ContractForm = () => {
                 name="propertyId"
                 options={properties.map((p) => ({
                   value: p.id,
-                  label: `${p.address}${p.code ? ` (${p.code})` : ''}`,
+                  label: p.address,
                 }))}
                 value={formData.propertyId}
                 onChange={handleChange}

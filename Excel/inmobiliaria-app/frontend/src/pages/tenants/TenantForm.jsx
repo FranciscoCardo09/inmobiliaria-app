@@ -34,6 +34,9 @@ export const TenantForm = () => {
     dni: '',
     phones: [''],
     emails: [''],
+    customerNumber: '',
+    epecContract: '',
+    ecogasAccount: '',
     observations: '',
   })
   const [guarantors, setGuarantors] = useState([])
@@ -47,6 +50,9 @@ export const TenantForm = () => {
         dni: tenant.dni || '',
         phones: splitMulti(tenant.phone).length > 0 ? splitMulti(tenant.phone) : [''],
         emails: splitMulti(tenant.email).length > 0 ? splitMulti(tenant.email) : [''],
+        customerNumber: tenant.customerNumber || '',
+        epecContract: tenant.epecContract || '',
+        ecogasAccount: tenant.ecogasAccount || '',
         observations: tenant.observations || '',
       })
       if (tenant.guarantors?.length > 0) {
@@ -154,6 +160,9 @@ export const TenantForm = () => {
       dni: formData.dni,
       phone: joinMulti(formData.phones),
       email: joinMulti(formData.emails),
+      customerNumber: formData.customerNumber,
+      epecContract: formData.epecContract,
+      ecogasAccount: formData.ecogasAccount,
       observations: formData.observations,
       guarantors: guarantors.filter(g => g.name && g.dni),
     }
@@ -267,6 +276,37 @@ export const TenantForm = () => {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Datos de Servicios */}
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Datos de Servicios</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Input
+                label="Número de Cliente"
+                name="customerNumber"
+                value={formData.customerNumber}
+                onChange={handleChange}
+                placeholder="Ej: 123456"
+              />
+
+              <Input
+                label="Número de Contrato (Epec)"
+                name="epecContract"
+                value={formData.epecContract}
+                onChange={handleChange}
+                placeholder="Ej: 0012345"
+              />
+
+              <Input
+                label="Número de Cuenta (Ecogas)"
+                name="ecogasAccount"
+                value={formData.ecogasAccount}
+                onChange={handleChange}
+                placeholder="Ej: 00-1234-5678"
+              />
             </div>
           </div>
 

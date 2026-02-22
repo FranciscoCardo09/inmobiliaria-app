@@ -119,9 +119,8 @@ export default function MonthlyControlPage() {
       filtered = filtered.filter((r) => {
         const tenant = (r.tenants?.length > 0 ? r.tenants.map(t => t.name).join(' / ') : r.tenant?.name || '').toLowerCase()
         const address = (r.property?.address || '').toLowerCase()
-        const code = (r.property?.code || '').toLowerCase()
         const owner = (r.owner?.name || '').toLowerCase()
-        return tenant.includes(term) || address.includes(term) || code.includes(term) || owner.includes(term)
+        return tenant.includes(term) || address.includes(term) || owner.includes(term)
       })
     }
 
@@ -438,11 +437,6 @@ export default function MonthlyControlPage() {
                         </td>
                         <td className="text-xs font-medium max-w-[150px] truncate">
                           {record.property?.address}
-                          {record.property?.code && (
-                            <span className="text-base-content/50 ml-1">
-                              ({record.property.code})
-                            </span>
-                          )}
                         </td>
                         <td className="text-xs">
                           {record.owner?.name || '-'}

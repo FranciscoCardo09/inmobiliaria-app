@@ -201,7 +201,6 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
       piso: contract.property.floor,
       depto: contract.property.apartment,
     },
@@ -367,7 +366,6 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
     },
     propietario: {
       nombre: contract.property.owner?.name || 'Sin propietario',
@@ -629,7 +627,6 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
     },
     propietario: {
       nombre: contract.property.owner?.name || '',

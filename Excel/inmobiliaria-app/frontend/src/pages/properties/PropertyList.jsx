@@ -92,7 +92,7 @@ export const PropertyList = () => {
                 <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50" />
                 <input
                   type="text"
-                  placeholder="Buscar por dirección, código..."
+                  placeholder="Buscar por dirección..."
                   className="input input-bordered w-full pl-10"
                   value={filters.search}
                   onChange={(e) => setFilters({ ...filters, search: e.target.value })}
@@ -147,7 +147,6 @@ export const PropertyList = () => {
             <thead>
               <tr>
                 <th>Dirección</th>
-                <th>Código</th>
                 <th>Categoría</th>
                 <th>m²</th>
                 <th>Hab.</th>
@@ -166,9 +165,6 @@ export const PropertyList = () => {
                         {property.observations}
                       </div>
                     )}
-                  </td>
-                  <td>
-                    <span className="badge badge-ghost">{property.code || '-'}</span>
                   </td>
                   <td>
                     {property.category ? (

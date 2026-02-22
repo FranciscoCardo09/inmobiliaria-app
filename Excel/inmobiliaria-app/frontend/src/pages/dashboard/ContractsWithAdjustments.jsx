@@ -224,8 +224,7 @@ export const ContractsWithAdjustments = () => {
                     <div>
                       <h3 className="font-semibold text-lg">{contract.tenant?.name}</h3>
                       <p className="text-sm text-base-content/60">
-                        {contract.property?.address}{' '}
-                        {contract.property?.code && `(${contract.property.code})`}
+                        {contract.property?.address}
                       </p>
                       <div className="flex gap-3 mt-2">
                         <span className="text-xs text-base-content/60">
@@ -265,8 +264,7 @@ export const ContractsWithAdjustments = () => {
                     <div>
                       <h3 className="font-semibold text-lg">{contract.tenant?.name}</h3>
                       <p className="text-sm text-base-content/60">
-                        {contract.property?.address}{' '}
-                        {contract.property?.code && `(${contract.property.code})`}
+                        {contract.property?.address}
                       </p>
                       <div className="flex gap-3 mt-2">
                         <span className="text-xs text-base-content/60">
@@ -332,9 +330,6 @@ export const ContractsWithAdjustments = () => {
                         <div className="flex-1">
                           <p className="font-semibold">
                             📍 {contract.property?.address || 'Sin dirección'}
-                            {contract.property?.code && (
-                              <span className="text-base-content/60 ml-2">({contract.property.code})</span>
-                            )}
                           </p>
                           <p className="text-sm text-base-content/60 mt-1">
                             Inquilino: {contract.tenant?.name || 'Sin nombre'}

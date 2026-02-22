@@ -329,8 +329,7 @@ export const PaymentForm = () => {
                 <option value="">Seleccionar contrato...</option>
                 {activeContracts.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.tenant?.name} - {c.property?.address}
-                    {c.property?.code ? ` (${c.property.code})` : ''} — Cuota{' '}
+                    {c.tenant?.name} - {c.property?.address} — Cuota{' '}
                     {c.currentMonth + 1}
                   </option>
                 ))}

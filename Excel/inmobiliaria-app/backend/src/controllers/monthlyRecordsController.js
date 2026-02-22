@@ -40,7 +40,6 @@ const getMonthlyRecords = async (req, res, next) => {
         (r) =>
           r.tenant?.name?.toLowerCase().includes(s) ||
           r.property?.address?.toLowerCase().includes(s) ||
-          r.property?.code?.toLowerCase().includes(s) ||
           r.owner?.name?.toLowerCase().includes(s)
       );
     }
