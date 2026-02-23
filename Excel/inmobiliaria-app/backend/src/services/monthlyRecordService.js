@@ -10,8 +10,8 @@ const prisma = new PrismaClient();
  */
 function getCalendarPeriod(contract, monthNumber) {
   const startDate = new Date(contract.startDate);
-  // Month number is 1-based: month 1 = startDate month
-  const monthsToAdd = monthNumber - 1;
+  // Month number relative to start: monthNumber startMonth = startDate month
+  const monthsToAdd = monthNumber - contract.startMonth;
   const date = new Date(startDate.getFullYear(), startDate.getMonth() + monthsToAdd, 1);
   return {
     periodMonth: date.getMonth() + 1, // 1-12
@@ -28,14 +28,16 @@ function getMonthNumber(contract, periodMonth, periodYear) {
   const startCalYear = startDate.getFullYear();
 
   const totalMonthsDiff = (periodYear - startCalYear) * 12 + (periodMonth - startCalMonth);
-  return 1 + totalMonthsDiff;
+  return contract.startMonth + totalMonthsDiff;
 }
 
 /**
  * Check if a contract is active for a given month number
  */
 function isContractActiveForMonth(contract, monthNumber) {
-  return monthNumber >= 1 && monthNumber <= contract.durationMonths && contract.active;
+  // When startMonth > 1, monthNumber range is [startMonth .. startMonth + durationMonths - 1]
+  const endMonth = contract.startMonth + contract.durationMonths - 1;
+  return monthNumber >= contract.startMonth && monthNumber <= endMonth && contract.active;
 }
 
 /**
@@ -424,7 +426,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         : contract.tenant ? [contract.tenant] : [],
       property: contract.property,
       owner: contract.property?.owner,
-      periodLabel: `${monthNames[month]} - Mes ${monthNumber}`,
+      periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
       nextAdjustmentLabel,
       // Calculated fields for the view
       // IMPORTANTE: Cuando hay deuda, calcular balance sobre totales históricos

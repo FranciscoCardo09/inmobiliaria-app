@@ -98,9 +98,10 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
 
       const startDate = new Date(contract.startDate);
       const totalMonthsDiff = (parseInt(year) - startDate.getFullYear()) * 12 + (parseInt(month) - (startDate.getMonth() + 1));
-      const monthNumber = 1 + totalMonthsDiff;
+      const monthNumber = contract.startMonth + totalMonthsDiff;
 
-      if (monthNumber < 1 || monthNumber > contract.durationMonths) continue;
+      const endMonth = contract.startMonth + contract.durationMonths - 1;
+      if (monthNumber < contract.startMonth || monthNumber > endMonth) continue;
 
       record = await prisma.monthlyRecord.create({
         data: {
