@@ -898,7 +898,7 @@ const getVencimientosData = async (groupId) => {
 
     // Compare by month only (ignore day/time/timezone issues)
     const monthsDiff = (endDate.getFullYear() - now.getFullYear()) * 12 + (endDate.getMonth() - now.getMonth());
-    if (monthsDiff <= 2) {
+    if (monthsDiff <= 3) {
       vencimientos.push({
         contractId: contract.id,
         inquilino: getTenantsName(contract),
