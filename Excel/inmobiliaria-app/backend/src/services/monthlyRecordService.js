@@ -10,8 +10,8 @@ const prisma = new PrismaClient();
  */
 function getCalendarPeriod(contract, monthNumber) {
   const startDate = new Date(contract.startDate);
-  // Month number relative to start: monthNumber 1 = startDate month
-  const monthsToAdd = monthNumber - contract.startMonth;
+  // Month number is 1-based: month 1 = startDate month
+  const monthsToAdd = monthNumber - 1;
   const date = new Date(startDate.getFullYear(), startDate.getMonth() + monthsToAdd, 1);
   return {
     periodMonth: date.getMonth() + 1, // 1-12
@@ -28,7 +28,7 @@ function getMonthNumber(contract, periodMonth, periodYear) {
   const startCalYear = startDate.getFullYear();
 
   const totalMonthsDiff = (periodYear - startCalYear) * 12 + (periodMonth - startCalMonth);
-  return contract.startMonth + totalMonthsDiff;
+  return 1 + totalMonthsDiff;
 }
 
 /**

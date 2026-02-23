@@ -98,7 +98,7 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
 
       const startDate = new Date(contract.startDate);
       const totalMonthsDiff = (parseInt(year) - startDate.getFullYear()) * 12 + (parseInt(month) - (startDate.getMonth() + 1));
-      const monthNumber = contract.startMonth + totalMonthsDiff;
+      const monthNumber = 1 + totalMonthsDiff;
 
       if (monthNumber < 1 || monthNumber > contract.durationMonths) continue;
 
