@@ -889,8 +889,8 @@ const getVencimientosData = async (groupId) => {
   });
 
   const now = new Date();
-  const twoMonthsFromNow = new Date(now);
-  twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
+  // Use first day of month 3 months ahead to capture any contract expiring within ~2 months
+  const thresholdDate = new Date(now.getFullYear(), now.getMonth() + 3, 1);
 
   const vencimientos = [];
   for (const contract of contracts) {
@@ -898,7 +898,7 @@ const getVencimientosData = async (groupId) => {
     const endDate = new Date(startDate);
     endDate.setMonth(endDate.getMonth() + contract.durationMonths);
 
-    if (endDate <= twoMonthsFromNow) {
+    if (endDate <= thresholdDate) {
       vencimientos.push({
         contractId: contract.id,
         inquilino: getTenantsName(contract),
