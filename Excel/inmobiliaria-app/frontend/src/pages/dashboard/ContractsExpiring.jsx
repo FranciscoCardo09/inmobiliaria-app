@@ -1,8 +1,11 @@
 // ContractsExpiring - Dashboard detail page
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, ExclamationTriangleIcon, BellIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
+import { useNotifications } from '../../hooks/useNotifications'
+import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import EmptyState from '../../components/ui/EmptyState'
@@ -13,6 +16,8 @@ export const ContractsExpiring = () => {
   const { groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
   const { expiringContracts, isLoadingExpiring } = useContracts(currentGroup?.id)
+  const { sendContractExpiring } = useNotifications(currentGroup?.id)
+  const [notifyContract, setNotifyContract] = useState(null)
 
   if (isLoadingExpiring) return <LoadingPage />
 
@@ -59,21 +64,48 @@ export const ContractsExpiring = () => {
                     </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold">
-                    ${contract.baseRent?.toLocaleString('es-AR')}
-                  </div>
-                  <div className="text-xs text-base-content/60">Alquiler actual</div>
-                  {contract.endDate && (
-                    <div className="text-xs text-error mt-1">
-                      Vence: {new Date(contract.endDate).toLocaleDateString('es-AR')}
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-lg font-bold">
+                      ${contract.baseRent?.toLocaleString('es-AR')}
                     </div>
-                  )}
+                    <div className="text-xs text-base-content/60">Alquiler actual</div>
+                    {contract.endDate && (
+                      <div className="text-xs text-error mt-1">
+                        Vence: {new Date(contract.endDate).toLocaleDateString('es-AR')}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-sm btn-primary btn-outline"
+                    onClick={() => setNotifyContract(contract)}
+                    title="Avisar inquilino"
+                  >
+                    <BellIcon className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </Card>
           ))}
         </div>
+      )}
+      {/* Notification Modal */}
+      {notifyContract && (
+        <SendNotificationModal
+          isOpen={!!notifyContract}
+          onClose={() => setNotifyContract(null)}
+          type="CONTRACT_EXPIRING"
+          recipients={[notifyContract.tenant].filter(Boolean)}
+          recipientType="TENANT"
+          onSend={async ({ channels }) => {
+            await sendContractExpiring.mutateAsync({
+              contractId: notifyContract.id,
+              channels,
+            })
+            setNotifyContract(null)
+          }}
+          isSending={sendContractExpiring.isPending}
+        />
       )}
     </div>
   )
