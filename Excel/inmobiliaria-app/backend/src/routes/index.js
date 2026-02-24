@@ -24,6 +24,8 @@ const debtsRoutes = require('./debts.routes');
 const serviceCategoriesRoutes = require('./serviceCategories.routes');
 const reportsRoutes = require('./reports.routes');
 const settingsRoutes = require('./settings.routes');
+const notificationsRoutes = require('./notifications.routes');
+const cronRoutes = require('./cron.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -93,6 +95,10 @@ router.use('/groups/:groupId/reports', reportsRoutes);
 
 // Settings (Phase 6+)
 router.use('/groups/:groupId/settings', settingsRoutes);
+
+// Notifications (Phase 7)
+router.use('/groups/:groupId/notifications', notificationsRoutes);
+router.use('/cron', cronRoutes);
 
 // Holidays (global)
 router.use('/holidays', holidaysRoutes);
