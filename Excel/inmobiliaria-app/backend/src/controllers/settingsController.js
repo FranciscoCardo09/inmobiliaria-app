@@ -22,6 +22,10 @@ const SETTINGS_FIELDS = {
   bankAccountType: true,
   bankAccountNumber: true,
   bankCbu: true,
+  bankAlias: true,
+  whatsappAccountSid: true,
+  whatsappAuthToken: true,
+  whatsappFrom: true,
 };
 
 // GET /api/groups/:groupId/settings
@@ -55,7 +59,8 @@ const updateSettings = async (req, res, next) => {
     const {
       companyName, address, phone, email, cuit, localidad, logo,
       ingBrutos, fechaInicioAct, ivaCondicion, subtitulo,
-      bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu,
+      bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias,
+      whatsappAccountSid, whatsappAuthToken, whatsappFrom,
     } = req.body;
 
     // Validate logo size if provided (~5MB base64 limit)
@@ -81,6 +86,10 @@ const updateSettings = async (req, res, next) => {
     if (bankAccountType !== undefined) updateData.bankAccountType = bankAccountType;
     if (bankAccountNumber !== undefined) updateData.bankAccountNumber = bankAccountNumber;
     if (bankCbu !== undefined) updateData.bankCbu = bankCbu;
+    if (bankAlias !== undefined) updateData.bankAlias = bankAlias;
+    if (whatsappAccountSid !== undefined) updateData.whatsappAccountSid = whatsappAccountSid;
+    if (whatsappAuthToken !== undefined) updateData.whatsappAuthToken = whatsappAuthToken;
+    if (whatsappFrom !== undefined) updateData.whatsappFrom = whatsappFrom;
 
     const group = await prisma.group.update({
       where: { id: groupId },
