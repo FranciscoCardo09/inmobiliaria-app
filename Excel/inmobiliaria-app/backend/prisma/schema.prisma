@@ -37,6 +37,7 @@ model User {
   refreshTokens           RefreshToken[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
+  notificationsSent       NotificationLog[]
 
   @@map("users")
 }
@@ -73,6 +74,11 @@ model Group {
   bankCbu         String?  @map("bank_cbu")
   bankAlias       String?  @map("bank_alias")
 
+  // WhatsApp / Twilio per-group settings
+  whatsappAccountSid  String?  @map("whatsapp_account_sid")
+  whatsappAuthToken   String?  @map("whatsapp_auth_token")
+  whatsappFrom        String?  @map("whatsapp_from")
+
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -92,6 +98,7 @@ model Group {
   monthlyRecords        MonthlyRecord[]
   paymentTransactions   PaymentTransaction[]
   debts                 Debt[]
+  notifications         NotificationLog[]
 
   @@map("groups")
 }
@@ -655,4 +662,66 @@ model ContractTenant {
 
   @@unique([contractId, tenantId])
   @@map("contract_tenants")
+}
+
+// ============================================
+// FASE 7: Notificaciones
+// ============================================
+
+enum NotificationType {
+  NEXT_MONTH
+  DEBT_TOTAL
+  DEBT_PARTIAL
+  LATE_PAYMENT
+  ADJUSTMENT
+  CONTRACT_EXPIRING
+  CASH_RECEIPT
+  REPORT_OWNER
+  REPORT_TENANT
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum RecipientType {
+  TENANT
+  OWNER
+  ADMIN
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model NotificationLog {
+  id               String             @id @default(uuid())
+  groupId          String             @map("group_id")
+  type             NotificationType
+  channel          NotificationChannel
+  recipientType    RecipientType      @map("recipient_type")
+  recipientId      String?            @map("recipient_id")
+  recipientName    String             @map("recipient_name")
+  recipientContact String?            @map("recipient_contact")
+  contractId       String?            @map("contract_id")
+  monthlyRecordId  String?            @map("monthly_record_id")
+  debtId           String?            @map("debt_id")
+  subject          String
+  status           NotificationStatus @default(PENDING)
+  errorMessage     String?            @map("error_message")
+  metadata         Json?
+  sentAt           DateTime           @default(now()) @map("sent_at")
+  createdBy        String             @map("created_by")
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User  @relation(fields: [createdBy], references: [id])
+
+  @@index([groupId])
+  @@index([type])
+  @@index([status])
+  @@index([sentAt])
+  @@map("notification_logs")
 }
