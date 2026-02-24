@@ -37,6 +37,9 @@ import ServiceTypeList from './pages/services/ServiceTypeList'
 // Phase 6: Reports
 import ReportsPage from './pages/reports/ReportsPage'
 
+// Notifications
+import NotificationDashboard from './pages/notifications/NotificationDashboard'
+
 // Phase 7: Settings
 import SettingsPage from './pages/settings/SettingsPage'
 
@@ -125,6 +128,9 @@ function App() {
 
         {/* Phase 6: Reports */}
         <Route path="reports" element={<ReportsPage />} />
+
+        {/* Notifications */}
+        <Route path="notifications" element={<NotificationDashboard />} />
 
         {/* Phase 7: Settings */}
         <Route path="settings" element={<SettingsPage />} />

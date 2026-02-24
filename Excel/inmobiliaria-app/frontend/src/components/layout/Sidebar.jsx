@@ -16,6 +16,7 @@ import {
   ClockIcon,
   WrenchScrewdriverIcon,
   ExclamationTriangleIcon,
+  BellIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
 } from '@heroicons/react/24/outline'
@@ -33,6 +34,7 @@ const navItems = [
   { name: 'Historial Pagos', href: '/payment-history', icon: ClockIcon, phase: 5 },
   { name: 'Servicios', href: '/services', icon: WrenchScrewdriverIcon, phase: 5 },
   { name: 'Reportes', href: '/reports', icon: DocumentTextIcon, phase: 6 },
+  { name: 'Notificaciones', href: '/notifications', icon: BellIcon },
 ]
 
 export const Sidebar = () => {
