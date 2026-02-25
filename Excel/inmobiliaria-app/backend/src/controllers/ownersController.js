@@ -9,7 +9,7 @@ const prisma = require('../lib/prisma');
 const getOwners = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { search } = req.query;
+    const { search, limit, offset } = req.query;
 
     const where = { groupId };
 
@@ -28,6 +28,8 @@ const getOwners = async (req, res, next) => {
         _count: { select: { properties: true } },
       },
       orderBy: { name: 'asc' },
+      take: limit ? parseInt(limit) : 500,
+      skip: offset ? parseInt(offset) : 0,
     });
 
     return ApiResponse.success(res, owners);

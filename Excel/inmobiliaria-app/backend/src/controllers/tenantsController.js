@@ -9,7 +9,7 @@ const prisma = require('../lib/prisma');
 const getTenants = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { search, isActive } = req.query;
+    const { search, isActive, limit, offset } = req.query;
 
     const where = { groupId };
 
@@ -45,6 +45,8 @@ const getTenants = async (req, res, next) => {
         _count: { select: { contracts: true } },
       },
       orderBy: { name: 'asc' },
+      take: limit ? parseInt(limit) : 500,
+      skip: offset ? parseInt(offset) : 0,
     });
 
     return ApiResponse.success(res, tenants);

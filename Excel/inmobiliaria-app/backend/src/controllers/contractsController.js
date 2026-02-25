@@ -91,7 +91,7 @@ const enrichContract = (c) => {
 const getContracts = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { status, propertyId, tenantId, search } = req.query;
+    const { status, propertyId, tenantId, search, limit, offset } = req.query;
 
     const where = { groupId };
 
@@ -121,6 +121,8 @@ const getContracts = async (req, res, next) => {
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
+      take: limit ? parseInt(limit) : 500,
+      skip: offset ? parseInt(offset) : 0,
     });
 
     // Enrich with tenants array
