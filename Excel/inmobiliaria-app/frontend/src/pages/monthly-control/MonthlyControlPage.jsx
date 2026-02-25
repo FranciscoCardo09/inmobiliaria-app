@@ -1,5 +1,5 @@
 // Monthly Control Page - Vista tipo planilla Excel
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, memo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { useMonthlyRecords } from '../../hooks/useMonthlyRecords'
@@ -164,7 +164,7 @@ export default function MonthlyControlPage() {
   }
 
   // Toggle row expansion
-  const toggleRow = (recordId) => {
+  const toggleRow = useCallback((recordId) => {
     setExpandedRows((prev) => {
       const next = new Set(prev)
       if (next.has(recordId)) {
@@ -174,7 +174,20 @@ export default function MonthlyControlPage() {
       }
       return next
     })
-  }
+  }, [])
+
+  // Stable callbacks for row actions
+  const handlePayment = useCallback((record) => {
+    setPaymentModal({ open: true, record })
+  }, [])
+
+  const handleDebtPayment = useCallback((debt) => {
+    setDebtModal({ open: true, debt })
+  }, [])
+
+  const handleTxHistory = useCallback((record) => {
+    setTxHistoryModal({ open: true, record })
+  }, [])
 
   // Zoom controls
   const zoomIn = () => setTableZoom((z) => Math.min(z + 10, 150))
@@ -427,235 +440,21 @@ export default function MonthlyControlPage() {
                 </tr>
               </thead>
               <tbody>
-                {records.map((record, idx) => {
-                  const rowClass = record.status === 'COMPLETE'
-                    ? 'bg-success/10'
-                    : record.status === 'PARTIAL'
-                    ? 'bg-warning/10'
-                    : idx % 2 === 1
-                    ? 'bg-base-200/50'
-                    : ''
-                  const isExpanded = expandedRows.has(record.id)
-
-                  return (
-                    <>
-                      <tr key={record.id} className={rowClass}>
-                        <td className="text-center">
-                          <button
-                            className="btn btn-xs btn-ghost"
-                            onClick={() => toggleRow(record.id)}
-                            title={isExpanded ? 'Colapsar' : 'Expandir para gestionar servicios'}
-                          >
-                            {isExpanded ? (
-                              <ChevronUpIcon className="w-3 h-3" />
-                            ) : (
-                              <ChevronDownIcon className="w-3 h-3" />
-                            )}
-                          </button>
-                        </td>
-                        <td className="text-xs font-medium max-w-[150px] truncate">
-                          {record.property?.address}
-                        </td>
-                        <td className="text-xs">
-                          {record.owner?.name || '-'}
-                        </td>
-                        <td className="text-xs font-medium">
-                          {record.tenants?.length > 0
-                            ? record.tenants.map(t => t.name).join(' / ')
-                            : record.tenant?.name || 'Sin inquilino'}
-                        </td>
-                        <td className="text-xs whitespace-nowrap">
-                          {record.periodLabel}
-                        </td>
-                        <td className="text-xs">
-                          {record.nextAdjustmentLabel || '-'}
-                        </td>
-                        <td className="text-xs text-right font-mono">
-                          {formatCurrency(record.rentAmount)}
-                        </td>
-                        <td
-                          className="text-xs text-right font-mono cursor-pointer hover:bg-base-200"
-                          title={getServicesTooltip(record)}
-                          onClick={() => toggleRow(record.id)}
-                        >
-                          <span className="underline decoration-dotted">
-                            {formatCurrency(record.servicesTotal)}
-                          </span>
-                        </td>
-                        {showIvaColumn && (
-                          <td className="text-xs text-right font-mono">
-                            {record.property?.category?.name === 'LOCAL COMERCIAL' ? (
-                              <div className="flex items-center justify-end gap-1">
-                                <input
-                                  type="checkbox"
-                                  className="checkbox checkbox-xs checkbox-primary"
-                                  checked={!!record.includeIva}
-                                  onChange={(e) => toggleIva({ recordId: record.id, includeIva: e.target.checked })}
-                                />
-                                {record.ivaAmount > 0 && (
-                                  <span className="text-primary">{formatCurrency(record.ivaAmount)}</span>
-                                )}
-                              </div>
-                            ) : '-'}
-                          </td>
-                        )}
-                        <td className="text-xs text-right font-mono text-info">
-                          {record.previousBalance > 0
-                            ? formatCurrency(record.previousBalance)
-                            : '-'}
-                        </td>
-                        <td className="text-xs text-right font-mono text-error">
-                          {record.punitoryForgiven
-                            ? <span className="text-success text-[10px]">Cond.</span>
-                            : (record.totalPunitoriosHistoricos || record.livePunitoryAmount) > 0
-                            ? <div className="flex flex-col items-end">
-                                <span>{formatCurrency(record.totalPunitoriosHistoricos || record.livePunitoryAmount)}</span>
-                                <span className="text-[9px] text-error/70">{record.livePunitoryDays}d</span>
-                              </div>
-                            : record.punitoryAmount > 0
-                            ? formatCurrency(record.punitoryAmount)
-                            : '-'}
-                        </td>
-                        <td className="text-xs text-right font-mono font-bold">
-                          {formatCurrency(record.totalHistorico || record.liveTotalDue || record.totalDue)}
-                        </td>
-                        <td className="text-xs">
-                          {(() => {
-                            const txs = record.transactions || []
-                            if (txs.length === 0) return '-'
-                            const lastTx = txs[txs.length - 1]
-                            return (
-                              <div className="dropdown dropdown-hover dropdown-bottom dropdown-end">
-                                <span tabIndex={0} className="cursor-help underline decoration-dotted decoration-base-content/40">
-                                  {formatDateShort(lastTx.paymentDate)}
-                                </span>
-                                <div tabIndex={0} className="dropdown-content z-[100] bg-base-200 border border-base-300 shadow-lg rounded-lg p-2 w-56 mt-1 fixed">
-                                  <div className="text-[11px] font-semibold mb-1 text-base-content/60">
-                                    {txs.length === 1 ? '1 pago registrado' : `${txs.length} pagos registrados`}
-                                  </div>
-                                  {txs.map((t, i) => (
-                                    <div key={t.id || i} className="text-[11px] flex justify-between py-0.5 border-b border-base-300 last:border-0">
-                                      <span>Pago {i + 1}:</span>
-                                      <span className="font-mono">{formatDateShort(t.paymentDate)} — {t.paymentMethod === 'TRANSFERENCIA' ? 'Transf.' : 'Efect.'}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td className="text-xs text-right font-mono">
-                          {(() => {
-                            const txs = record.transactions || []
-                            const totalAbonado = record.totalAbonado || record.amountPaid
-                            if (txs.length === 0 && totalAbonado <= 0) return '-'
-                            if (txs.length === 0) return formatCurrency(totalAbonado)
-                            return (
-                              <div className="dropdown dropdown-hover dropdown-bottom dropdown-end">
-                                <span tabIndex={0} className="cursor-help underline decoration-dotted decoration-base-content/40">
-                                  {formatCurrency(totalAbonado)}
-                                </span>
-                                <div tabIndex={0} className="dropdown-content z-[100] bg-base-200 border border-base-300 shadow-lg rounded-lg p-2 w-60 mt-1 fixed">
-                                  <div className="text-[11px] font-semibold mb-1 text-base-content/60">Detalle de pagos</div>
-                                  {txs.map((t, i) => (
-                                    <div key={t.id || i} className="text-[11px] flex justify-between py-0.5 border-b border-base-300 last:border-0">
-                                      <span>Pago {i + 1} ({formatDateShort(t.paymentDate)}):</span>
-                                      <span className="font-mono text-success">{formatCurrency(t.amount)}</span>
-                                    </div>
-                                  ))}
-                                  {txs.length > 1 && (
-                                    <div className="text-[11px] flex justify-between pt-1 font-bold">
-                                      <span>Total:</span>
-                                      <span className="font-mono">{formatCurrency(totalAbonado)}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td className="text-xs text-right font-mono text-success">
-                          {record.aFavorNextMonth > 0
-                            ? formatCurrency(record.aFavorNextMonth)
-                            : '-'}
-                        </td>
-                        <td className="text-xs text-right font-mono text-error">
-                          {record.debeNextMonth > 0
-                            ? formatCurrency(record.debeNextMonth)
-                            : '-'}
-                        </td>
-                        <td className="text-center">
-                          <BoolBadge value={record.isCancelled} />
-                        </td>
-                        <td className="text-center">
-                          <BoolBadge value={record.amountPaid > 0} />
-                        </td>
-                        <td className="text-center">
-                          {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span className="badge badge-sm badge-error">DEUDA</span>
-                              <span className="text-[10px] font-mono text-error">
-                                {formatCurrency(record.debtInfo.liveCurrentTotal)}
-                              </span>
-                              {record.debtInfo.livePunitoryDays > 0 && (
-                                <span className="text-[9px] text-error/70">
-                                  {record.debtInfo.livePunitoryDays}d punt.
-                                </span>
-                              )}
-                            </div>
-                          ) : record.debtInfo && record.debtInfo.status === 'PAID' ? (
-                            <span className="badge badge-sm badge-success">SALDADA</span>
-                          ) : (
-                            <span className="text-base-content/30">-</span>
-                          )}
-                        </td>
-                        <td className="text-center">
-                          <div className="flex items-center justify-center gap-1">
-                          {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
-                            <button
-                              className="btn btn-xs btn-error"
-                              onClick={() => setDebtModal({ open: true, debt: record.debtInfo })}
-                              title="Pagar deuda"
-                            >
-                              <BanknotesIcon className="w-3 h-3" />
-                            </button>
-                          ) : record.status === 'COMPLETE' ? (
-                            <CheckCircleIcon className="w-4 h-4 text-success" />
-                          ) : (
-                            <button
-                              className="btn btn-xs btn-primary"
-                              onClick={() => setPaymentModal({ open: true, record })}
-                              disabled={record.status === 'COMPLETE'}
-                              title="Registrar pago"
-                            >
-                              <CurrencyDollarIcon className="w-3 h-3" />
-                            </button>
-                          )}
-                          {/* Transaction history / void button */}
-                          {record.amountPaid > 0 && (
-                            <button
-                              className="btn btn-xs btn-ghost"
-                              onClick={() => setTxHistoryModal({ open: true, record })}
-                              title="Ver pagos / Anular"
-                            >
-                              <EyeIcon className="w-3 h-3" />
-                            </button>
-                          )}
-                          </div>
-                        </td>
-                      </tr>
-
-                      {/* Expanded row - Service management inline */}
-                      {isExpanded && (
-                        <tr key={`${record.id}-expanded`} className="bg-base-200/50">
-                          <td colSpan={showIvaColumn ? 20 : 19} className="p-0">
-                            <ServiceManagerInline record={record} groupId={currentGroupId} />
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  )
-                })}
+                {records.map((record, idx) => (
+                  <MonthlyRecordRow
+                    key={record.id}
+                    record={record}
+                    idx={idx}
+                    isExpanded={expandedRows.has(record.id)}
+                    showIvaColumn={showIvaColumn}
+                    groupId={currentGroupId}
+                    onToggleRow={toggleRow}
+                    onToggleIva={toggleIva}
+                    onPayment={handlePayment}
+                    onDebtPayment={handleDebtPayment}
+                    onTxHistory={handleTxHistory}
+                  />
+                ))}
               </tbody>
             </table>
             </div>
@@ -738,6 +537,243 @@ export default function MonthlyControlPage() {
     </div>
   )
 }
+
+// Memoized table row to prevent re-renders when unrelated state changes
+const MonthlyRecordRow = memo(function MonthlyRecordRow({
+  record, idx, isExpanded, showIvaColumn, groupId,
+  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory,
+}) {
+  const rowClass = record.status === 'COMPLETE'
+    ? 'bg-success/10'
+    : record.status === 'PARTIAL'
+    ? 'bg-warning/10'
+    : idx % 2 === 1
+    ? 'bg-base-200/50'
+    : ''
+
+  const servicesTooltip = !record.services || record.services.length === 0
+    ? 'Sin servicios'
+    : record.services
+        .map((s) => `${s.conceptType?.label || s.conceptType?.name}: ${formatCurrency(s.amount)}`)
+        .join('\n')
+
+  return (
+    <>
+      <tr className={rowClass}>
+        <td className="text-center">
+          <button
+            className="btn btn-xs btn-ghost"
+            onClick={() => onToggleRow(record.id)}
+            title={isExpanded ? 'Colapsar' : 'Expandir para gestionar servicios'}
+          >
+            {isExpanded ? (
+              <ChevronUpIcon className="w-3 h-3" />
+            ) : (
+              <ChevronDownIcon className="w-3 h-3" />
+            )}
+          </button>
+        </td>
+        <td className="text-xs font-medium max-w-[150px] truncate">
+          {record.property?.address}
+        </td>
+        <td className="text-xs">
+          {record.owner?.name || '-'}
+        </td>
+        <td className="text-xs font-medium">
+          {record.tenants?.length > 0
+            ? record.tenants.map(t => t.name).join(' / ')
+            : record.tenant?.name || 'Sin inquilino'}
+        </td>
+        <td className="text-xs whitespace-nowrap">
+          {record.periodLabel}
+        </td>
+        <td className="text-xs">
+          {record.nextAdjustmentLabel || '-'}
+        </td>
+        <td className="text-xs text-right font-mono">
+          {formatCurrency(record.rentAmount)}
+        </td>
+        <td
+          className="text-xs text-right font-mono cursor-pointer hover:bg-base-200"
+          title={servicesTooltip}
+          onClick={() => onToggleRow(record.id)}
+        >
+          <span className="underline decoration-dotted">
+            {formatCurrency(record.servicesTotal)}
+          </span>
+        </td>
+        {showIvaColumn && (
+          <td className="text-xs text-right font-mono">
+            {record.property?.category?.name === 'LOCAL COMERCIAL' ? (
+              <div className="flex items-center justify-end gap-1">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs checkbox-primary"
+                  checked={!!record.includeIva}
+                  onChange={(e) => onToggleIva({ recordId: record.id, includeIva: e.target.checked })}
+                />
+                {record.ivaAmount > 0 && (
+                  <span className="text-primary">{formatCurrency(record.ivaAmount)}</span>
+                )}
+              </div>
+            ) : '-'}
+          </td>
+        )}
+        <td className="text-xs text-right font-mono text-info">
+          {record.previousBalance > 0
+            ? formatCurrency(record.previousBalance)
+            : '-'}
+        </td>
+        <td className="text-xs text-right font-mono text-error">
+          {record.punitoryForgiven
+            ? <span className="text-success text-[10px]">Cond.</span>
+            : (record.totalPunitoriosHistoricos || record.livePunitoryAmount) > 0
+            ? <div className="flex flex-col items-end">
+                <span>{formatCurrency(record.totalPunitoriosHistoricos || record.livePunitoryAmount)}</span>
+                <span className="text-[9px] text-error/70">{record.livePunitoryDays}d</span>
+              </div>
+            : record.punitoryAmount > 0
+            ? formatCurrency(record.punitoryAmount)
+            : '-'}
+        </td>
+        <td className="text-xs text-right font-mono font-bold">
+          {formatCurrency(record.totalHistorico || record.liveTotalDue || record.totalDue)}
+        </td>
+        <td className="text-xs">
+          {(() => {
+            const txs = record.transactions || []
+            if (txs.length === 0) return '-'
+            const lastTx = txs[txs.length - 1]
+            return (
+              <div className="dropdown dropdown-hover dropdown-bottom dropdown-end">
+                <span tabIndex={0} className="cursor-help underline decoration-dotted decoration-base-content/40">
+                  {formatDateShort(lastTx.paymentDate)}
+                </span>
+                <div tabIndex={0} className="dropdown-content z-[100] bg-base-200 border border-base-300 shadow-lg rounded-lg p-2 w-56 mt-1 fixed">
+                  <div className="text-[11px] font-semibold mb-1 text-base-content/60">
+                    {txs.length === 1 ? '1 pago registrado' : `${txs.length} pagos registrados`}
+                  </div>
+                  {txs.map((t, i) => (
+                    <div key={t.id || i} className="text-[11px] flex justify-between py-0.5 border-b border-base-300 last:border-0">
+                      <span>Pago {i + 1}:</span>
+                      <span className="font-mono">{formatDateShort(t.paymentDate)} — {t.paymentMethod === 'TRANSFERENCIA' ? 'Transf.' : 'Efect.'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </td>
+        <td className="text-xs text-right font-mono">
+          {(() => {
+            const txs = record.transactions || []
+            const totalAbonado = record.totalAbonado || record.amountPaid
+            if (txs.length === 0 && totalAbonado <= 0) return '-'
+            if (txs.length === 0) return formatCurrency(totalAbonado)
+            return (
+              <div className="dropdown dropdown-hover dropdown-bottom dropdown-end">
+                <span tabIndex={0} className="cursor-help underline decoration-dotted decoration-base-content/40">
+                  {formatCurrency(totalAbonado)}
+                </span>
+                <div tabIndex={0} className="dropdown-content z-[100] bg-base-200 border border-base-300 shadow-lg rounded-lg p-2 w-60 mt-1 fixed">
+                  <div className="text-[11px] font-semibold mb-1 text-base-content/60">Detalle de pagos</div>
+                  {txs.map((t, i) => (
+                    <div key={t.id || i} className="text-[11px] flex justify-between py-0.5 border-b border-base-300 last:border-0">
+                      <span>Pago {i + 1} ({formatDateShort(t.paymentDate)}):</span>
+                      <span className="font-mono text-success">{formatCurrency(t.amount)}</span>
+                    </div>
+                  ))}
+                  {txs.length > 1 && (
+                    <div className="text-[11px] flex justify-between pt-1 font-bold">
+                      <span>Total:</span>
+                      <span className="font-mono">{formatCurrency(totalAbonado)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+        </td>
+        <td className="text-xs text-right font-mono text-success">
+          {record.aFavorNextMonth > 0
+            ? formatCurrency(record.aFavorNextMonth)
+            : '-'}
+        </td>
+        <td className="text-xs text-right font-mono text-error">
+          {record.debeNextMonth > 0
+            ? formatCurrency(record.debeNextMonth)
+            : '-'}
+        </td>
+        <td className="text-center">
+          <BoolBadge value={record.isCancelled} />
+        </td>
+        <td className="text-center">
+          <BoolBadge value={record.amountPaid > 0} />
+        </td>
+        <td className="text-center">
+          {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="badge badge-sm badge-error">DEUDA</span>
+              <span className="text-[10px] font-mono text-error">
+                {formatCurrency(record.debtInfo.liveCurrentTotal)}
+              </span>
+              {record.debtInfo.livePunitoryDays > 0 && (
+                <span className="text-[9px] text-error/70">
+                  {record.debtInfo.livePunitoryDays}d punt.
+                </span>
+              )}
+            </div>
+          ) : record.debtInfo && record.debtInfo.status === 'PAID' ? (
+            <span className="badge badge-sm badge-success">SALDADA</span>
+          ) : (
+            <span className="text-base-content/30">-</span>
+          )}
+        </td>
+        <td className="text-center">
+          <div className="flex items-center justify-center gap-1">
+          {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
+            <button
+              className="btn btn-xs btn-error"
+              onClick={() => onDebtPayment(record.debtInfo)}
+              title="Pagar deuda"
+            >
+              <BanknotesIcon className="w-3 h-3" />
+            </button>
+          ) : record.status === 'COMPLETE' ? (
+            <CheckCircleIcon className="w-4 h-4 text-success" />
+          ) : (
+            <button
+              className="btn btn-xs btn-primary"
+              onClick={() => onPayment(record)}
+              disabled={record.status === 'COMPLETE'}
+              title="Registrar pago"
+            >
+              <CurrencyDollarIcon className="w-3 h-3" />
+            </button>
+          )}
+          {record.amountPaid > 0 && (
+            <button
+              className="btn btn-xs btn-ghost"
+              onClick={() => onTxHistory(record)}
+              title="Ver pagos / Anular"
+            >
+              <EyeIcon className="w-3 h-3" />
+            </button>
+          )}
+          </div>
+        </td>
+      </tr>
+
+      {isExpanded && (
+        <tr className="bg-base-200/50">
+          <td colSpan={showIvaColumn ? 20 : 19} className="p-0">
+            <ServiceManagerInline record={record} groupId={groupId} />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+})
 
 // Inline Service Manager Component
 function ServiceManagerInline({ record, groupId }) {
