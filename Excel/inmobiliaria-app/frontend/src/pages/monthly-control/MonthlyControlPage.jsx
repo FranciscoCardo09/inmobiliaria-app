@@ -13,6 +13,7 @@ import PaymentRegistrationModal from '../../components/PaymentRegistrationModal'
 import TransactionHistoryModal from '../../components/TransactionHistoryModal'
 import DebtPaymentModal from '../../components/DebtPaymentModal'
 import CloseMonthWizard from './CloseMonthWizard'
+import BatchServiceModal from './BatchServiceModal'
 import { useDebts } from '../../hooks/useDebts'
 import {
   TableCellsIcon,
@@ -91,6 +92,7 @@ export default function MonthlyControlPage() {
   const [debtModal, setDebtModal] = useState({ open: false, debt: null })
   const [txHistoryModal, setTxHistoryModal] = useState({ open: false, record: null })
   const [closeMonthWizard, setCloseMonthWizard] = useState(false)
+  const [showBatchService, setShowBatchService] = useState(false)
 
   // Debt payment hook
   const { payDebt, isPaying } = useDebts(currentGroupId)
@@ -199,6 +201,14 @@ export default function MonthlyControlPage() {
         {/* Actions */}
         <div className="flex items-center gap-2">
           {/* Close Month button - visible when there are pending/partial records without debts */}
+          <button
+              className="btn btn-sm btn-primary gap-1"
+              onClick={() => setShowBatchService(true)}
+              title="Cargar servicio a múltiples propiedades"
+            >
+              <WrenchScrewdriverIcon className="w-4 h-4" />
+              Cargar Servicio
+            </button>
           {allRecords.some((r) => (r.status === 'PENDING' || r.status === 'PARTIAL') && !r.debtInfo) && (
             <button
               className="btn btn-sm btn-error gap-1"
@@ -713,6 +723,15 @@ export default function MonthlyControlPage() {
       )}
 
       {/* Close Month Wizard */}
+      {showBatchService && (
+        <BatchServiceModal
+          groupId={currentGroupId}
+          records={allRecords}
+          periodMonth={periodMonth}
+          periodYear={periodYear}
+          onClose={() => setShowBatchService(false)}
+        />
+      )}
       {closeMonthWizard && (
         <CloseMonthWizard
           groupId={currentGroupId}
