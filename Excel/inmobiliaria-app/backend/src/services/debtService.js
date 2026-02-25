@@ -70,22 +70,11 @@ function calculateImputation(monthlyRecord) {
  * Se llama durante el cierre mensual.
  */
 const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
-  console.log('\n========== CREATE DEBT FROM MONTHLY RECORD ==========');
-  console.log('MonthlyRecord ID:', monthlyRecord.id);
-  console.log('MonthlyRecord data:');
-  console.log('  - rentAmount:', monthlyRecord.rentAmount);
-  console.log('  - servicesTotal:', monthlyRecord.servicesTotal);
-  console.log('  - amountPaid:', monthlyRecord.amountPaid);
-  console.log('  - punitoryAmount (frozen):', monthlyRecord.punitoryAmount);
-  console.log('  - status:', monthlyRecord.status);
-
   // Verificar que no exista deuda para este record
   const existing = await prisma.debt.findUnique({
     where: { monthlyRecordId: monthlyRecord.id },
   });
   if (existing) {
-    console.log('DEBT ALREADY EXISTS - skipping');
-    console.log('========== END CREATE DEBT ==========\n');
     return existing;
   }
 
@@ -128,13 +117,6 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       );
 
       currentPunitoryAmount = liveResult.amount;
-
-      console.log('LIVE PUNITORY CALCULATION (at closing):');
-      console.log('  - Unpaid rent:', unpaidRent);
-      console.log('  - Last payment date:', lastPaymentDate);
-      console.log('  - Calculation date:', calculationDate);
-      console.log('  - Frozen punitoryAmount:', monthlyRecord.punitoryAmount);
-      console.log('  - CURRENT punitoryAmount:', currentPunitoryAmount);
     } catch (error) {
       console.error('Error calculating live punitorios:', error);
       // Fallback to frozen value if calculation fails
@@ -149,19 +131,8 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(recordWithCurrentPunitorios);
 
-  console.log('Imputation calculation:');
-  console.log('  - totalOriginal:', totalOriginal);
-  console.log('  - servicesCovered:', servicesCovered);
-  console.log('  - rentCovered:', rentCovered);
-  console.log('  - punitoryCovered:', punitoryCovered);
-  console.log('  - unpaidRent:', unpaidRent);
-  console.log('  - unpaidPunitory:', unpaidPunitory);
-  console.log('  - totalUnpaid:', totalUnpaid);
-
   // Si no queda nada impago (ni alquiler ni punitorios), no crear deuda
   if (totalUnpaid <= 0) {
-    console.log('NO UNPAID AMOUNT - not creating debt');
-    console.log('========== END CREATE DEBT ==========\n');
     return null;
   }
 
@@ -179,9 +150,6 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
     punitoryStartDate = new Date(monthlyRecord.periodYear, monthlyRecord.periodMonth - 1, 1);
   }
 
-  console.log('Punitory calculation:');
-  console.log('  - punitoryStartDate:', punitoryStartDate);
-
   // IMPORTANTE: unpaidRent ya refleja los pagos aplicados del MonthlyRecord
   // Por lo tanto, la deuda se crea con amountPaid = 0 (sin pagos adicionales)
   // El pago del MonthlyRecord ya fue contabilizado al calcular unpaidRent
@@ -190,13 +158,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
   // Guardar cuánto se pagó del MonthlyRecord antes de crear la deuda (para información al usuario)
   const previousRecordPayment = monthlyRecord.amountPaid || 0;
 
-  console.log('Initial debt paid calculation:');
-  console.log('  - unpaidRent (after applying MonthlyRecord.amountPaid):', unpaidRent);
-  console.log('  - previousRecordPayment (what was paid before closing):', previousRecordPayment);
-  console.log('  - initialDebtPaid (new debt starts unpaid):', initialDebtPaid);
-
   const initialStatus = 'OPEN'; // Siempre OPEN al crear, se actualizará cuando se pague
-  console.log('  - CALCULATED STATUS:', initialStatus);
 
   const periodLabel = `${monthNames[monthlyRecord.periodMonth]} ${monthlyRecord.periodYear}`;
 
@@ -228,15 +190,6 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       },
     },
   });
-
-  console.log('DEBT CREATED:');
-  console.log('  - id:', debt.id);
-  console.log('  - unpaidRentAmount:', debt.unpaidRentAmount);
-  console.log('  - accumulatedPunitory:', debt.accumulatedPunitory);
-  console.log('  - amountPaid:', debt.amountPaid);
-  console.log('  - currentTotal:', debt.currentTotal);
-  console.log('  - status:', debt.status);
-  console.log('========== END CREATE DEBT ==========\n');
 
   return debt;
 };
@@ -409,13 +362,6 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   const rentPortion = Math.min(remainingDebt, parsedAmount);
   const punitoryPortion = Math.max(parsedAmount - rentPortion, 0);
 
-  console.log('\n[payDebt] PAYMENT IMPUTATION:');
-  console.log('  Payment amount:', parsedAmount);
-  console.log('  Remaining debt (rent):', remainingDebt);
-  console.log('  Punitory amount:', punitoryAmount);
-  console.log('  -> Rent portion:', rentPortion);
-  console.log('  -> Punitory portion:', punitoryPortion);
-
   const transaction = await prisma.paymentTransaction.create({
     data: {
       groupId: debt.groupId,
@@ -477,15 +423,9 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
 
   // When debt is fully paid (including punitorios), update the associated MonthlyRecord
   if (status === 'PAID' && debt.monthlyRecordId) {
-    console.log('\n[payDebt] Updating MonthlyRecord - Debt FULLY PAID');
-
     // Use recalculateMonthlyRecord to sum all transactions correctly
     const { recalculateMonthlyRecord } = require('./monthlyRecordService');
     const updatedRecord = await recalculateMonthlyRecord(debt.monthlyRecordId);
-
-    console.log('  MonthlyRecord recalculated');
-    console.log('  New amountPaid:', updatedRecord.amountPaid);
-    console.log('  Status:', updatedRecord.status);
 
     // If still not COMPLETE, force it (debt is fully paid)
     if (updatedRecord.status !== 'COMPLETE') {
@@ -498,22 +438,14 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
           fullPaymentDate: parseLocalDate(paymentDate),
         },
       });
-      console.log('  Forced MonthlyRecord to COMPLETE');
     }
   } else if (debt.monthlyRecordId) {
-    console.log('\n[payDebt] Updating MonthlyRecord - Debt PARTIAL payment');
-    console.log('  Debt status:', status);
-    console.log('  Remaining debt:', remainingDebt - rentPortion);
-    console.log('  Unpaid punitory:', punitoryAmount - punitoryPortion);
-
     // Partial debt payment: DO NOT mark MonthlyRecord as COMPLETE
     // because there are still unpaid punitorios or rent on the debt
     // Use recalculateMonthlyRecord to sum all transactions correctly
     // (avoids manual increment that causes duplicates)
     const { recalculateMonthlyRecord } = require('./monthlyRecordService');
     await recalculateMonthlyRecord(debt.monthlyRecordId);
-
-    console.log('  MonthlyRecord recalculated (amountPaid updated from transactions)');
   }
 
   return { debt: updatedDebt, payment: debtPayment };
@@ -680,29 +612,16 @@ const canPayCurrentMonth = async (groupId, contractId) => {
  * @param {string} skipTransactionDeletion - Si es true, no intenta eliminar el PaymentTransaction (ya fue eliminado)
  */
 const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = false) => {
-  console.log('\n========== CANCEL DEBT PAYMENT START ==========');
-  console.log('DebtId:', debtId);
-  console.log('PaymentId:', paymentId);
-
   const debt = await prisma.debt.findUnique({
     where: { id: debtId },
     include: { payments: { orderBy: { createdAt: 'asc' } } },
   });
-
-  console.log('DEBT BEFORE CANCEL:');
-  console.log('  - status:', debt.status);
-  console.log('  - unpaidRentAmount:', debt.unpaidRentAmount);
-  console.log('  - amountPaid:', debt.amountPaid);
-  console.log('  - payments count:', debt.payments.length);
 
   if (!debt) throw new Error('Deuda no encontrada');
 
   // Buscar el pago a anular
   const payment = debt.payments.find((p) => p.id === paymentId);
   if (!payment) throw new Error('Pago no encontrado');
-
-  console.log('PAYMENT TO CANCEL:');
-  console.log('  - amount:', payment.amount);
 
   // Validar que sea el ÚLTIMO pago (LIFO)
   const lastPayment = debt.payments[debt.payments.length - 1];
@@ -720,17 +639,12 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
       },
     });
 
-    console.log('PAYMENT TRANSACTION FOUND:', transaction ? 'YES' : 'NO');
-
     if (transaction) {
       // Los TransactionConcept se borran en cascada
       await prisma.paymentTransaction.delete({
         where: { id: transaction.id },
       });
-      console.log('PAYMENT TRANSACTION DELETED');
     }
-  } else {
-    console.log('SKIPPING PAYMENT TRANSACTION DELETION (already deleted)');
   }
 
   // Revertir cambios en Debt
@@ -749,23 +663,15 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
   // Calcular deuda restante (solo la parte de alquiler sin punitorios)
   const remainingDebt = debt.unpaidRentAmount - newAmountPaid;
 
-  console.log('CALCULATIONS:');
-  console.log('  - newAmountPaid:', newAmountPaid);
-  console.log('  - newAccumulatedPunitory:', newAccumulatedPunitory);
-  console.log('  - remainingDebt:', remainingDebt);
-  console.log('  - payments remaining:', debt.payments.length - 1);
-
   // Determinar nuevo estado y lastPaymentDate
   let newStatus = 'OPEN';
   let newLastPaymentDate = null;
 
   // Si quedan pagos previos, tomar el último
   if (debt.payments.length > 1) {
-    console.log('CASE: Multiple payments (will have', debt.payments.length - 1, 'after cancel)');
     const previousPayment = debt.payments[debt.payments.length - 2];
     newLastPaymentDate = previousPayment.paymentDate;
   } else {
-    console.log('CASE: Single payment (will have 0 after cancel)');
     newLastPaymentDate = null;
   }
 
@@ -790,32 +696,22 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     // es directamente los punitorios IMPAGOS. NO restar de nuevo aquí.
     const { amount: unpaidPunitory } = await calculateDebtPunitory(tempDebt, new Date());
 
-    console.log('PUNITORY CHECK:');
-    console.log('  - Unpaid punitory (from calculateDebtPunitory):', unpaidPunitory);
-
     if (unpaidPunitory <= 1) {
       newStatus = 'PAID';
-      console.log('  -> newStatus: PAID (rent and punitorios fully paid)');
     } else {
       newStatus = 'PARTIAL';
-      console.log('  -> newStatus: PARTIAL (rent paid, but punitorios remain)');
     }
   } else if (newAmountPaid > 0) {
     newStatus = 'PARTIAL';
-    console.log('  -> newStatus: PARTIAL (rent partially paid)');
   } else {
     newStatus = 'OPEN';
-    console.log('  -> newStatus: OPEN (no payments)');
   }
-
-  console.log('NEW STATUS DETERMINED:', newStatus);
 
   // IMPORTANTE: Eliminar el DebtPayment ANTES de la query final
   // para que el debt retornado tenga la lista de payments correcta
   await prisma.debtPayment.delete({
     where: { id: paymentId },
   });
-  console.log('DEBT PAYMENT DELETED');
 
   const updatedDebt = await prisma.debt.update({
     where: { id: debtId },
@@ -838,20 +734,11 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     },
   });
 
-  console.log('DEBT UPDATED IN DB:');
-  console.log('  - status:', updatedDebt.status);
-  console.log('  - amountPaid:', updatedDebt.amountPaid);
-  console.log('  - currentTotal:', updatedDebt.currentTotal);
-  console.log('  - closedAt:', updatedDebt.closedAt);
-
   // Recalcular MonthlyRecord si existe
   if (debt.monthlyRecordId) {
-    console.log('RECALCULATING MonthlyRecord:', debt.monthlyRecordId);
     const { recalculateMonthlyRecord } = require('./monthlyRecordService');
     await recalculateMonthlyRecord(debt.monthlyRecordId);
   }
-
-  console.log('========== CANCEL DEBT PAYMENT END ==========\n');
 
   return {
     debt: updatedDebt,
@@ -863,17 +750,12 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
  * Recalcular una deuda cuando el MonthlyRecord cambia (ej: se anula un pago previo al cierre)
  */
 const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
-  console.log('\n========== RECALCULATE DEBT FROM MONTHLY RECORD ==========');
-  console.log('DebtId:', debtId);
-  console.log('MonthlyRecordId:', monthlyRecordId);
-
   const debt = await prisma.debt.findUnique({
     where: { id: debtId },
     include: { payments: true },
   });
 
   if (!debt) {
-    console.log('Debt not found');
     return null;
   }
 
@@ -883,22 +765,11 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   });
 
   if (!monthlyRecord) {
-    console.log('MonthlyRecord not found');
     return null;
   }
 
-  console.log('Current MonthlyRecord state:');
-  console.log('  - rentAmount:', monthlyRecord.rentAmount);
-  console.log('  - servicesTotal:', monthlyRecord.servicesTotal);
-  console.log('  - amountPaid:', monthlyRecord.amountPaid);
-
   // Recalcular unpaidRent basado en el estado actual del MonthlyRecord
   const { unpaidRent, totalOriginal } = calculateImputation(monthlyRecord);
-
-  console.log('Recalculated values:');
-  console.log('  - unpaidRent:', unpaidRent);
-  console.log('  - totalOriginal:', totalOriginal);
-  console.log('  - previousRecordPayment:', monthlyRecord.amountPaid);
 
   // Recalcular el status basándose en el nuevo unpaidRent y los pagos de la deuda
   let newStatus = 'OPEN';
@@ -910,11 +781,6 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   } else if (debt.amountPaid > 0) {
     newStatus = 'PARTIAL';
   }
-
-  console.log('Status recalculation:');
-  console.log('  - debt.amountPaid:', debt.amountPaid);
-  console.log('  - unpaidRent:', unpaidRent);
-  console.log('  - newStatus:', newStatus);
 
   // Actualizar la deuda
   const updatedDebt = await prisma.debt.update({
@@ -932,19 +798,12 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
       payments: true,
       contract: {
         include: {
-          tenant: true,
-          property: true,
+          tenant: { select: { id: true, name: true, dni: true } },
+          property: { select: { id: true, address: true } },
         },
       },
     },
   });
-
-  console.log('Debt updated:');
-  console.log('  - unpaidRentAmount:', updatedDebt.unpaidRentAmount);
-  console.log('  - previousRecordPayment:', updatedDebt.previousRecordPayment);
-  console.log('  - currentTotal:', updatedDebt.currentTotal);
-  console.log('  - status:', updatedDebt.status);
-  console.log('========== END RECALCULATE DEBT ==========\n');
 
   return updatedDebt;
 };
