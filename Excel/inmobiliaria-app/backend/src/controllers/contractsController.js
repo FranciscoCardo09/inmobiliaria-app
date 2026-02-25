@@ -205,10 +205,11 @@ const getContractById = async (req, res, next) => {
     const contract = await prisma.contract.findUnique({
       where: { id },
       include: {
-        tenant: true,
-        contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+        tenant: { select: { id: true, name: true, dni: true, phone: true, email: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true, email: true } } }, orderBy: { isPrimary: 'desc' } },
         property: {
-          include: {
+          select: {
+            id: true, address: true,
             category: { select: { id: true, name: true, color: true } },
             owner: { select: { id: true, name: true, dni: true, phone: true } },
           },

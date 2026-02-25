@@ -244,14 +244,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     // Calcular datos de deuda en vivo si existe
     let debtInfo = null;
-    if (record.debt) {
-      console.log('\n--- DEBT INFO CALCULATION ---');
-      console.log('Record ID:', record.id);
-      console.log('Contract:', contract.id);
-      console.log('Debt status:', record.debt.status);
-      console.log('Debt unpaidRentAmount:', record.debt.unpaidRentAmount);
-      console.log('Debt amountPaid:', record.debt.amountPaid);
-    }
 
     if (record.debt && record.debt.status !== 'PAID') {
       const { amount, days, startDate, endDate } = await calculateDebtPunitory(record.debt);
@@ -265,17 +257,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         punitoryFromDate: startDate,
         punitoryToDate: endDate,
       };
-      console.log('Debt NOT PAID - calculating live values');
-      console.log('  remainingDebt:', remainingDebt);
-      console.log('  liveCurrentTotal:', remainingDebt + amount);
     } else if (record.debt) {
       debtInfo = { ...record.debt, liveCurrentTotal: 0, liveAccumulatedPunitory: 0, livePunitoryDays: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
-      console.log('Debt PAID - setting values to 0');
-    }
-
-    if (debtInfo) {
-      console.log('Final debtInfo.status:', debtInfo.status);
-      console.log('--- END DEBT INFO CALCULATION ---\n');
     }
 
     // Calculate LIVE punitorios for display
@@ -341,19 +324,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           livePunitoryDays = record.punitoryDays || 0;
         }
 
-        console.log('\n[monthlyRecordService] LIVE PUNITORY CALCULATION:');
-        console.log('  Record ID:', record.id);
-        console.log('  Period:', `${month}/${year}`);
-        console.log('  Rent amount:', record.rentAmount);
-        console.log('  Amount paid:', amountPaid);
-        console.log('  Services total:', servicesTotal);
-        console.log('  Frozen punitory:', frozenPunitory);
-        console.log('  Unpaid rent:', unpaidRent);
-        console.log('  Unpaid frozen punitory:', unpaidFrozenPunitory);
-        console.log('  Last payment date:', lastPaymentDate);
-        console.log('  Calculation date:', calculationDate);
-        console.log('  Live punitory amount:', livePunitoryAmount);
-        console.log('  Live punitory days:', livePunitoryDays);
       } catch (e) {
         console.error('[monthlyRecordService] Error calculating live punitory:', e.message);
         // If calculation fails, keep the stored values
@@ -389,15 +359,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       // Total histórico = alquiler + servicios + punitorios de la deuda + IVA
       totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos + ivaAmount - record.previousBalance;
 
-      console.log('\n[monthlyRecordService] HISTORICAL TOTALS WITH DEBT:');
-      console.log('  Record punitorios (congelados):', livePunitoryAmount);
-      console.log('  Debt punitorios pagados:', debtPunitoriosPagados);
-      console.log('  Debt punitorios impagos:', debtPunitoriosImpagos);
-      console.log('  TOTAL punitorios históricos (SOLO deuda):', totalPunitoriosHistoricos);
-      console.log('  Record amountPaid (incluye pagos de deuda):', record.amountPaid);
-      console.log('  Debt amountPaid:', record.debt.amountPaid);
-      console.log('  TOTAL abonado:', totalAbonado);
-      console.log('  TOTAL histórico:', totalHistorico);
     }
 
     records.push({

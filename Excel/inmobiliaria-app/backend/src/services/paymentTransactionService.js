@@ -21,10 +21,22 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   // Load the monthly record with contract
   const record = await prisma.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
-    include: {
-      contract: true,
+    select: {
+      id: true, groupId: true, contractId: true, monthNumber: true,
+      periodMonth: true, periodYear: true, rentAmount: true,
+      servicesTotal: true, previousBalance: true, amountPaid: true,
+      punitoryAmount: true, punitoryDays: true, punitoryForgiven: true,
+      includeIva: true, status: true,
+      contract: {
+        select: {
+          id: true, punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
+        },
+      },
       services: {
-        include: { conceptType: { select: { category: true, name: true, label: true } } },
+        select: {
+          id: true, amount: true, description: true,
+          conceptType: { select: { category: true, name: true, label: true } },
+        },
       },
     },
   });
@@ -74,18 +86,6 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     holidays,
     lastTransaction?.paymentDate || null
   );
-
-  console.log('\n========== PUNITORY CALCULATION ==========');
-  console.log('Payment date:', paymentDate);
-  console.log('Period:', `${record.periodMonth}/${record.periodYear}`);
-  console.log('Unpaid rent:', unpaidRent);
-  console.log('Punitory start day:', contract.punitoryStartDay);
-  console.log('Punitory grace day:', contract.punitoryGraceDay);
-  console.log('Punitory percent:', contract.punitoryPercent);
-  console.log('Last transaction:', lastTransaction?.paymentDate || 'None');
-  console.log('Calculated punitory:', punitory);
-  console.log('Forgive punitorios?', forgivePunitorios);
-  console.log('========== END PUNITORY CALCULATION ==========\n');
 
   const punitoryAmount = forgivePunitorios ? 0 : punitory.amount;
 
@@ -227,8 +227,15 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
 const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const record = await prisma.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
-    include: {
-      contract: true,
+    select: {
+      id: true, periodMonth: true, periodYear: true, rentAmount: true,
+      servicesTotal: true, previousBalance: true, amountPaid: true,
+      punitoryAmount: true, punitoryDays: true, status: true,
+      contract: {
+        select: {
+          punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
+        },
+      },
       transactions: {
         orderBy: { paymentDate: 'desc' },
         take: 1,
@@ -253,18 +260,6 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   // Last payment date (transactions ordered desc, so [0] is most recent)
   const lastTx = record.transactions[0] || null;
 
-  console.log('\n[calculatePunitoryPreview] PREVIEW CALCULATION:');
-  console.log('  MonthlyRecord ID:', monthlyRecordId);
-  console.log('  Period:', `${record.periodMonth}/${record.periodYear}`);
-  console.log('  Payment date for preview:', paymentDate);
-  console.log('  Rent amount:', record.rentAmount);
-  console.log('  Amount paid so far:', amountPaid);
-  console.log('  Services total:', servicesTotal);
-  console.log('  Unpaid rent:', unpaidRent);
-  console.log('  Transactions count:', record.transactions.length);
-  console.log('  Last transaction:', lastTx);
-  console.log('  Last payment date:', lastTx?.paymentDate || 'NONE');
-
   const result = calculatePunitoryV2(
     paymentDate,
     record.periodMonth,
@@ -276,12 +271,6 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
     holidays,
     lastTx?.paymentDate || null
   );
-
-  console.log('  Result from calculatePunitoryV2:', result);
-  console.log('  From date:', result.fromDate);
-  console.log('  To date:', result.toDate);
-  console.log('  Days:', result.days);
-  console.log('  Amount:', result.amount);
 
   return {
     ...result,
@@ -417,9 +406,6 @@ const getTransactionById = async (groupId, id) => {
  * Also handles deletion of associated DebtPayment if it exists.
  */
 const deleteTransaction = async (groupId, id) => {
-  console.log('\n========== DELETE PAYMENT TRANSACTION START ==========');
-  console.log('Transaction ID:', id);
-
   const transaction = await prisma.paymentTransaction.findUnique({
     where: { id },
     include: {
@@ -436,23 +422,12 @@ const deleteTransaction = async (groupId, id) => {
   });
 
   if (!transaction || transaction.groupId !== groupId) {
-    console.log('Transaction not found or wrong group');
     return null;
   }
-
-  console.log('TRANSACTION TO DELETE:');
-  console.log('  - monthlyRecordId:', transaction.monthlyRecordId);
-  console.log('  - amount:', transaction.amount);
-  console.log('  - paymentDate:', transaction.paymentDate);
 
   // Check if there's an associated Debt with DebtPayments
   const debt = transaction.monthlyRecord?.debt;
   if (debt && debt.payments && debt.payments.length > 0) {
-    console.log('FOUND ASSOCIATED DEBT:');
-    console.log('  - debtId:', debt.id);
-    console.log('  - debt status:', debt.status);
-    console.log('  - debt payments count:', debt.payments.length);
-
     // Find matching DebtPayment by date and amount
     const matchingDebtPayment = debt.payments.find((p) => {
       const txDate = new Date(transaction.paymentDate);
@@ -463,52 +438,28 @@ const deleteTransaction = async (groupId, id) => {
     });
 
     if (matchingDebtPayment) {
-      console.log('FOUND MATCHING DEBT PAYMENT:', matchingDebtPayment.id);
-      console.log('  - amount:', matchingDebtPayment.amount);
-      console.log('  - paymentDate:', matchingDebtPayment.paymentDate);
-
-      // Use the cancelDebtPayment service to properly revert the debt
-      // Pass skipTransactionDeletion=true because we'll delete it below
       const { cancelDebtPayment } = require('./debtService');
       try {
         await cancelDebtPayment(debt.id, matchingDebtPayment.id, true);
-        console.log('DEBT PAYMENT CANCELLED SUCCESSFULLY');
       } catch (error) {
-        console.error('ERROR CANCELLING DEBT PAYMENT:', error.message);
         // Continue with transaction deletion even if debt payment cancellation fails
       }
     } else {
-      console.log('NO MATCHING DEBT PAYMENT FOUND');
-      console.log('This is a payment from the MonthlyRecord BEFORE closing');
-      console.log('Will recalculate debt AFTER updating MonthlyRecord');
-      // Mark for recalculation after MonthlyRecord is updated
       debt.needsRecalculation = true;
     }
-  } else {
-    console.log('NO ASSOCIATED DEBT OR DEBT PAYMENTS');
   }
 
-  // Delete the PaymentTransaction FIRST
   await prisma.paymentTransaction.delete({ where: { id } });
-  console.log('PAYMENT TRANSACTION DELETED');
-
-  // Recalculate the monthly record (updates amountPaid)
   await recalculateMonthlyRecord(transaction.monthlyRecordId);
-  console.log('MONTHLY RECORD RECALCULATED');
 
-  // NOW recalculate debt if needed (reads the UPDATED amountPaid)
   if (debt && debt.needsRecalculation) {
-    console.log('Recalculating debt based on updated MonthlyRecord...');
     const { recalculateDebtFromMonthlyRecord } = require('./debtService');
     try {
       await recalculateDebtFromMonthlyRecord(debt.id, transaction.monthlyRecordId);
-      console.log('DEBT RECALCULATED FROM MONTHLY RECORD');
     } catch (error) {
-      console.error('ERROR RECALCULATING DEBT:', error.message);
+      // Debt recalculation failed, but transaction is already deleted
     }
   }
-
-  console.log('========== DELETE PAYMENT TRANSACTION END ==========\n');
 
   return transaction;
 };
