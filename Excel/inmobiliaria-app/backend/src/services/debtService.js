@@ -242,59 +242,68 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 };
 
 /**
- * Calcular punitorios acumulados para una deuda a una fecha dada.
- * Ahora usa calculatePunitoryV2 para consistencia con el resto del sistema.
+ * Batch-load contracts and holidays needed by calculateDebtPunitory.
+ * Call once before processing multiple debts to avoid N+1 queries.
  */
-const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
-  console.log('\n[debtService] CALCULATE DEBT PUNITORY:');
-  console.log('  Debt ID:', debt.id);
-  console.log('  Period:', `${debt.periodMonth}/${debt.periodYear}`);
-  console.log('  Payment date:', paymentDate);
+const preloadDebtDependencies = async (debts) => {
+  const contractIds = [...new Set(debts.map(d => d.contractId))];
+  const years = [...new Set(debts.map(d => d.periodYear))];
 
-  // Los punitorios acumulados son los del MonthlyRecord que quedaron impagos
+  const [contracts, ...holidayArrays] = await Promise.all([
+    prisma.contract.findMany({
+      where: { id: { in: contractIds } },
+      select: { id: true, punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true },
+    }),
+    ...years.map(year => getHolidaysForYear(year)),
+  ]);
+
+  const contractMap = new Map(contracts.map(c => [c.id, c]));
+  const holidayMap = new Map(years.map((year, i) => [year, holidayArrays[i]]));
+
+  return { contractMap, holidayMap };
+};
+
+/**
+ * Calcular punitorios acumulados para una deuda a una fecha dada.
+ * Accepts optional pre-loaded contract and holidays to avoid DB queries (batch mode).
+ */
+const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
-
-  // La deuda base sobre la que se calculan punitorios es SOLO el alquiler impago
-  // NO calculamos punitorios sobre punitorios (anatocismo)
   const remainingRent = Math.max(debt.unpaidRentAmount - debt.amountPaid, 0);
 
-  console.log('  Unpaid rent amount:', debt.unpaidRentAmount);
-  console.log('  Amount paid on debt:', debt.amountPaid);
-  console.log('  Remaining rent:', remainingRent);
-  console.log('  Accumulated punitory (stored):', accumulatedPunitory);
-
-  // Si no queda renta impaga, calcular punitorios sobre los punitorios acumulados impagos
-  if (remainingRent <= 0) {
-    console.log('  -> Rent fully paid, calculating punitorios on unpaid punitorios');
-
-    // IMPORTANTE: Primero calcular nuevos punitorios sobre los punitorios acumulados del período
-    // Obtener configuración del contrato
-    const contract = await prisma.contract.findUnique({
-      where: { id: debt.contractId },
-      select: {
-        punitoryStartDay: true,
-        punitoryGraceDay: true,
-        punitoryPercent: true,
-      },
-    });
-
-    if (!contract) {
-      throw new Error('Contract not found for debt');
+  // Helper to get contract - from preloaded cache or DB
+  const getContract = async () => {
+    if (preloaded?.contractMap) {
+      const c = preloaded.contractMap.get(debt.contractId);
+      if (c) return c;
     }
+    return prisma.contract.findUnique({
+      where: { id: debt.contractId },
+      select: { punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true },
+    });
+  };
 
-    const holidays = await getHolidaysForYear(debt.periodYear);
+  // Helper to get holidays - from preloaded cache or DB
+  const getHolidays = async () => {
+    if (preloaded?.holidayMap) {
+      const h = preloaded.holidayMap.get(debt.periodYear);
+      if (h) return h;
+    }
+    return getHolidaysForYear(debt.periodYear);
+  };
+
+  if (remainingRent <= 0) {
+    const contract = await getContract();
+    if (!contract) throw new Error('Contract not found for debt');
+
+    const holidays = await getHolidays();
     const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : new Date(debt.punitoryStartDate);
-
-    // Calcular nuevos punitorios sobre los punitorios acumulados del período
-    console.log('  Calculating NEW punitorios on accumulated punitory:', accumulatedPunitory);
-    console.log('  From date (last payment):', lastPaymentDate);
-    console.log('  To date:', paymentDate);
 
     const newPunitorios = calculatePunitoryV2(
       paymentDate,
       debt.periodMonth,
       debt.periodYear,
-      accumulatedPunitory,  // Calcular sobre los punitorios acumulados del período
+      accumulatedPunitory,
       contract.punitoryStartDay,
       contract.punitoryGraceDay,
       contract.punitoryPercent,
@@ -302,123 +311,62 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date()) => {
       lastPaymentDate
     );
 
-    // Total de punitorios = acumulados del período + nuevos
     const totalPunitory = accumulatedPunitory + newPunitorios.amount;
-
-    // Cuánto se pagó de punitorios = lo que excede el alquiler
     const amountPaidToPunitory = Math.max(0, debt.amountPaid - debt.unpaidRentAmount);
-
-    // Punitorios impagos = total de punitorios - lo pagado
     const unpaidPunitory = Math.max(0, totalPunitory - amountPaidToPunitory);
 
-    console.log('  Accumulated punitory (period):', accumulatedPunitory);
-    console.log('  New punitorios calculated:', newPunitorios.amount);
-    console.log('  Days:', newPunitorios.days);
-    console.log('  Total punitory (period + new):', totalPunitory);
-    console.log('  Amount paid to punitory:', amountPaidToPunitory);
-    console.log('  Unpaid punitory:', unpaidPunitory);
-
-    // Si no quedan punitorios impagos, return 0
     if (unpaidPunitory <= 0) {
-      console.log('  -> No unpaid punitorios, returning 0');
-      return {
-        days: 0,
-        amount: 0,
-        newPunitoryAmount: 0,
-        accumulatedPunitory: 0,
-        remainingDebt: 0,
-        startDate: null,
-        endDate: null,
-      };
+      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, startDate: null, endDate: null };
     }
 
     return {
       days: newPunitorios.days,
-      amount: unpaidPunitory,  // Total impago
+      amount: unpaidPunitory,
       newPunitoryAmount: newPunitorios.amount,
-      accumulatedPunitory: accumulatedPunitory,
+      accumulatedPunitory,
       remainingDebt: 0,
       startDate: newPunitorios.fromDate,
       endDate: newPunitorios.toDate,
     };
   }
 
-  // Get contract info from debt (we need punitory config)
-  const contract = await prisma.contract.findUnique({
-    where: { id: debt.contractId },
-    select: {
-      punitoryStartDay: true,
-      punitoryGraceDay: true,
-      punitoryPercent: true,
-    },
-  });
+  const contract = await getContract();
+  if (!contract) throw new Error('Contract not found for debt');
 
-  if (!contract) {
-    throw new Error('Contract not found for debt');
-  }
-
-  // Get holidays for the period
-  const holidays = await getHolidaysForYear(debt.periodYear);
-
-  // Use calculatePunitoryV2 with proper parameters
-  // The debt is from a PAST period, so punitorios count from punitoryStartDate
-  // If there was a partial payment on the debt, use lastPaymentDate
-  // If there was NO partial payment on debt, but debt started from a specific date (punitoryStartDate),
-  // we need to pass that as lastPaymentDate to avoid counting from day 1 of the month
+  const holidays = await getHolidays();
 
   const punitoryStartDate = new Date(debt.punitoryStartDate);
   let effectiveLastPaymentDate;
 
   if (debt.lastPaymentDate) {
-    // There was a partial payment on the debt itself
     effectiveLastPaymentDate = new Date(debt.lastPaymentDate);
-    console.log('  Using lastPaymentDate from debt:', effectiveLastPaymentDate);
   } else {
-    // No partial payment on debt, but debt started counting from punitoryStartDate
-    // Check if punitoryStartDate is different from day 1 of the month
     const firstOfMonth = new Date(debt.periodYear, debt.periodMonth - 1, 1);
-    const punitoryStartDay = punitoryStartDate.getDate();
-    const firstDay = firstOfMonth.getDate();
-
-    if (punitoryStartDay !== firstDay || punitoryStartDate.getTime() !== firstOfMonth.getTime()) {
-      // punitoryStartDate is NOT day 1, so use it as effectiveLastPaymentDate
-      // This happens when there was a partial payment on the MonthlyRecord before closing
+    if (punitoryStartDate.getTime() !== firstOfMonth.getTime()) {
       effectiveLastPaymentDate = punitoryStartDate;
-      console.log('  Using punitoryStartDate as effective last payment:', effectiveLastPaymentDate);
     } else {
-      // punitoryStartDate IS day 1, so let calculatePunitoryV2 handle it naturally
       effectiveLastPaymentDate = null;
-      console.log('  No effective last payment, will count from day 1');
     }
   }
-
-  console.log('  Punitory start date:', punitoryStartDate);
-  console.log('  Last payment date on debt:', debt.lastPaymentDate || 'NONE');
-  console.log('  Effective last payment date for calculation:', effectiveLastPaymentDate || 'NONE');
-  console.log('  Contract config:', contract);
 
   const result = calculatePunitoryV2(
     paymentDate,
     debt.periodMonth,
     debt.periodYear,
-    remainingRent, // Calculate ONLY on remaining rent (not on accumulated punitorios)
+    remainingRent,
     contract.punitoryStartDay,
     contract.punitoryGraceDay,
     contract.punitoryPercent,
     holidays,
-    effectiveLastPaymentDate // Use effective last payment date
+    effectiveLastPaymentDate
   );
-
-  console.log('  Calculated punitory result:', result);
-  console.log('  New punitory amount:', result.amount);
-  console.log('  Days:', result.days);
 
   return {
     days: result.days,
     amount: result.amount,
     newPunitoryAmount: result.amount,
-    accumulatedPunitory, // Original punitorios from MonthlyRecord (not compounded)
-    remainingDebt: remainingRent, // Only rent, not including punitorios
+    accumulatedPunitory,
+    remainingDebt: remainingRent,
     startDate: result.fromDate,
     endDate: result.toDate,
   };
@@ -596,9 +544,11 @@ const getOpenDebts = async (groupId, contractId = null) => {
     orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
   });
 
-  // Recalcular punitorios actuales para cada deuda
+  // Batch-load contracts and holidays for all debts (avoids N+1)
+  const preloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
+
   return Promise.all(debts.map(async (debt) => {
-    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt);
+    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
     return {
       ...debt,
@@ -635,11 +585,14 @@ const getDebts = async (groupId, filters = {}) => {
     orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
   });
 
-  // Recalcular punitorios en vivo para deudas abiertas
+  // Batch-load dependencies for non-PAID debts (avoids N+1)
+  const openDebts = debts.filter(d => d.status !== 'PAID');
+  const preloaded = openDebts.length > 0 ? await preloadDebtDependencies(openDebts) : null;
+
   return Promise.all(debts.map(async (debt) => {
     if (debt.status === 'PAID') return { ...debt, liveCurrentTotal: 0, livePunitoryDays: 0, liveAccumulatedPunitory: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
 
-    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt);
+    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
     return {
       ...debt,
@@ -700,9 +653,10 @@ const canPayCurrentMonth = async (groupId, contractId) => {
     return { canPay: true, debts: [] };
   }
 
-  // Recalcular punitorios
+  // Batch-load dependencies and recalculate punitorios
+  const preloaded = await preloadDebtDependencies(openDebts);
   const debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
-    const { amount: currentPunitory, days } = await calculateDebtPunitory(debt);
+    const { amount: currentPunitory, days } = await calculateDebtPunitory(debt, new Date(), preloaded);
     const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
     return {
       id: debt.id,
@@ -999,6 +953,7 @@ module.exports = {
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,
   calculateImputation,
+  preloadDebtDependencies,
   payDebt,
   cancelDebtPayment,
   recalculateDebtFromMonthlyRecord,
