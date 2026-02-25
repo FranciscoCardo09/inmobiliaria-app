@@ -232,7 +232,9 @@ model Property {
   categoryId      String?  @map("category_id")
   ownerId         String?  @map("owner_id")
   address         String   // Dirección completa
-  code            String?  // Código interno (ej: "4B", "LC")
+  billingUnit             String?  @map("billing_unit")             // Unidad de Facturación (Agua)
+  cadastralNomenclature   String?  @map("cadastral_nomenclature")   // Nomenclatura Catastral (Municipalidad)
+  accountNumber           String?  @map("account_number")           // Número de Cuenta (Rentas)
   squareMeters    Float?   @map("square_meters") // m²
   rooms           Int?     // Habitaciones
   bathrooms       Int?     // Baños
@@ -284,6 +286,9 @@ model Tenant {
   phone           String?  // Teléfono
   email           String?  // Email contacto
   observations    String?  // Notas
+  customerNumber  String?  @map("customer_number")   // Número de cliente
+  epecContract    String?  @map("epec_contract")     // Número de Contrato (Epec)
+  ecogasAccount   String?  @map("ecogas_account")    // Número de cuenta (Ecogas)
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

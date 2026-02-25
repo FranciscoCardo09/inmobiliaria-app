@@ -209,7 +209,6 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
       piso: contract.property.floor,
       depto: contract.property.apartment,
     },
@@ -375,7 +374,6 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
     },
     propietario: {
       nombre: contract.property.owner?.name || 'Sin propietario',
@@ -637,7 +635,6 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     },
     propiedad: {
       direccion: contract.property.address,
-      codigo: contract.property.code,
     },
     propietario: {
       nombre: contract.property.owner?.name || '',
@@ -902,8 +899,6 @@ const getVencimientosData = async (groupId) => {
   });
 
   const now = new Date();
-  const twoMonthsFromNow = new Date(now);
-  twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
 
   const vencimientos = [];
   for (const contract of contracts) {
@@ -911,7 +906,9 @@ const getVencimientosData = async (groupId) => {
     const endDate = new Date(startDate);
     endDate.setMonth(endDate.getMonth() + contract.durationMonths);
 
-    if (endDate <= twoMonthsFromNow) {
+    // Compare by month only (ignore day/time/timezone issues)
+    const monthsDiff = (endDate.getFullYear() - now.getFullYear()) * 12 + (endDate.getMonth() - now.getMonth());
+    if (monthsDiff <= 3) {
       vencimientos.push({
         contractId: contract.id,
         inquilino: getTenantsName(contract),

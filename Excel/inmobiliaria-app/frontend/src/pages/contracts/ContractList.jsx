@@ -157,9 +157,6 @@ export const ContractList = () => {
                   </td>
                   <td>
                     <div className="text-sm">{contract.property?.address}</div>
-                    {contract.property?.code && (
-                      <span className="badge badge-ghost badge-xs">{contract.property.code}</span>
-                    )}
                   </td>
                   <td>{new Date(contract.startDate).toLocaleDateString('es-AR')}</td>
                   <td>{new Date(contract.endDate).toLocaleDateString('es-AR')}</td>

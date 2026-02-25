@@ -117,7 +117,7 @@ const getContracts = async (req, res, next) => {
       include: {
         tenant: { select: { id: true, name: true, dni: true, phone: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
@@ -149,7 +149,7 @@ const getExpiringContracts = async (req, res, next) => {
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
         property: {
           select: {
-            id: true, address: true, code: true,
+            id: true, address: true,
             category: { select: { id: true, name: true, color: true } },
           },
         },
@@ -330,7 +330,7 @@ const createContract = async (req, res, next) => {
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
     });
@@ -435,7 +435,7 @@ const updateContract = async (req, res, next) => {
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
     });
@@ -561,7 +561,7 @@ const assignTenantToProperty = async (req, res, next) => {
       include: {
         tenant: { select: { id: true, name: true, dni: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
     });

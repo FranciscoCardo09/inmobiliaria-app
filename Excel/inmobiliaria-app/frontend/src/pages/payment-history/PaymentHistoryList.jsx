@@ -399,9 +399,6 @@ export default function PaymentHistoryList() {
                         <td>
                           <div className="text-sm">
                             {property.address}
-                            {property.code && (
-                              <span className="text-base-content/50"> ({property.code})</span>
-                            )}
                           </div>
                           <CategoryBadge category={property.category} />
                         </td>

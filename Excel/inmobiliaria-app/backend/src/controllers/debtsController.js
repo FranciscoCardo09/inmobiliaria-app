@@ -61,7 +61,7 @@ const getDebtById = async (req, res, next) => {
         contract: {
           include: {
             tenant: { select: { id: true, name: true, dni: true } },
-            property: { select: { id: true, address: true, code: true } },
+            property: { select: { id: true, address: true } },
           },
         },
         payments: { orderBy: { createdAt: 'asc' } },

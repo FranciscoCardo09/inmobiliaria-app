@@ -32,7 +32,6 @@ const getExpiringContracts = async (groupId, months = 2) => {
         select: {
           id: true,
           address: true,
-          code: true,
           category: { select: { id: true, name: true, color: true } },
         },
       },

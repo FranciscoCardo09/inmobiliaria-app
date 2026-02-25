@@ -121,9 +121,8 @@ export default function MonthlyControlPage() {
       filtered = filtered.filter((r) => {
         const tenant = (r.tenants?.length > 0 ? r.tenants.map(t => t.name).join(' / ') : r.tenant?.name || '').toLowerCase()
         const address = (r.property?.address || '').toLowerCase()
-        const code = (r.property?.code || '').toLowerCase()
         const owner = (r.owner?.name || '').toLowerCase()
-        return tenant.includes(term) || address.includes(term) || code.includes(term) || owner.includes(term)
+        return tenant.includes(term) || address.includes(term) || owner.includes(term)
       })
     }
 
@@ -185,7 +184,7 @@ export default function MonthlyControlPage() {
   if (isLoading && allRecords.length === 0) return <LoadingPage />
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
@@ -393,8 +392,8 @@ export default function MonthlyControlPage() {
           description={`No hay contratos activos para ${monthNames[periodMonth]} ${periodYear}`}
         />
       ) : (
-        <Card className="flex-1 flex flex-col overflow-hidden">
-          <div className="overflow-auto flex-1">
+        <Card>
+          <div className="overflow-x-auto">
             <div
               style={{
                 transform: `scale(${tableZoom / 100})`,
@@ -456,11 +455,6 @@ export default function MonthlyControlPage() {
                         </td>
                         <td className="text-xs font-medium max-w-[150px] truncate">
                           {record.property?.address}
-                          {record.property?.code && (
-                            <span className="text-base-content/50 ml-1">
-                              ({record.property.code})
-                            </span>
-                          )}
                         </td>
                         <td className="text-xs">
                           {record.owner?.name || '-'}
@@ -668,7 +662,7 @@ export default function MonthlyControlPage() {
           </div>
 
           {/* Table Footer Summary */}
-          <div className="flex-shrink-0 flex justify-between items-center mt-4 pt-4 border-t border-base-200 text-sm">
+          <div className="flex justify-between items-center mt-4 pt-4 border-t border-base-200 text-sm">
             <div className="flex gap-4">
               <span>
                 <CheckCircleIcon className="w-4 h-4 inline text-success mr-1" />

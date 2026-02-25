@@ -27,9 +27,11 @@ export const PropertyForm = () => {
 
   const [formData, setFormData] = useState({
     address: '',
-    code: '',
     categoryId: '',
     ownerId: '',
+    billingUnit: '',
+    cadastralNomenclature: '',
+    accountNumber: '',
     squareMeters: '',
     rooms: '',
     bathrooms: '',
@@ -44,9 +46,11 @@ export const PropertyForm = () => {
     if (property) {
       setFormData({
         address: property.address || '',
-        code: property.code || '',
         categoryId: property.categoryId || '',
         ownerId: property.ownerId || '',
+        billingUnit: property.billingUnit || '',
+        cadastralNomenclature: property.cadastralNomenclature || '',
+        accountNumber: property.accountNumber || '',
         squareMeters: property.squareMeters || '',
         rooms: property.rooms || '',
         bathrooms: property.bathrooms || '',
@@ -137,15 +141,7 @@ export const PropertyForm = () => {
               error={errors.address}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="Código"
-                name="code"
-                value={formData.code}
-                onChange={handleChange}
-                placeholder="4B, LC, etc."
-              />
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="label">
                   <span className="label-text">Categoría</span>
@@ -175,6 +171,37 @@ export const PropertyForm = () => {
                 value={formData.ownerId}
                 onChange={handleChange}
                 placeholder="Buscar dueño por nombre, DNI..."
+              />
+            </div>
+          </div>
+
+          {/* Service Data */}
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Datos de Servicios</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Input
+                label="Unid. Facturación (Agua)"
+                name="billingUnit"
+                value={formData.billingUnit}
+                onChange={handleChange}
+                placeholder="Ej: 12345"
+              />
+
+              <Input
+                label="Nomenclatura Catastral"
+                name="cadastralNomenclature"
+                value={formData.cadastralNomenclature}
+                onChange={handleChange}
+                placeholder="Ej: 01-02-003-004"
+              />
+
+              <Input
+                label="Nro. Cuenta (Rentas)"
+                name="accountNumber"
+                value={formData.accountNumber}
+                onChange={handleChange}
+                placeholder="Ej: 0001-00234"
               />
             </div>
           </div>

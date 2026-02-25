@@ -36,7 +36,7 @@ const getTenants = async (req, res, next) => {
           where: { active: true },
           include: {
             property: {
-              select: { id: true, address: true, code: true },
+              select: { id: true, address: true },
             },
           },
           orderBy: { startDate: 'desc' },
@@ -67,7 +67,7 @@ const getTenantById = async (req, res, next) => {
         contracts: {
           include: {
             property: {
-              select: { id: true, address: true, code: true },
+              select: { id: true, address: true },
             },
             adjustmentIndex: {
               select: { id: true, name: true, frequencyMonths: true },
@@ -101,7 +101,7 @@ const getTenantHistory = async (req, res, next) => {
     const contracts = await prisma.contract.findMany({
       where: { tenantId: id },
       include: {
-        property: { select: { id: true, address: true, code: true } },
+        property: { select: { id: true, address: true } },
         adjustmentIndex: { select: { name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
@@ -120,7 +120,7 @@ const getTenantHistory = async (req, res, next) => {
 const createTenant = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, dni, phone, email, observations, guarantors } = req.body;
+    const { name, dni, phone, email, observations, customerNumber, epecContract, ecogasAccount, guarantors } = req.body;
 
     if (!name || !dni) {
       return ApiResponse.badRequest(res, 'Nombre y DNI son requeridos');
@@ -141,7 +141,7 @@ const createTenant = async (req, res, next) => {
 
     const tenant = await prisma.tenant.create({
       data: {
-        groupId, name, dni, phone, email, observations,
+        groupId, name, dni, phone, email, observations, customerNumber, epecContract, ecogasAccount,
         guarantors: guarantors?.length ? {
           create: guarantors.map((g, idx) => ({
             name: g.name,
@@ -159,7 +159,7 @@ const createTenant = async (req, res, next) => {
         contracts: {
           where: { active: true },
           include: {
-            property: { select: { id: true, address: true, code: true } },
+            property: { select: { id: true, address: true } },
           },
         },
         _count: { select: { contracts: true } },
@@ -176,7 +176,7 @@ const createTenant = async (req, res, next) => {
 const updateTenant = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { name, dni, phone, email, observations, isActive, guarantors } = req.body;
+    const { name, dni, phone, email, observations, customerNumber, epecContract, ecogasAccount, isActive, guarantors } = req.body;
 
     const tenant = await prisma.tenant.findUnique({ where: { id } });
     if (!tenant || tenant.groupId !== groupId) {
@@ -226,6 +226,9 @@ const updateTenant = async (req, res, next) => {
           ...(phone !== undefined && { phone }),
           ...(email !== undefined && { email }),
           ...(observations !== undefined && { observations }),
+          ...(customerNumber !== undefined && { customerNumber }),
+          ...(epecContract !== undefined && { epecContract }),
+          ...(ecogasAccount !== undefined && { ecogasAccount }),
           ...(isActive !== undefined && { isActive }),
         },
         include: {
@@ -233,7 +236,7 @@ const updateTenant = async (req, res, next) => {
           contracts: {
             where: { active: true },
             include: {
-              property: { select: { id: true, address: true, code: true } },
+              property: { select: { id: true, address: true } },
             },
           },
           _count: { select: { contracts: true } },

@@ -106,7 +106,7 @@ const getCurrentMonthPayments = async (groupId) => {
     where: { groupId, active: true },
     include: {
       tenant: { select: { id: true, name: true, dni: true } },
-      property: { select: { id: true, address: true, code: true } },
+      property: { select: { id: true, address: true } },
       payments: {
         include: { concepts: true },
       },
@@ -178,7 +178,7 @@ const getNextMonthPayments = async (groupId) => {
     where: { groupId, active: true },
     include: {
       tenant: { select: { id: true, name: true, dni: true } },
-      property: { select: { id: true, address: true, code: true } },
+      property: { select: { id: true, address: true } },
       adjustmentIndex: {
         select: { id: true, name: true, currentValue: true },
       },

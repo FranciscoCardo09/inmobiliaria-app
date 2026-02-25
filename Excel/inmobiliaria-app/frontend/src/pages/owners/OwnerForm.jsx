@@ -240,12 +240,11 @@ export const OwnerForm = () => {
               <h2 className="text-xl font-semibold">Propiedades</h2>
               <div className="overflow-x-auto">
                 <table className="table table-sm">
-                  <thead><tr><th>Dirección</th><th>Código</th><th>Estado</th></tr></thead>
+                  <thead><tr><th>Dirección</th><th>Estado</th></tr></thead>
                   <tbody>
                     {owner.properties.map((p) => (
                       <tr key={p.id}>
                         <td>{p.address}</td>
-                        <td><span className="badge badge-ghost">{p.code || '-'}</span></td>
                         <td><span className={`badge badge-sm ${p.isActive ? 'badge-success' : 'badge-error'}`}>{p.isActive ? 'Activa' : 'Inactiva'}</span></td>
                       </tr>
                     ))}

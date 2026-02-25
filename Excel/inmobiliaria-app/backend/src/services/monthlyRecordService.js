@@ -9,7 +9,7 @@ const prisma = require('../lib/prisma');
  */
 function getCalendarPeriod(contract, monthNumber) {
   const startDate = new Date(contract.startDate);
-  // Month number relative to start: monthNumber 1 = startDate month
+  // Month number relative to start: monthNumber startMonth = startDate month
   const monthsToAdd = monthNumber - contract.startMonth;
   const date = new Date(startDate.getFullYear(), startDate.getMonth() + monthsToAdd, 1);
   return {
@@ -34,7 +34,9 @@ function getMonthNumber(contract, periodMonth, periodYear) {
  * Check if a contract is active for a given month number
  */
 function isContractActiveForMonth(contract, monthNumber) {
-  return monthNumber >= 1 && monthNumber <= contract.durationMonths && contract.active;
+  // When startMonth > 1, monthNumber range is [startMonth .. startMonth + durationMonths - 1]
+  const endMonth = contract.startMonth + contract.durationMonths - 1;
+  return monthNumber >= contract.startMonth && monthNumber <= endMonth && contract.active;
 }
 
 /**
@@ -79,7 +81,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         select: {
           id: true,
           address: true,
-          code: true,
           category: { select: { id: true, name: true, color: true } },
           owner: { select: { id: true, name: true } },
         },
@@ -429,7 +430,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         : contract.tenant ? [contract.tenant] : [],
       property: contract.property,
       owner: contract.property?.owner,
-      periodLabel: `${monthNames[month]} - Mes ${monthNumber}`,
+      periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
       nextAdjustmentLabel,
       // Calculated fields for the view
       // IMPORTANTE: Cuando hay deuda, calcular balance sobre totales históricos
@@ -577,7 +578,6 @@ const getMonthlyRecordById = async (groupId, id) => {
             select: {
               id: true,
               address: true,
-              code: true,
               category: { select: { id: true, name: true, color: true } },
               owner: { select: { id: true, name: true } },
             },

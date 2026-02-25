@@ -45,7 +45,7 @@ const getOwnerById = async (req, res, next) => {
       where: { id },
       include: {
         properties: {
-          select: { id: true, address: true, code: true, isActive: true },
+          select: { id: true, address: true, isActive: true },
           orderBy: { address: 'asc' },
         },
       },
