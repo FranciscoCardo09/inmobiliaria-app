@@ -97,7 +97,7 @@ export default function MonthlyControlPage() {
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
-  const { records: allRecords, summary, isLoading } = useMonthlyRecords(
+  const { records: allRecords, summary, isLoading, toggleIva } = useMonthlyRecords(
     currentGroupId,
     periodMonth,
     periodYear,
@@ -127,6 +127,13 @@ export default function MonthlyControlPage() {
 
     return filtered
   }, [allRecords, statusFilter, searchFilter])
+
+  // Detect if IVA column should be shown
+  const showIvaColumn = useMemo(() => {
+    return allRecords.some(
+      (r) => r.ivaAmount > 0 || r.property?.category?.name === 'LOCAL COMERCIAL'
+    )
+  }, [allRecords])
 
   // Navigation between months
   const goToPrevMonth = () => {
@@ -396,6 +403,7 @@ export default function MonthlyControlPage() {
                   <th className="text-xs">Próx. Ajuste</th>
                   <th className="text-xs text-right">Alquiler</th>
                   <th className="text-xs text-right">Servicios</th>
+                  {showIvaColumn && <th className="text-xs text-right">IVA (21%)</th>}
                   <th className="text-xs text-right">A Favor Ant.</th>
                   <th className="text-xs text-right">Punitorios</th>
                   <th className="text-xs text-right font-bold">TOTAL</th>
@@ -470,6 +478,23 @@ export default function MonthlyControlPage() {
                             {formatCurrency(record.servicesTotal)}
                           </span>
                         </td>
+                        {showIvaColumn && (
+                          <td className="text-xs text-right font-mono">
+                            {record.property?.category?.name === 'LOCAL COMERCIAL' ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <input
+                                  type="checkbox"
+                                  className="checkbox checkbox-xs checkbox-primary"
+                                  checked={!!record.includeIva}
+                                  onChange={(e) => toggleIva({ recordId: record.id, includeIva: e.target.checked })}
+                                />
+                                {record.ivaAmount > 0 && (
+                                  <span className="text-primary">{formatCurrency(record.ivaAmount)}</span>
+                                )}
+                              </div>
+                            ) : '-'}
+                          </td>
+                        )}
                         <td className="text-xs text-right font-mono text-info">
                           {record.previousBalance > 0
                             ? formatCurrency(record.previousBalance)
@@ -619,7 +644,7 @@ export default function MonthlyControlPage() {
                       {/* Expanded row - Service management inline */}
                       {isExpanded && (
                         <tr key={`${record.id}-expanded`} className="bg-base-200/50">
-                          <td colSpan="19" className="p-0">
+                          <td colSpan={showIvaColumn ? 20 : 19} className="p-0">
                             <ServiceManagerInline record={record} groupId={currentGroupId} />
                           </td>
                         </tr>

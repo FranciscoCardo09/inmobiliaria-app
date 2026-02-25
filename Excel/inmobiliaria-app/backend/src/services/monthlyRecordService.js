@@ -194,7 +194,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
         if (latestPrevBalance !== record.previousBalance) {
           // Update the record with the fresh previous balance
-          const newTotalDue = record.rentAmount + record.servicesTotal + record.punitoryAmount - latestPrevBalance;
+          const recordIva = record.includeIva ? record.rentAmount * 0.21 : 0;
+          const newTotalDue = record.rentAmount + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
           const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
 
           record = await prisma.monthlyRecord.update({
@@ -359,15 +360,18 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
     }
 
-    // Live total = rent + services + live punitorios - a favor anterior
-    const liveTotalDue = Math.max(record.rentAmount + record.servicesTotal + livePunitoryAmount - record.previousBalance, 0);
+    // Calculate IVA (21% of rent if includeIva is true)
+    const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
+
+    // Live total = rent + services + live punitorios + IVA - a favor anterior
+    const liveTotalDue = Math.max(record.rentAmount + record.servicesTotal + livePunitoryAmount + ivaAmount - record.previousBalance, 0);
     // Live balance = what was paid minus what is owed (with live punitorios)
     const liveBalance = record.amountPaid - liveTotalDue;
 
     // TOTALES HISTÓRICOS: incluyen punitorios de la deuda (pagados + impagos)
     let totalPunitoriosHistoricos = livePunitoryAmount; // Punitorios del record
     let totalAbonado = record.amountPaid; // Lo pagado al record (ya incluye pagos de deuda)
-    let totalHistorico = liveTotalDue; // Total con punitorios del record
+    let totalHistorico = liveTotalDue; // Total con punitorios del record + IVA
 
     if (debtInfo && record.debt) {
       // Si hay deuda, los punitorios del record se "transfirieron" a la deuda
@@ -382,8 +386,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       // NOTA: NO sumar debt.amountPaid porque record.amountPaid ya lo incluye
       // (cuando se paga la deuda, se actualiza MonthlyRecord.amountPaid en payDebt)
 
-      // Total histórico = alquiler + servicios + punitorios de la deuda
-      totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos - record.previousBalance;
+      // Total histórico = alquiler + servicios + punitorios de la deuda + IVA
+      totalHistorico = record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos + ivaAmount - record.previousBalance;
 
       console.log('\n[monthlyRecordService] HISTORICAL TOTALS WITH DEBT:');
       console.log('  Record punitorios (congelados):', livePunitoryAmount);
@@ -399,6 +403,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     records.push({
       ...record,
       debtInfo,
+      ivaAmount,
       livePunitoryAmount,
       livePunitoryDays,
       liveTotalDue,
@@ -500,7 +505,8 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
     punitoryForgiven = lastTx.punitoryForgiven;
   }
 
-  const totalDue = record.rentAmount + servicesTotal + punitoryAmount - record.previousBalance;
+  const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
+  const totalDue = record.rentAmount + servicesTotal + punitoryAmount + ivaAmount - record.previousBalance;
   const balance = amountPaid - Math.max(totalDue, 0);
 
   // Check if there's an open debt for this record

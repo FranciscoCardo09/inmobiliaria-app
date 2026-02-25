@@ -58,6 +58,22 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     },
   })
 
+  const toggleIvaMutation = useMutation({
+    mutationFn: async ({ recordId, includeIva }) => {
+      const response = await api.patch(
+        `/groups/${groupId}/monthly-records/${recordId}/iva`,
+        { includeIva }
+      )
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords'] })
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al cambiar IVA')
+    },
+  })
+
   return {
     records: recordsQuery.data?.records || [],
     summary: recordsQuery.data?.summary || {},
@@ -66,6 +82,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     updateRecord: updateMutation.mutate,
     generateRecords: generateMutation.mutate,
     isUpdating: updateMutation.isPending,
+    toggleIva: toggleIvaMutation.mutate,
   }
 }
 

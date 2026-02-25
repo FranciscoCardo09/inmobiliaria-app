@@ -32,6 +32,13 @@ router.post(
   controller.forceGenerate
 );
 
+// IVA toggle
+router.patch(
+  '/:recordId/iva',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.toggleIva
+);
+
 // Monthly Services (nested under records)
 router.get(
   '/:recordId/services',
