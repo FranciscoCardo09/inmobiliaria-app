@@ -1,47 +1,43 @@
 // Main App Component with Routes
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useAuthStore } from './stores/authStore'
 import { authAPI } from './services/api'
 
 // Layout
 import Layout from './components/layout/Layout'
 
-// Pages
+// Loading
+import { LoadingPage } from './components/ui/Loading'
+
+// Public pages (eager — needed immediately)
 import Login from './pages/Login'
 import Register from './pages/Register'
-import Dashboard from './pages/Dashboard'
 import AcceptInvite from './pages/AcceptInvite'
 import AuthCallback from './pages/AuthCallback'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
-import PropertyList from './pages/properties/PropertyList'
-import PropertyForm from './pages/properties/PropertyForm'
-import OwnerList from './pages/owners/OwnerList'
-import OwnerForm from './pages/owners/OwnerForm'
-import TenantList from './pages/tenants/TenantList'
-import TenantForm from './pages/tenants/TenantForm'
-import ContractList from './pages/contracts/ContractList'
-import ContractForm from './pages/contracts/ContractForm'
-import { AdjustmentIndexList } from './pages/adjustments/AdjustmentIndexList'
-import AdjustmentIndexForm from './pages/adjustments/AdjustmentIndexForm'
-import ContractsWithAdjustments from './pages/dashboard/ContractsWithAdjustments'
-import ContractsExpiring from './pages/dashboard/ContractsExpiring'
 
-// Phase 5: Monthly Control + Debts
-import MonthlyControlPage from './pages/monthly-control/MonthlyControlPage'
-import PaymentHistoryList from './pages/payment-history/PaymentHistoryList'
-import ServiceTypeList from './pages/services/ServiceTypeList'
-
-// Phase 6: Reports
-import ReportsPage from './pages/reports/ReportsPage'
-
-// Phase 7: Settings
-import SettingsPage from './pages/settings/SettingsPage'
-
-// Loading
-import { LoadingPage } from './components/ui/Loading'
+// Protected pages (lazy — loaded on demand)
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const PropertyList = lazy(() => import('./pages/properties/PropertyList'))
+const PropertyForm = lazy(() => import('./pages/properties/PropertyForm'))
+const OwnerList = lazy(() => import('./pages/owners/OwnerList'))
+const OwnerForm = lazy(() => import('./pages/owners/OwnerForm'))
+const TenantList = lazy(() => import('./pages/tenants/TenantList'))
+const TenantForm = lazy(() => import('./pages/tenants/TenantForm'))
+const ContractList = lazy(() => import('./pages/contracts/ContractList'))
+const ContractForm = lazy(() => import('./pages/contracts/ContractForm'))
+const AdjustmentIndexList = lazy(() => import('./pages/adjustments/AdjustmentIndexList').then(m => ({ default: m.AdjustmentIndexList })))
+const AdjustmentIndexForm = lazy(() => import('./pages/adjustments/AdjustmentIndexForm'))
+const ContractsWithAdjustments = lazy(() => import('./pages/dashboard/ContractsWithAdjustments'))
+const ContractsExpiring = lazy(() => import('./pages/dashboard/ContractsExpiring'))
+const MonthlyControlPage = lazy(() => import('./pages/monthly-control/MonthlyControlPage'))
+const PaymentHistoryList = lazy(() => import('./pages/payment-history/PaymentHistoryList'))
+const ServiceTypeList = lazy(() => import('./pages/services/ServiceTypeList'))
+const ReportsPage = lazy(() => import('./pages/reports/ReportsPage'))
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
 
 function App() {
   const { isAuthenticated, setLoading, isLoading, setUser, setGroups, setPendingInvites } = useAuthStore()
@@ -71,68 +67,70 @@ function App() {
   }
 
   return (
-    <Routes>
-      {/* Public routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/invite/:token" element={<AcceptInvite />} />
+    <Suspense fallback={<LoadingPage />}>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/invite/:token" element={<AcceptInvite />} />
 
-      {/* Email verification & Password reset */}
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Email verification & Password reset */}
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
-      {/* Google OAuth Callback */}
-      <Route path="/auth/callback" element={<AuthCallback />} />
+        {/* Google OAuth Callback */}
+        <Route path="/auth/callback" element={<AuthCallback />} />
 
-      {/* Protected routes */}
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="dashboard/contracts-adjustments" element={<ContractsWithAdjustments />} />
-        <Route path="dashboard/contracts-expiring" element={<ContractsExpiring />} />
+        {/* Protected routes */}
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="dashboard/contracts-adjustments" element={<ContractsWithAdjustments />} />
+          <Route path="dashboard/contracts-expiring" element={<ContractsExpiring />} />
 
-        {/* Phase 2: Properties */}
-        <Route path="properties" element={<PropertyList />} />
-        <Route path="properties/new" element={<PropertyForm />} />
-        <Route path="properties/:id" element={<PropertyForm />} />
+          {/* Phase 2: Properties */}
+          <Route path="properties" element={<PropertyList />} />
+          <Route path="properties/new" element={<PropertyForm />} />
+          <Route path="properties/:id" element={<PropertyForm />} />
 
-        {/* Phase 3: Owners */}
-        <Route path="owners" element={<OwnerList />} />
-        <Route path="owners/new" element={<OwnerForm />} />
-        <Route path="owners/:id" element={<OwnerForm />} />
+          {/* Phase 3: Owners */}
+          <Route path="owners" element={<OwnerList />} />
+          <Route path="owners/new" element={<OwnerForm />} />
+          <Route path="owners/:id" element={<OwnerForm />} />
 
-        {/* Phase 3: Tenants */}
-        <Route path="tenants" element={<TenantList />} />
-        <Route path="tenants/new" element={<TenantForm />} />
-        <Route path="tenants/:id" element={<TenantForm />} />
+          {/* Phase 3: Tenants */}
+          <Route path="tenants" element={<TenantList />} />
+          <Route path="tenants/new" element={<TenantForm />} />
+          <Route path="tenants/:id" element={<TenantForm />} />
 
-        {/* Phase 3: Contracts */}
-        <Route path="contracts" element={<ContractList />} />
-        <Route path="contracts/new" element={<ContractForm />} />
-        <Route path="contracts/:id" element={<ContractForm />} />
+          {/* Phase 3: Contracts */}
+          <Route path="contracts" element={<ContractList />} />
+          <Route path="contracts/new" element={<ContractForm />} />
+          <Route path="contracts/:id" element={<ContractForm />} />
 
-        {/* Phase 3: Adjustment Indices */}
-        <Route path="adjustments" element={<AdjustmentIndexList />} />
-        <Route path="adjustments/new" element={<AdjustmentIndexForm />} />
-        <Route path="adjustments/:id" element={<AdjustmentIndexForm />} />
+          {/* Phase 3: Adjustment Indices */}
+          <Route path="adjustments" element={<AdjustmentIndexList />} />
+          <Route path="adjustments/new" element={<AdjustmentIndexForm />} />
+          <Route path="adjustments/:id" element={<AdjustmentIndexForm />} />
 
-        {/* Phase 5: Monthly Control + Debts */}
-        <Route path="monthly-control" element={<MonthlyControlPage />} />
-        <Route path="debts" element={<Navigate to="/monthly-control" replace />} />
-        <Route path="payment-history" element={<PaymentHistoryList />} />
-        <Route path="services" element={<ServiceTypeList />} />
+          {/* Phase 5: Monthly Control + Debts */}
+          <Route path="monthly-control" element={<MonthlyControlPage />} />
+          <Route path="debts" element={<Navigate to="/monthly-control" replace />} />
+          <Route path="payment-history" element={<PaymentHistoryList />} />
+          <Route path="services" element={<ServiceTypeList />} />
 
-        {/* Phase 6: Reports */}
-        <Route path="reports" element={<ReportsPage />} />
+          {/* Phase 6: Reports */}
+          <Route path="reports" element={<ReportsPage />} />
 
-        {/* Phase 7: Settings */}
-        <Route path="settings" element={<SettingsPage />} />
-      </Route>
+          {/* Phase 7: Settings */}
+          <Route path="settings" element={<SettingsPage />} />
+        </Route>
 
-      {/* 404 */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+        {/* 404 */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Suspense>
   )
 }
 
