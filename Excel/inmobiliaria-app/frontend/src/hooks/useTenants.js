@@ -19,6 +19,7 @@ export const useTenants = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   // Fetch single tenant
@@ -30,6 +31,7 @@ export const useTenants = (groupId, filters = {}) => {
         return response.data.data
       },
       enabled: !!groupId && !!tenantId,
+      staleTime: 2 * 60 * 1000,
     })
   }
 
@@ -42,6 +44,7 @@ export const useTenants = (groupId, filters = {}) => {
         return response.data.data
       },
       enabled: !!groupId && !!tenantId,
+      staleTime: 2 * 60 * 1000,
     })
   }
 

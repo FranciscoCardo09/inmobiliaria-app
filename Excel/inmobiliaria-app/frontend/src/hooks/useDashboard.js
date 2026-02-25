@@ -10,6 +10,7 @@ export const useDashboard = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
     refetchInterval: 60000,
   })
 

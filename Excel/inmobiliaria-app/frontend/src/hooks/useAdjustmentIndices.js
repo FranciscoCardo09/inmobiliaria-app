@@ -13,6 +13,7 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 5 * 60 * 1000,
   })
 
   const createMutation = useMutation({
@@ -64,6 +65,7 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   // Apply adjustment percentage to contracts

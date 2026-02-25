@@ -13,6 +13,7 @@ export const useSettings = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 5 * 60 * 1000,
   })
 
   const mutation = useMutation({

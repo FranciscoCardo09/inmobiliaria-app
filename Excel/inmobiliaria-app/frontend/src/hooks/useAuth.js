@@ -60,6 +60,7 @@ export const useAuth = () => {
       return response.data.data
     },
     enabled: isAuthenticated,
+    staleTime: 5 * 60 * 1000,
     onSuccess: (data) => {
       setUser(data.user)
       setGroups(data.groups)

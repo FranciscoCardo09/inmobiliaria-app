@@ -14,6 +14,7 @@ export const useCategories = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 5 * 60 * 1000,
   })
 
   // Create category

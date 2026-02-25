@@ -23,6 +23,7 @@ export const usePayments = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const invalidateAll = () => {
@@ -99,6 +100,7 @@ export const usePaymentCalculation = (groupId, contractId, paymentDate) => {
       return response.data.data
     },
     enabled: !!groupId && !!contractId,
+    staleTime: 2 * 60 * 1000,
   })
 }
 
@@ -113,6 +115,7 @@ export const useConceptTypes = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 5 * 60 * 1000,
   })
 
   const createMutation = useMutation({

@@ -16,6 +16,7 @@ export const useOwners = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const useOwner = (ownerId) => {
@@ -26,6 +27,7 @@ export const useOwners = (groupId, filters = {}) => {
         return response.data.data
       },
       enabled: !!groupId && !!ownerId,
+      staleTime: 2 * 60 * 1000,
     })
   }
 

@@ -12,6 +12,7 @@ export const usePropertyGroups = (groupId) => {
       return res.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const invalidate = () => {

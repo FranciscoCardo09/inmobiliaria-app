@@ -19,6 +19,7 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const useContract = (contractId) => {
@@ -29,6 +30,7 @@ export const useContracts = (groupId, filters = {}) => {
         return response.data.data
       },
       enabled: !!groupId && !!contractId,
+      staleTime: 2 * 60 * 1000,
     })
   }
 
@@ -39,6 +41,7 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const createMutation = useMutation({
