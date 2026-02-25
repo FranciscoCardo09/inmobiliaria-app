@@ -169,6 +169,15 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     });
   }
 
+  // IVA
+  if (monthlyRecord.includeIva && monthlyRecord.ivaAmount > 0) {
+    conceptos.push({
+      concepto: 'IVA (21%)',
+      base: monthlyRecord.rentAmount,
+      importe: monthlyRecord.ivaAmount,
+    });
+  }
+
   // Punitorios
   if (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) {
     conceptos.push({
@@ -740,6 +749,7 @@ const getControlMensualData = async (groupId, month, year) => {
     mesContrato: r.monthNumber,
     alquiler: r.rentAmount,
     servicios: r.servicesTotal,
+    iva: r.includeIva ? r.ivaAmount : 0,
     punitorios: r.punitoryAmount,
     total: r.totalDue,
     pagado: r.amountPaid,
@@ -752,6 +762,7 @@ const getControlMensualData = async (groupId, month, year) => {
   const totales = {
     alquiler: registros.reduce((s, r) => s + r.alquiler, 0),
     servicios: registros.reduce((s, r) => s + r.servicios, 0),
+    iva: registros.reduce((s, r) => s + r.iva, 0),
     punitorios: registros.reduce((s, r) => s + r.punitorios, 0),
     total: registros.reduce((s, r) => s + r.total, 0),
     pagado: registros.reduce((s, r) => s + r.pagado, 0),

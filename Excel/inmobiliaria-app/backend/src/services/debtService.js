@@ -28,33 +28,41 @@ function calculateImputation(monthlyRecord) {
   const rentAmount = monthlyRecord.rentAmount || 0;
   const servicesTotal = monthlyRecord.servicesTotal || 0;
   const punitoryAmount = monthlyRecord.punitoryAmount || 0;
+  const ivaAmount = monthlyRecord.ivaAmount || 0;
   const amountPaid = monthlyRecord.amountPaid || 0;
 
-  // Imputar primero a servicios, luego a alquiler, luego a punitorios
+  // Imputar primero a servicios, luego a IVA, luego a alquiler, luego a punitorios
   let remaining = amountPaid;
 
   // 1. Cubrir servicios
   const servicesCovered = Math.min(remaining, servicesTotal);
   remaining -= servicesCovered;
 
-  // 2. Cubrir alquiler
+  // 2. Cubrir IVA
+  const ivaCovered = Math.min(remaining, ivaAmount);
+  remaining -= ivaCovered;
+
+  // 3. Cubrir alquiler
   const rentCovered = Math.min(remaining, rentAmount);
   remaining -= rentCovered;
 
-  // 3. Cubrir punitorios del record (si quedaron fondos)
+  // 4. Cubrir punitorios del record (si quedaron fondos)
   const punitoryCovered = Math.min(remaining, punitoryAmount);
 
   const unpaidRent = rentAmount - rentCovered;
+  const unpaidIva = ivaAmount - ivaCovered;
   const unpaidPunitory = punitoryAmount - punitoryCovered;
 
   return {
     servicesCovered,
+    ivaCovered,
     rentCovered,
     punitoryCovered,
     unpaidRent,
+    unpaidIva,
     unpaidPunitory,
-    totalOriginal: rentAmount + servicesTotal + punitoryAmount,
-    totalUnpaid: unpaidRent + unpaidPunitory,
+    totalOriginal: rentAmount + servicesTotal + punitoryAmount + ivaAmount,
+    totalUnpaid: unpaidRent + unpaidPunitory + unpaidIva,
   };
 }
 

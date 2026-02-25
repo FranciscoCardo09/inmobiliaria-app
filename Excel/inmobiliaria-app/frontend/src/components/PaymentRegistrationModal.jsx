@@ -85,7 +85,8 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const alquiler = record?.rentAmount || 0
   const servicios = record?.servicesTotal || 0
   const aFavorAnterior = record?.previousBalance || 0
-  const totalDue = Math.round(alquiler + servicios + punitoryAmount - aFavorAnterior)
+  const iva = record?.ivaAmount || 0
+  const totalDue = Math.round(alquiler + servicios + punitoryAmount + iva - aFavorAnterior)
   const alreadyPaid = record?.amountPaid || 0
   const remaining = Math.max(totalDue - Math.round(alreadyPaid), 0)
 
@@ -308,6 +309,14 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                 {punitoryPreview.days === 0 && (
                   <div className="text-success">Pago dentro del plazo — sin punitorios</div>
                 )}
+              </div>
+            )}
+
+            {/* IVA */}
+            {iva > 0 && (
+              <div className="flex justify-between">
+                <span>IVA (21%)</span>
+                <span className="font-mono">{formatCurrency(iva)}</span>
               </div>
             )}
 

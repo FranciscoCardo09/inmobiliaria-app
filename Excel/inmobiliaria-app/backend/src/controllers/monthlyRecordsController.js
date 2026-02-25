@@ -212,11 +212,37 @@ const deleteRecordService = async (req, res, next) => {
   }
 };
 
+// PATCH /api/groups/:groupId/monthly-records/:recordId/iva
+const toggleIva = async (req, res, next) => {
+  try {
+    const { groupId, recordId } = req.params;
+    const { includeIva } = req.body;
+
+    const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+    if (!record || record.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    const ivaAmount = includeIva ? record.rentAmount * 0.21 : 0;
+
+    await prisma.monthlyRecord.update({
+      where: { id: recordId },
+      data: { includeIva, ivaAmount },
+    });
+
+    const updated = await recalculateMonthlyRecord(recordId);
+    return ApiResponse.success(res, updated, 'IVA actualizado');
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMonthlyRecords,
   getMonthlyRecordDetail,
   updateMonthlyRecord,
   forceGenerate,
+  toggleIva,
   getRecordServices,
   addRecordService,
   updateRecordService,
