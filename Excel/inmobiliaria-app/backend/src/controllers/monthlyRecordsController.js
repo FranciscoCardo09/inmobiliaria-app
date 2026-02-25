@@ -237,6 +237,42 @@ const toggleIva = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/monthly-records/batch-services
+const batchAddServices = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { conceptTypeId, totalAmount, description, distributions } = req.body;
+
+    if (!conceptTypeId || !totalAmount || !distributions?.length) {
+      return ApiResponse.badRequest(res, 'conceptTypeId, totalAmount y distributions son requeridos');
+    }
+
+    // Validate all records belong to this group
+    const recordIds = distributions.map((d) => d.recordId);
+    const records = await prisma.monthlyRecord.findMany({
+      where: { id: { in: recordIds }, groupId },
+    });
+    if (records.length !== recordIds.length) {
+      return ApiResponse.badRequest(res, 'Algunos registros no pertenecen a este grupo');
+    }
+
+    // Validate amounts sum matches total
+    const amountSum = distributions.reduce((s, d) => s + d.amount, 0);
+    if (Math.abs(amountSum - totalAmount) > 1) {
+      return ApiResponse.badRequest(res, 'La suma de montos no coincide con el total');
+    }
+
+    const { batchAddServices: batchAdd } = require('../services/monthlyServiceService');
+    const results = await batchAdd(distributions, conceptTypeId, description);
+    return ApiResponse.success(res, results, 'Servicios asignados correctamente');
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return ApiResponse.conflict(res, 'Alguna propiedad ya tiene ese servicio asignado este mes');
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   getMonthlyRecords,
   getMonthlyRecordDetail,
@@ -247,4 +283,5 @@ module.exports = {
   addRecordService,
   updateRecordService,
   deleteRecordService,
+  batchAddServices,
 };

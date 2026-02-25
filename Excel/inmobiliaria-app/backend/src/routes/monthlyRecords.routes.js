@@ -32,6 +32,13 @@ router.post(
   controller.forceGenerate
 );
 
+// Batch services
+router.post(
+  '/batch-services',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.batchAddServices
+);
+
 // IVA toggle
 router.patch(
   '/:recordId/iva',
