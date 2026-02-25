@@ -10,9 +10,8 @@ const {
   calculateDebtPunitory,
 } = require('../services/debtService');
 const { previewCloseMonth, closeMonth } = require('../services/monthlyCloseService');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/debts
 const getAllDebts = async (req, res, next) => {

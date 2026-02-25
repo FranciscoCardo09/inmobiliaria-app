@@ -1,8 +1,7 @@
 // Debt Service - Gestión de deudas con punitorios acumulados
-const { PrismaClient } = require('@prisma/client');
 const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Helper: parse a date string as local midnight (avoids UTC shift)
 const parseLocalDate = (dateStr) => {

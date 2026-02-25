@@ -1,10 +1,9 @@
 // Owners Controller
 // Handles: CRUD owners (dueños de propiedades) per group
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/owners
 const getOwners = async (req, res, next) => {

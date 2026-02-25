@@ -1,10 +1,9 @@
 // Payment Transaction Service - Register and manage payment transactions
-const { PrismaClient } = require('@prisma/client');
 const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
 const { recalculateMonthlyRecord } = require('./monthlyRecordService');
 const { canPayCurrentMonth } = require('./debtService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Register a payment transaction against a MonthlyRecord

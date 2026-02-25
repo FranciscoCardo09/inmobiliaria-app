@@ -1,10 +1,9 @@
 // Tenants Controller
 // Handles: CRUD tenants per group with filters + history (sin garante)
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/tenants
 const getTenants = async (req, res, next) => {

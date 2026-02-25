@@ -1,8 +1,7 @@
 // Punitory (late fee) calculation utilities - V2
 // Supports business day calculation with holidays
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Check if a date is a weekend (Saturday or Sunday)

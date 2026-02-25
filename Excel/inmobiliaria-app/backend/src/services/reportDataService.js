@@ -1,8 +1,7 @@
 // Report Data Service - Prisma queries for all report types
-const { PrismaClient } = require('@prisma/client');
 const { numeroATexto } = require('../utils/helpers');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const MONTH_NAMES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',

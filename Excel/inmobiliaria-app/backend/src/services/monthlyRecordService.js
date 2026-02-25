@@ -1,9 +1,8 @@
 // Monthly Record Service - Core auto-generation and control logic
-const { PrismaClient } = require('@prisma/client');
 const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Calculate which calendar month/year corresponds to a given contract month number

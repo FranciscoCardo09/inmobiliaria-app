@@ -11,9 +11,8 @@ const {
   removeService,
   getServicesForRecord,
 } = require('../services/monthlyServiceService');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/monthly-records?month=2&year=2026
 const getMonthlyRecords = async (req, res, next) => {

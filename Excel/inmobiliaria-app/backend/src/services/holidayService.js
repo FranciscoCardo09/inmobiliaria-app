@@ -1,7 +1,6 @@
 // Holiday Service - Business day support
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Argentine national holidays (fixed dates)
 const ARGENTINE_FIXED_HOLIDAYS = [

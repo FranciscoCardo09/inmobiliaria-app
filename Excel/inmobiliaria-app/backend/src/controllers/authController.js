@@ -1,7 +1,6 @@
 // Auth Controller
 // Handles: register, login, refresh, me, logout, verifyEmail, forgotPassword, resetPassword
 
-const { PrismaClient } = require('@prisma/client');
 const crypto = require('crypto');
 const { hashPassword, comparePassword } = require('../utils/password');
 const { generateTokenPair, verifyRefreshToken } = require('../utils/jwt');
@@ -9,7 +8,7 @@ const ApiResponse = require('../utils/apiResponse');
 const { getExpiryDate } = require('../utils/helpers');
 const emailService = require('../services/emailService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Generate secure random token
 const generateSecureToken = () => crypto.randomBytes(32).toString('hex');

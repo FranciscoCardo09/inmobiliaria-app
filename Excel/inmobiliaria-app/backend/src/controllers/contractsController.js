@@ -1,11 +1,10 @@
 // Contracts Controller
 // Handles: CRUD contracts with adjustment info, punitory fields, currentMonth
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services/adjustmentService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Helper: parse a date string as noon UTC (avoids timezone shift issues)
 const parseLocalDate = (dateStr) => {

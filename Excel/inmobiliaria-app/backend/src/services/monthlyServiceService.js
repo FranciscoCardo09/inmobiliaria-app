@@ -1,8 +1,7 @@
 // Monthly Service Service - Manage services/extras for monthly records
-const { PrismaClient } = require('@prisma/client');
 const { recalculateMonthlyRecord } = require('./monthlyRecordService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Add a service to a monthly record

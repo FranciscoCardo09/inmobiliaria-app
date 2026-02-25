@@ -1,5 +1,4 @@
 // Dashboard Controller - Phase 5+
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 const {
   getContractsWithAdjustmentThisMonth,
@@ -7,7 +6,7 @@ const {
 } = require('../services/adjustmentService');
 const { getDebtsSummary } = require('../services/debtService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/dashboard/summary
 const getSummary = async (req, res, next) => {
