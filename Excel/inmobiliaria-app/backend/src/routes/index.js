@@ -24,6 +24,7 @@ const debtsRoutes = require('./debts.routes');
 const serviceCategoriesRoutes = require('./serviceCategories.routes');
 const reportsRoutes = require('./reports.routes');
 const settingsRoutes = require('./settings.routes');
+const propertyGroupsRoutes = require('./propertyGroups.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -83,6 +84,7 @@ router.use('/groups/:groupId/service-categories', serviceCategoriesRoutes);
 
 // Monthly Control (Phase 5)
 router.use('/groups/:groupId/monthly-records', monthlyRecordsRoutes);
+router.use('/groups/:groupId/property-groups', propertyGroupsRoutes);
 router.use('/groups/:groupId/payment-transactions', paymentTransactionsRoutes);
 
 // Debts + Close Month (Phase 5+)
