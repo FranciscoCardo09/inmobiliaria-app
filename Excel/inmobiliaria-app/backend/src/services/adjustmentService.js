@@ -2,9 +2,8 @@
 // Los ajustes ocurren cada frequencyMonths A PARTIR del startMonth
 // NO en múltiplos absolutos de frequencyMonths
 
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Helper: get tenant name(s) from contract (supports multi-tenant)
 const getTenantsNameAdj = (contract) => {

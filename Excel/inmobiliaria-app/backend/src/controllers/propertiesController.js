@@ -1,10 +1,9 @@
 // Properties Controller
 // Handles: CRUD properties per group with filters
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/properties
 const getProperties = async (req, res, next) => {

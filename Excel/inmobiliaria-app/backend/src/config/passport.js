@@ -1,10 +1,9 @@
 // Passport Configuration - Google OAuth 2.0
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const { PrismaClient } = require('@prisma/client');
 const config = require('./index');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Google OAuth Strategy - only initialize if credentials are configured
 if (config.google.clientId && config.google.clientSecret) {

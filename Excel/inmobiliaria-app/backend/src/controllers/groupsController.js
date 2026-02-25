@@ -1,11 +1,10 @@
 // Groups Controller
 // Handles: CRUD groups, invitations, members
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 const { generateSlug, generateInviteToken, getExpiryDate } = require('../utils/helpers');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups - List user's groups
 const listGroups = async (req, res, next) => {

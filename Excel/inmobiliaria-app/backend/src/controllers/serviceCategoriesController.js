@@ -1,10 +1,9 @@
 // Service Categories Controller
 // Handles: CRUD for dynamic service categories per group
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/service-categories
 const getServiceCategories = async (req, res, next) => {
