@@ -8,6 +8,7 @@ import {
   TrashIcon,
   FolderIcon,
   PlusIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline'
 
 const formatCurrency = (amount) => {
@@ -22,6 +23,7 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
 
   // Step 1 state
   const [selectedRecordIds, setSelectedRecordIds] = useState(new Set())
+  const [searchTerm, setSearchTerm] = useState('')
 
   // Step 2 state
   const [conceptTypeId, setConceptTypeId] = useState('')
@@ -45,6 +47,30 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
     () => records.filter((r) => selectedRecordIds.has(r.id)),
     [records, selectedRecordIds]
   )
+
+  // Helper to get display info from a record (flat structure)
+  const getRecordLabel = (record) => {
+    const address = record?.property?.address || ''
+    const unit = record?.property?.unit ? ` - ${record.property.unit}` : ''
+    return `${address}${unit}`
+  }
+  const getRecordTenant = (record) => {
+    if (record?.tenants?.length > 0) return record.tenants.map(t => t.name).join(' / ')
+    return record?.tenant?.name || ''
+  }
+
+  // Filtered records for search in step 1
+  const filteredRecords = useMemo(() => {
+    if (!searchTerm.trim()) return records
+    const term = searchTerm.toLowerCase().trim()
+    return records.filter((r) => {
+      const address = (r.property?.address || '').toLowerCase()
+      const unit = (r.property?.unit || '').toLowerCase()
+      const tenant = getRecordTenant(r).toLowerCase()
+      const owner = (r.owner?.name || '').toLowerCase()
+      return address.includes(term) || unit.includes(term) || tenant.includes(term) || owner.includes(term)
+    })
+  }, [records, searchTerm])
 
   const toggleRecord = (recordId) => {
     setSelectedRecordIds((prev) => {
@@ -219,8 +245,18 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
             )}
 
             <label className="label"><span className="label-text font-semibold">Seleccionar propiedades</span></label>
+            <div className="relative mb-2">
+              <MagnifyingGlassIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
+              <input
+                type="text"
+                className="input input-bordered input-sm w-full pl-9"
+                placeholder="Buscar por propiedad, inquilino, dueño..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
             <div className="max-h-64 overflow-y-auto border rounded-lg">
-              {records.map((record) => (
+              {filteredRecords.map((record) => (
                 <label
                   key={record.id}
                   className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-base-200 border-b last:border-b-0 ${
@@ -235,11 +271,10 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
                   />
                   <div className="flex-1">
                     <div className="font-medium text-sm">
-                      {record.contract?.property?.address}
-                      {record.contract?.property?.unit ? ` - ${record.contract.property.unit}` : ''}
+                      {getRecordLabel(record)}
                     </div>
                     <div className="text-xs text-base-content/60">
-                      {record.contract?.tenant?.firstName} {record.contract?.tenant?.lastName}
+                      {getRecordTenant(record)}
                     </div>
                   </div>
                 </label>
@@ -292,8 +327,7 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
                     <tr key={d.recordId}>
                       <td>
                         <div className="text-sm font-medium">
-                          {d.record?.contract?.property?.address}
-                          {d.record?.contract?.property?.unit ? ` - ${d.record.contract.property.unit}` : ''}
+                          {getRecordLabel(d.record)}
                         </div>
                       </td>
                       <td>
@@ -369,8 +403,7 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
                 {computedDistributions.map((d) => (
                   <tr key={d.recordId}>
                     <td>
-                      {d.record?.contract?.property?.address}
-                      {d.record?.contract?.property?.unit ? ` - ${d.record.contract.property.unit}` : ''}
+                      {getRecordLabel(d.record)}
                     </td>
                     <td className="text-right">{d.percentage}%</td>
                     <td className="text-right font-mono">{formatCurrency(d.amount)}</td>
