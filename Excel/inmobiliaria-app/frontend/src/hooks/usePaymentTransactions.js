@@ -24,24 +24,21 @@ export const usePaymentTransactions = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const invalidateAll = async () => {
-    // Remove cached punitory previews entirely — payment changes make them stale
-    // and with global staleTime=5min they would be served as "fresh" otherwise
-    queryClient.removeQueries({ queryKey: ['punitoryPreview'] })
+    queryClient.removeQueries({ queryKey: ['punitoryPreview', groupId] })
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['paymentTransactions'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecord'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
-      // Invalidar deuda individual y preview de punitorios (usado por DebtPaymentModal)
-      queryClient.invalidateQueries({ queryKey: ['debt'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview'], refetchType: 'active' }),
-      queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth'], refetchType: 'active' }),
+      queryClient.invalidateQueries({ queryKey: ['paymentTransactions', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debts', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debt', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
     ])
   }
 
@@ -97,5 +94,6 @@ export const usePunitoryPreview = (groupId, monthlyRecordId, paymentDate) => {
       return response.data.data
     },
     enabled: !!groupId && !!monthlyRecordId && !!paymentDate,
+    staleTime: 30 * 1000,
   })
 }
