@@ -92,6 +92,7 @@ model Group {
   monthlyRecords        MonthlyRecord[]
   paymentTransactions   PaymentTransaction[]
   debts                 Debt[]
+  propertyGroups        PropertyGroup[]
 
   @@map("groups")
 }
@@ -353,6 +354,7 @@ model Contract {
   monthlyRecords      MonthlyRecord[]
   debts               Debt[]
   rentHistory         RentHistory[]
+  propertyGroupItems  PropertyGroupItem[]
 
   @@map("contracts")
 }
@@ -652,4 +654,34 @@ model ContractTenant {
 
   @@unique([contractId, tenantId])
   @@map("contract_tenants")
+}
+
+// ============================================
+// Property Groups (multi-property service loading)
+// ============================================
+
+model PropertyGroup {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  group Group    @relation(fields: [groupId], references: [id])
+  items PropertyGroupItem[]
+
+  @@map("property_groups")
+}
+
+model PropertyGroupItem {
+  id              String  @id @default(cuid())
+  propertyGroupId String  @map("property_group_id")
+  contractId      String  @map("contract_id")
+  percentage      Float
+
+  propertyGroup PropertyGroup @relation(fields: [propertyGroupId], references: [id], onDelete: Cascade)
+  contract      Contract      @relation(fields: [contractId], references: [id])
+
+  @@unique([propertyGroupId, contractId])
+  @@map("property_group_items")
 }
