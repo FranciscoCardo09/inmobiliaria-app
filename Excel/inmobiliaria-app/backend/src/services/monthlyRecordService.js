@@ -1,6 +1,7 @@
 // Monthly Record Service - Core auto-generation and control logic
 const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
+const { calculateNextAdjustmentMonth } = require('./adjustmentService');
 
 const prisma = require('../lib/prisma');
 
@@ -232,15 +233,28 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
     }
 
-    // Calculate next adjustment info
+    // Calculate next adjustment info (recalcular si el valor de DB quedó en el pasado)
     let nextAdjustmentLabel = null;
     if (contract.nextAdjustmentMonth && contract.adjustmentIndex) {
-      const adjPeriod = getCalendarPeriod(contract, contract.nextAdjustmentMonth);
-      const monthNames = [
-        '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-      ];
-      nextAdjustmentLabel = `${monthNames[adjPeriod.periodMonth]} ${adjPeriod.periodYear}`;
+      let effectiveNextAdj = contract.nextAdjustmentMonth;
+      // Recalcular si quedó desfasado
+      const start = new Date(contract.startDate);
+      const now = new Date();
+      const mDiff = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+      const realCurrentMonth = Math.max(1, Math.min(mDiff + 1, contract.durationMonths));
+      if (effectiveNextAdj < realCurrentMonth) {
+        effectiveNextAdj = calculateNextAdjustmentMonth(
+          contract.startMonth, realCurrentMonth, contract.adjustmentIndex.frequencyMonths, contract.durationMonths
+        );
+      }
+      if (effectiveNextAdj) {
+        const adjPeriod = getCalendarPeriod(contract, effectiveNextAdj);
+        const monthNames = [
+          '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+          'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+        ];
+        nextAdjustmentLabel = `${monthNames[adjPeriod.periodMonth]} ${adjPeriod.periodYear}`;
+      }
     }
 
     const monthNames = [
