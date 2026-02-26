@@ -146,7 +146,11 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         }
       }
 
-      const totalDue = rentAmount - previousBalance; // Services start at 0, punitorios at 0
+      // Auto-apply IVA if contract has pagaIva enabled
+      const includeIva = !!contract.pagaIva;
+      const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
+
+      const totalDue = rentAmount + ivaAmount - previousBalance;
 
       record = await prisma.monthlyRecord.create({
         data: {
@@ -156,6 +160,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           periodMonth: month,
           periodYear: year,
           rentAmount,
+          includeIva,
+          ivaAmount,
           servicesTotal: 0,
           previousBalance,
           punitoryAmount: 0,

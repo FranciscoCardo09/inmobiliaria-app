@@ -249,6 +249,7 @@ const createContract = async (req, res, next) => {
       adjustmentIndexId,
       punitoryStartDay,
       punitoryPercent,
+      pagaIva,
       observations,
     } = req.body;
 
@@ -322,6 +323,7 @@ const createContract = async (req, res, next) => {
         nextAdjustmentMonth: nextAdjMonth,
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
+        pagaIva: !!pagaIva,
         observations,
         contractTenants: resolvedTenantIds.length > 0 ? {
           create: resolvedTenantIds.map((tid, i) => ({
@@ -371,6 +373,7 @@ const updateContract = async (req, res, next) => {
       adjustmentIndexId,
       punitoryStartDay,
       punitoryPercent,
+      pagaIva,
       active,
       observations,
       tenantIds,
@@ -388,6 +391,7 @@ const updateContract = async (req, res, next) => {
     if (baseRent) data.baseRent = parseFloat(baseRent);
     if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
+    if (pagaIva !== undefined) data.pagaIva = !!pagaIva;
     if (active !== undefined) data.active = active;
     if (observations !== undefined) data.observations = observations;
 

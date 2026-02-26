@@ -132,7 +132,7 @@ export default function MonthlyControlPage() {
   // Detect if IVA column should be shown
   const showIvaColumn = useMemo(() => {
     return allRecords.some(
-      (r) => r.ivaAmount > 0 || r.property?.category?.name === 'LOCAL COMERCIAL'
+      (r) => r.ivaAmount > 0 || ['LOCAL COMERCIAL', 'LOCAL'].includes(r.property?.category?.name)
     )
   }, [allRecords])
 
@@ -604,7 +604,7 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
         </td>
         {showIvaColumn && (
           <td className="text-xs text-right font-mono">
-            {record.property?.category?.name === 'LOCAL COMERCIAL' ? (
+            {['LOCAL COMERCIAL', 'LOCAL'].includes(record.property?.category?.name) ? (
               <div className="flex items-center justify-end gap-1">
                 <input
                   type="checkbox"
