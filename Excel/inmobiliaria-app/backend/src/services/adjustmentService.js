@@ -83,21 +83,24 @@ const isAdjustmentMonth = (startMonth, currentMonth, frequencyMonths) => {
 
 /**
  * Calculate contract month from calendar date
+ * When startMonth > 1 (contract loaded mid-way), the first elapsed month maps to startMonth, not 1.
  * @param {Date} contractStartDate - Contract start date
+ * @param {number} startMonth - Contract's startMonth (1-based, may be > 1 for mid-loaded contracts)
  * @param {number} calendarMonth - Calendar month (1-12)
  * @param {number} calendarYear - Calendar year
- * @returns {number} Contract month (1-based)
+ * @returns {number} Contract month (startMonth-based)
  */
-const calculateContractMonthFromCalendar = (contractStartDate, calendarMonth, calendarYear) => {
+const calculateContractMonthFromCalendar = (contractStartDate, startMonth, calendarMonth, calendarYear) => {
   const startDate = new Date(contractStartDate);
   const targetDate = new Date(calendarYear, calendarMonth - 1, 1);
-  
-  // Calcular diferencia en meses
+
+  // Calcular diferencia en meses desde startDate
   const yearDiff = targetDate.getFullYear() - startDate.getFullYear();
   const monthDiff = targetDate.getMonth() - startDate.getMonth();
-  const totalMonths = yearDiff * 12 + monthDiff + 1; // +1 porque el primer mes es 1
-  
-  return totalMonths;
+  const monthsDiff = yearDiff * 12 + monthDiff;
+
+  // startMonth + elapsed months (same formula as computeCurrentMonth and getMonthNumber)
+  return (startMonth || 1) + monthsDiff;
 };
 
 /**
@@ -136,19 +139,21 @@ const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, cale
     
     const contractMonth = calculateContractMonthFromCalendar(
       contract.startDate,
+      contract.startMonth,
       calendarMonth,
       calendarYear
     );
-    
+
     // El mes debe estar dentro del rango del contrato
-    if (contractMonth < 1 || contractMonth > contract.durationMonths) continue;
-    
+    const endMonth = contract.startMonth + contract.durationMonths - 1;
+    if (contractMonth < contract.startMonth || contractMonth > endMonth) continue;
+
     // Usar isAdjustmentMonth para verificar si es mes de ajuste según la frecuencia
     // (no depende de nextAdjustmentMonth que cambia al aplicar)
     if (!isAdjustmentMonth(contract.startMonth, contractMonth, contract.adjustmentIndex.frequencyMonths)) {
       continue;
     }
-    
+
     // Buscar TODOS los registros de historial para este mes
     const rentHistoryRecords = await prisma.rentHistory.findMany({
       where: {
@@ -535,18 +540,20 @@ const applyAdjustmentToCalendar = async (groupId, indexId, percentageIncrease, c
   for (const contract of allContracts) {
     const contractMonth = calculateContractMonthFromCalendar(
       contract.startDate,
+      contract.startMonth,
       calendarMonth,
       calendarYear
     );
-    
+
     // Verificar que el mes esté dentro del rango del contrato
-    if (contractMonth < 1 || contractMonth > contract.durationMonths) continue;
-    
+    const endMonth = contract.startMonth + contract.durationMonths - 1;
+    if (contractMonth < contract.startMonth || contractMonth > endMonth) continue;
+
     // Usar isAdjustmentMonth basado en la frecuencia para determinar si ajusta
     if (!isAdjustmentMonth(contract.startMonth, contractMonth, contract.adjustmentIndex.frequencyMonths)) {
       continue;
     }
-    
+
     // Verificar que no haya sido ya aplicado para este mes
     const existingHistory = await prisma.rentHistory.findFirst({
       where: {
@@ -634,6 +641,7 @@ const undoAdjustmentForCalendar = async (groupId, indexId, calendarMonth, calend
   for (const contract of allContracts) {
     const contractMonth = calculateContractMonthFromCalendar(
       contract.startDate,
+      contract.startMonth,
       calendarMonth,
       calendarYear
     );
