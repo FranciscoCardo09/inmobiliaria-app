@@ -76,7 +76,7 @@ export default function ServiceTypeList() {
 
   // --- Edit mode ---
   const [editingId, setEditingId] = useState(null)
-  const [editForm, setEditForm] = useState({ label: '', category: '', description: '' })
+  const [editForm, setEditForm] = useState({ name: '', label: '', category: '', description: '' })
 
   // --- Category management ---
   const [showCategoryForm, setShowCategoryForm] = useState(false)
@@ -92,7 +92,7 @@ export default function ServiceTypeList() {
 
   const handleStartEdit = (ct) => {
     setEditingId(ct.id)
-    setEditForm({ label: ct.label, category: ct.category, description: ct.description || '' })
+    setEditForm({ name: ct.name, label: ct.label, category: ct.category, description: ct.description || '' })
   }
 
   const handleSaveEdit = (id) => {
@@ -284,7 +284,14 @@ export default function ServiceTypeList() {
                       {editingId === ct.id ? (
                         /* Edit mode */
                         <div className="flex-1 space-y-2">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                            <input
+                              type="text"
+                              className="input input-bordered input-xs font-mono"
+                              value={editForm.name}
+                              onChange={(e) => setEditForm({ ...editForm, name: e.target.value.toUpperCase().replace(/\s+/g, '_') })}
+                              placeholder="Código"
+                            />
                             <input
                               type="text"
                               className="input input-bordered input-xs"

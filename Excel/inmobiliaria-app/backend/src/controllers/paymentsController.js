@@ -435,6 +435,28 @@ const createConceptType = async (req, res, next) => {
     // Normalize name to uppercase
     const normalizedName = name.toUpperCase().replace(/\s+/g, '_');
 
+    // Si existe uno inactivo con el mismo nombre, reactivarlo
+    const existing = await prisma.conceptType.findUnique({
+      where: { groupId_name: { groupId, name: normalizedName } },
+    });
+
+    if (existing) {
+      if (existing.isActive) {
+        return ApiResponse.conflict(res, 'Ya existe un concepto con ese nombre en este grupo');
+      }
+      // Reactivar el existente con los nuevos datos
+      const reactivated = await prisma.conceptType.update({
+        where: { id: existing.id },
+        data: {
+          label,
+          category: category || 'OTROS',
+          description: description || null,
+          isActive: true,
+        },
+      });
+      return ApiResponse.created(res, reactivated, 'Tipo de concepto creado');
+    }
+
     const conceptType = await prisma.conceptType.create({
       data: {
         groupId,
@@ -458,7 +480,7 @@ const createConceptType = async (req, res, next) => {
 const updateConceptType = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { label, category, description, isActive } = req.body;
+    const { name, label, category, description, isActive } = req.body;
 
     const existing = await prisma.conceptType.findUnique({ where: { id } });
     if (!existing || existing.groupId !== groupId) {
@@ -466,6 +488,7 @@ const updateConceptType = async (req, res, next) => {
     }
 
     const updateData = {};
+    if (name !== undefined) updateData.name = name.toUpperCase().replace(/\s+/g, '_');
     if (label !== undefined) updateData.label = label;
     if (category !== undefined) updateData.category = category;
     if (description !== undefined) updateData.description = description;
@@ -478,6 +501,9 @@ const updateConceptType = async (req, res, next) => {
 
     return ApiResponse.success(res, conceptType, 'Tipo de concepto actualizado');
   } catch (error) {
+    if (error.code === 'P2002') {
+      return ApiResponse.conflict(res, 'Ya existe un concepto con ese código en este grupo');
+    }
     next(error);
   }
 };
