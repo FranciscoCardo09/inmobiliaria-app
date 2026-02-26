@@ -22,6 +22,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
       return response.data.data
     },
     enabled: !!groupId && !!periodMonth && !!periodYear,
+    staleTime: 2 * 60 * 1000,
   })
 
   const updateMutation = useMutation({
@@ -33,7 +34,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords'] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Registro actualizado')
     },
     onError: (error) => {
@@ -50,11 +51,27 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords'] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Registros generados')
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al generar')
+    },
+  })
+
+  const toggleIvaMutation = useMutation({
+    mutationFn: async ({ recordId, includeIva }) => {
+      const response = await api.patch(
+        `/groups/${groupId}/monthly-records/${recordId}/iva`,
+        { includeIva }
+      )
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al cambiar IVA')
     },
   })
 
@@ -66,6 +83,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     updateRecord: updateMutation.mutate,
     generateRecords: generateMutation.mutate,
     isUpdating: updateMutation.isPending,
+    toggleIva: toggleIvaMutation.mutate,
   }
 }
 
@@ -79,5 +97,6 @@ export const useMonthlyRecordDetail = (groupId, recordId) => {
       return response.data.data
     },
     enabled: !!groupId && !!recordId,
+    staleTime: 60 * 1000,
   })
 }

@@ -12,6 +12,7 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year && !!contractId,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -37,6 +38,7 @@ export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorario
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -54,6 +56,7 @@ export const useEstadoCuentas = (groupId, { contractId } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!contractId,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -72,6 +75,7 @@ export const useResumenEjecutivo = (groupId, { month, year } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -89,6 +93,7 @@ export const useEvolucionIngresos = (groupId, { year } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -107,6 +112,7 @@ export const useAjustesMes = (groupId, { month, year } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -125,6 +131,7 @@ export const useControlMensual = (groupId, { month, year } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -149,6 +156,7 @@ export const useImpuestos = (groupId, { month, year, propertyIds, ownerId } = {}
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -166,6 +174,7 @@ export const useVencimientos = (groupId) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 60 * 1000,
   })
 
   return {
@@ -184,6 +193,7 @@ export const useMonthlyRecordsForPago = (groupId, { month, year } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
+    staleTime: 60 * 1000,
   })
 
   return {

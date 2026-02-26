@@ -15,6 +15,7 @@ export const useGroups = () => {
       const response = await groupsAPI.list()
       return response.data.data
     },
+    staleTime: 5 * 60 * 1000,
     onSuccess: (data) => {
       setGroups(data)
     },

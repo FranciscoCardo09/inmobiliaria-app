@@ -15,12 +15,13 @@ export const useMonthlyServices = (groupId, recordId) => {
       return response.data.data
     },
     enabled: !!groupId && !!recordId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['monthlyServices'] })
-    queryClient.invalidateQueries({ queryKey: ['monthlyRecords'] })
-    queryClient.invalidateQueries({ queryKey: ['monthlyRecord'] })
+    queryClient.invalidateQueries({ queryKey: ['monthlyServices', groupId] })
+    queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+    queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] })
   }
 
   const addMutation = useMutation({

@@ -7,11 +7,10 @@ const { authenticate } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const { registerSchema, loginSchema, refreshTokenSchema } = require('../validators/authValidators');
 const { generateTokenPair } = require('../utils/jwt');
-const { PrismaClient } = require('@prisma/client');
 const config = require('../config');
 const { getExpiryDate } = require('../utils/helpers');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Public routes - Email/Password
 router.post('/register', validate(registerSchema), authController.register);

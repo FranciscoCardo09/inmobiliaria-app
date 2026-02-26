@@ -1,11 +1,10 @@
 // Contracts Controller
 // Handles: CRUD contracts with adjustment info, punitory fields, currentMonth
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services/adjustmentService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Helper: parse a date string as noon UTC (avoids timezone shift issues)
 const parseLocalDate = (dateStr) => {
@@ -54,9 +53,10 @@ const enrichContract = (c) => {
     }
   }
 
-  // Compute end date from startDate + durationMonths
+  // Compute end date from startDate + durationMonths (last day of contract, not first day after)
   const endDate = new Date(start);
   endDate.setMonth(endDate.getMonth() + c.durationMonths);
+  endDate.setDate(endDate.getDate() - 1);
 
   // Remaining months
   const remainingMonths = Math.max(0, c.durationMonths - computedCurrentMonth);
@@ -92,7 +92,7 @@ const enrichContract = (c) => {
 const getContracts = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { status, propertyId, tenantId, search } = req.query;
+    const { status, propertyId, tenantId, search, limit, offset } = req.query;
 
     const where = { groupId };
 
@@ -122,6 +122,8 @@ const getContracts = async (req, res, next) => {
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
+      take: limit ? parseInt(limit) : 500,
+      skip: offset ? parseInt(offset) : 0,
     });
 
     // Enrich with tenants array
@@ -206,10 +208,11 @@ const getContractById = async (req, res, next) => {
     const contract = await prisma.contract.findUnique({
       where: { id },
       include: {
-        tenant: true,
-        contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+        tenant: { select: { id: true, name: true, dni: true, phone: true, email: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true, email: true } } }, orderBy: { isPrimary: 'desc' } },
         property: {
-          include: {
+          select: {
+            id: true, address: true,
             category: { select: { id: true, name: true, color: true } },
             owner: { select: { id: true, name: true, dni: true, phone: true } },
           },
@@ -247,6 +250,7 @@ const createContract = async (req, res, next) => {
       adjustmentIndexId,
       punitoryStartDay,
       punitoryPercent,
+      pagaIva,
       observations,
     } = req.body;
 
@@ -320,6 +324,7 @@ const createContract = async (req, res, next) => {
         nextAdjustmentMonth: nextAdjMonth,
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
+        pagaIva: !!pagaIva,
         observations,
         contractTenants: resolvedTenantIds.length > 0 ? {
           create: resolvedTenantIds.map((tid, i) => ({
@@ -369,6 +374,7 @@ const updateContract = async (req, res, next) => {
       adjustmentIndexId,
       punitoryStartDay,
       punitoryPercent,
+      pagaIva,
       active,
       observations,
       tenantIds,
@@ -386,6 +392,7 @@ const updateContract = async (req, res, next) => {
     if (baseRent) data.baseRent = parseFloat(baseRent);
     if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
+    if (pagaIva !== undefined) data.pagaIva = !!pagaIva;
     if (active !== undefined) data.active = active;
     if (observations !== undefined) data.observations = observations;
 

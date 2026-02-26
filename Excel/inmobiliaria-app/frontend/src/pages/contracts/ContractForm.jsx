@@ -39,6 +39,7 @@ export const ContractForm = () => {
     adjustmentIndexId: '',
     punitoryStartDay: '10',
     punitoryPercent: '0.6',
+    pagaIva: false,
     active: true,
     observations: '',
   })
@@ -60,11 +61,23 @@ export const ContractForm = () => {
         adjustmentIndexId: contract.adjustmentIndexId || '',
         punitoryStartDay: contract.punitoryStartDay?.toString() || '10',
         punitoryPercent: contract.punitoryPercent ? (contract.punitoryPercent * 100).toString() : '0.6',
+        pagaIva: contract.pagaIva ?? false,
         active: contract.active ?? true,
         observations: contract.observations || '',
       })
     }
   }, [contract])
+
+  // Auto-check pagaIva when property category is LOCAL or LOCAL COMERCIAL
+  useEffect(() => {
+    if (isEditing) return // Don't auto-change when editing
+    const selected = properties.find(p => p.id === formData.propertyId)
+    if (selected?.category?.name === 'LOCAL COMERCIAL' || selected?.category?.name === 'LOCAL') {
+      setFormData(prev => ({ ...prev, pagaIva: true }))
+    } else {
+      setFormData(prev => ({ ...prev, pagaIva: false }))
+    }
+  }, [formData.propertyId, properties, isEditing])
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -122,6 +135,7 @@ export const ContractForm = () => {
       adjustmentIndexId: formData.adjustmentIndexId || null,
       punitoryStartDay: parseInt(formData.punitoryStartDay, 10),
       punitoryPercent: parseFloat(formData.punitoryPercent) / 100,
+      pagaIva: formData.pagaIva,
     }
 
     if (isEditing) {
@@ -281,6 +295,25 @@ export const ContractForm = () => {
                 </label>
               )}
             </div>
+          </div>
+
+          {/* IVA */}
+          <div className="form-control">
+            <label className="label cursor-pointer justify-start gap-4">
+              <input
+                type="checkbox"
+                name="pagaIva"
+                className="checkbox checkbox-primary"
+                checked={formData.pagaIva}
+                onChange={handleChange}
+              />
+              <div>
+                <span className="label-text font-medium">¿Paga IVA?</span>
+                <p className="text-xs text-base-content/60">
+                  Se aplicará automáticamente 21% de IVA en cada nuevo mes del control mensual
+                </p>
+              </div>
+            </label>
           </div>
 
           {/* Ajustes */}

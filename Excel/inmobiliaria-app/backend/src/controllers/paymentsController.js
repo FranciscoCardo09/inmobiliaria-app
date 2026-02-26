@@ -1,11 +1,10 @@
 // Payments Controller - Phase 4 v2
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 const {
   calculatePaymentConcepts,
 } = require('../services/paymentService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/payments
 // Supports filters: periodMonth, periodYear, status, categoryId, tenantId, propertyId, contractId, search

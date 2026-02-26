@@ -1,8 +1,7 @@
 // Monthly Close Service - Cierre mensual que genera deudas automáticas
-const { PrismaClient } = require('@prisma/client');
 const { createDebtFromMonthlyRecord, calculateImputation } = require('./debtService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const monthNames = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',

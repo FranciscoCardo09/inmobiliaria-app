@@ -20,6 +20,7 @@ export const useDebts = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   const summaryQuery = useQuery({
@@ -29,28 +30,29 @@ export const useDebts = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
+
+  // Shared invalidation for debt mutations — scoped to groupId
+  const invalidateDebtRelated = async (debtId) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['debt', groupId, debtId] }),
+      queryClient.invalidateQueries({ queryKey: ['debts', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId, debtId] }),
+      queryClient.invalidateQueries({ queryKey: ['paymentTransactions', groupId] }),
+    ])
+  }
 
   const payDebtMutation = useMutation({
     mutationFn: async ({ debtId, ...data }) => {
       const response = await api.post(`/groups/${groupId}/debts/${debtId}/pay`, data)
-      // El backend devuelve { debt: {...}, payment: {...} } — extraer solo el objeto debt
       return { updatedDebt: response.data.data.debt, debtId }
     },
     onSuccess: async (data, variables) => {
-      // Invalidar TODAS las queries relacionadas, incluyendo ['debt'] para que
-      // useDebt refetche desde getDebtById (que enriquece con datos live de punitorios)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['debt', groupId, variables.debtId] }),
-        queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['monthlyRecords'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['monthlyRecord'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['paymentTransactions'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview'], refetchType: 'active' }),
-      ])
+      await invalidateDebtRelated(variables.debtId)
       toast.success('Pago de deuda registrado')
     },
     onError: (error) => {
@@ -64,20 +66,7 @@ export const useDebts = (groupId, filters = {}) => {
       return { updatedDebt: response.data.data, debtId, paymentId }
     },
     onSuccess: async (data, variables) => {
-      // Invalidar TODAS las queries relacionadas, incluyendo ['debt'] para que
-      // useDebt refetche desde getDebtById (que enriquece con datos live de punitorios)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['debt', groupId, variables.debtId] }),
-        queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['monthlyRecords'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['monthlyRecord'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['paymentTransactions'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['punitoryPreview'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview'], refetchType: 'active' }),
-      ])
+      await invalidateDebtRelated(variables.debtId)
       toast.success('Pago de deuda anulado')
     },
     onError: (error) => {
@@ -101,11 +90,11 @@ export const useDebt = (groupId, debtId) => {
   return useQuery({
     queryKey: ['debt', groupId, debtId],
     queryFn: async () => {
-      // Usar el endpoint individual para obtener la deuda con payments incluidos
       const response = await api.get(`/groups/${groupId}/debts/${debtId}`)
       return response.data.data
     },
     enabled: !!groupId && !!debtId,
+    staleTime: 60 * 1000,
   })
 }
 
@@ -119,6 +108,7 @@ export const useCanPayCurrentMonth = (groupId, contractId) => {
       return response.data.data
     },
     enabled: !!groupId && !!contractId,
+    staleTime: 2 * 60 * 1000,
   })
 }
 
@@ -133,6 +123,7 @@ export const useDebtPunitoryPreview = (groupId, debtId, paymentDate) => {
       return response.data.data
     },
     enabled: !!groupId && !!debtId && !!paymentDate,
+    staleTime: 30 * 1000,
   })
 }
 
@@ -153,11 +144,10 @@ export const useCloseMonth = (groupId) => {
     },
     onSuccess: async (data) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['debts'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['debtsSummary'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['monthlyRecords'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'active' }),
-        queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth'], refetchType: 'active' }),
+        queryClient.invalidateQueries({ queryKey: ['debts', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
       ])
       toast.success(`Mes cerrado: ${data.debtsCreated} deudas generadas`)
     },

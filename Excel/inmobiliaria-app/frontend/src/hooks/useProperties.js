@@ -20,6 +20,7 @@ export const useProperties = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000,
   })
 
   // Fetch single property
@@ -31,6 +32,7 @@ export const useProperties = (groupId, filters = {}) => {
         return response.data.data
       },
       enabled: !!groupId && !!propertyId,
+      staleTime: 2 * 60 * 1000,
     })
   }
 

@@ -99,6 +99,7 @@ model Group {
   paymentTransactions   PaymentTransaction[]
   debts                 Debt[]
   notifications         NotificationLog[]
+  propertyGroups        PropertyGroup[]
 
   @@map("groups")
 }
@@ -115,6 +116,7 @@ model UserGroup {
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([userId, groupId])
+  @@index([groupId])
   @@map("user_groups")
 }
 
@@ -134,6 +136,7 @@ model GroupInvite {
   group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
   invitedBy   User      @relation("InviteSender", fields: [invitedById], references: [id])
 
+  @@index([groupId])
   @@map("group_invites")
 }
 
@@ -199,6 +202,7 @@ model Category {
   properties  Property[]
 
   @@unique([groupId, name])
+  @@index([groupId])
   @@map("categories")
 }
 
@@ -228,6 +232,7 @@ model Owner {
   properties  Property[]
 
   @@unique([groupId, dni])
+  @@index([groupId])
   @@map("owners")
 }
 
@@ -257,6 +262,9 @@ model Property {
   owner           Owner?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   contracts       Contract[]
 
+  @@index([groupId])
+  @@index([ownerId])
+  @@index([categoryId])
   @@map("properties")
 }
 
@@ -306,6 +314,7 @@ model Tenant {
   guarantors      Guarantor[]
 
   @@unique([groupId, dni])
+  @@index([groupId])
   @@map("tenants")
 }
 
@@ -326,6 +335,7 @@ model Guarantor {
   // Relations
   tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("guarantors")
 }
 
@@ -351,6 +361,7 @@ model Contract {
   punitoryGraceDay    Int      @default(10) @map("punitory_grace_day")  // Día límite hábil sin punitorios
   punitoryPercent     Float    @default(0.02) @map("punitory_percent")  // % diario (0.02 = 2%)
 
+  pagaIva             Boolean  @default(false) @map("paga_iva")
   observations        String?
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
@@ -365,7 +376,12 @@ model Contract {
   monthlyRecords      MonthlyRecord[]
   debts               Debt[]
   rentHistory         RentHistory[]
+  propertyGroupItems  PropertyGroupItem[]
 
+  @@index([groupId])
+  @@index([propertyId])
+  @@index([tenantId])
+  @@index([active])
   @@map("contracts")
 }
 
@@ -383,6 +399,7 @@ model RentHistory {
   // Relations
   contract            Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
+  @@index([contractId])
   @@map("rent_history")
 }
 
@@ -411,6 +428,8 @@ model Payment {
   concepts       PaymentConcept[]
 
   @@unique([contractId, monthNumber])
+  @@index([groupId])
+  @@index([contractId])
   @@map("payments")
 }
 
@@ -425,6 +444,7 @@ model PaymentConcept {
 
   payment        Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
+  @@index([paymentId])
   @@map("payment_concepts")
 }
 
@@ -486,7 +506,9 @@ model MonthlyRecord {
   punitoryAmount      Float     @default(0) @map("punitory_amount")  // Punitorios calculados
   punitoryDays        Int       @default(0) @map("punitory_days")
   punitoryForgiven    Boolean   @default(false) @map("punitory_forgiven")
-  totalDue            Float     @map("total_due")             // Alquiler + servicios + punitorios - a_favor
+  includeIva          Boolean   @default(false) @map("include_iva")
+  ivaAmount           Float     @default(0) @map("iva_amount")
+  totalDue            Float     @map("total_due")             // Alquiler + servicios + punitorios + IVA - a_favor
 
   // Seguimiento de pagos
   amountPaid          Float     @default(0) @map("amount_paid")
@@ -511,6 +533,10 @@ model MonthlyRecord {
 
   @@unique([contractId, monthNumber])
   @@unique([contractId, periodMonth, periodYear])
+  @@index([groupId])
+  @@index([groupId, periodMonth, periodYear])
+  @@index([contractId])
+  @@index([status])
   @@map("monthly_records")
 }
 
@@ -528,6 +554,7 @@ model MonthlyService {
   conceptType       ConceptType   @relation(fields: [conceptTypeId], references: [id], onDelete: Cascade)
 
   @@unique([monthlyRecordId, conceptTypeId])
+  @@index([monthlyRecordId])
   @@map("monthly_services")
 }
 
@@ -557,6 +584,8 @@ model PaymentTransaction {
   monthlyRecord     MonthlyRecord  @relation(fields: [monthlyRecordId], references: [id], onDelete: Cascade)
   concepts          TransactionConcept[]
 
+  @@index([groupId])
+  @@index([monthlyRecordId])
   @@map("payment_transactions")
 }
 
@@ -571,6 +600,7 @@ model TransactionConcept {
 
   transaction       PaymentTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
+  @@index([transactionId])
   @@map("transaction_concepts")
 }
 
@@ -624,6 +654,10 @@ model Debt {
   monthlyRecord       MonthlyRecord  @relation(fields: [monthlyRecordId], references: [id])
   payments            DebtPayment[]
 
+  @@index([groupId])
+  @@index([contractId])
+  @@index([status])
+  @@index([groupId, status])
   @@map("debts")
 }
 
@@ -641,6 +675,7 @@ model DebtPayment {
   // Relations
   debt                Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
 
+  @@index([debtId])
   @@map("debt_payments")
 }
 
@@ -661,6 +696,8 @@ model ContractTenant {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([contractId, tenantId])
+  @@index([contractId])
+  @@index([tenantId])
   @@map("contract_tenants")
 }
 
@@ -724,4 +761,35 @@ model NotificationLog {
   @@index([status])
   @@index([sentAt])
   @@map("notification_logs")
+}
+
+// ============================================
+// Property Groups (multi-property service loading)
+// ============================================
+
+model PropertyGroup {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  group Group    @relation(fields: [groupId], references: [id])
+  items PropertyGroupItem[]
+
+  @@index([groupId])
+  @@map("property_groups")
+}
+
+model PropertyGroupItem {
+  id              String  @id @default(cuid())
+  propertyGroupId String  @map("property_group_id")
+  contractId      String  @map("contract_id")
+  percentage      Float
+
+  propertyGroup PropertyGroup @relation(fields: [propertyGroupId], references: [id], onDelete: Cascade)
+  contract      Contract      @relation(fields: [contractId], references: [id])
+
+  @@unique([propertyGroupId, contractId])
+  @@map("property_group_items")
 }

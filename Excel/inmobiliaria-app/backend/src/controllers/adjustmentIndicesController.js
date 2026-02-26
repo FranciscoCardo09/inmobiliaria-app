@@ -1,10 +1,9 @@
 // AdjustmentIndices Controller
 // Handles: CRUD adjustment indices per group
 
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/groups/:groupId/adjustment-indices
 const getIndices = async (req, res, next) => {

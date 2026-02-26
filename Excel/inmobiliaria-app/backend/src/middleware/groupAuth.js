@@ -1,8 +1,7 @@
 // Group Authorization Middleware
 const ApiResponse = require('../utils/apiResponse');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Verify user belongs to the group
 const requireGroupMember = async (req, res, next) => {

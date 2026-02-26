@@ -1,8 +1,7 @@
 // Payment Service - Phase 4
-const { PrismaClient } = require('@prisma/client');
 const { calculatePunitoryDays, calculatePunitoryAmount } = require('../utils/punitory');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Get the last payment balance for a contract (positive = a favor)

@@ -1,9 +1,8 @@
 // Authentication Middleware
 const { verifyAccessToken } = require('../utils/jwt');
 const ApiResponse = require('../utils/apiResponse');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Verify JWT token
 const authenticate = async (req, res, next) => {

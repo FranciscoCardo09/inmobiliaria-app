@@ -1,8 +1,7 @@
 // Monthly Service Service - Manage services/extras for monthly records
-const { PrismaClient } = require('@prisma/client');
 const { recalculateMonthlyRecord } = require('./monthlyRecordService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 /**
  * Add a service to a monthly record
@@ -190,6 +189,38 @@ const copyConfig = async (groupId, contractId, sourceMonth, sourceYear, targetMo
   return results;
 };
 
+/**
+ * Add the same service type to multiple monthly records with different amounts.
+ * Used for distributing a total amount across multiple properties.
+ */
+const batchAddServices = async (distributions, conceptTypeId, description = null) => {
+  const results = [];
+
+  await prisma.$transaction(async (tx) => {
+    for (const { recordId, amount } of distributions) {
+      const service = await tx.monthlyService.create({
+        data: {
+          monthlyRecordId: recordId,
+          conceptTypeId,
+          amount,
+          description,
+        },
+        include: {
+          conceptType: { select: { id: true, name: true, label: true, category: true } },
+        },
+      });
+      results.push(service);
+    }
+  });
+
+  // Recalculate all affected records outside the transaction
+  for (const { recordId } of distributions) {
+    await recalculateMonthlyRecord(recordId);
+  }
+
+  return results;
+};
+
 module.exports = {
   addService,
   updateService,
@@ -197,4 +228,5 @@ module.exports = {
   getServicesForRecord,
   bulkAssign,
   copyConfig,
+  batchAddServices,
 };

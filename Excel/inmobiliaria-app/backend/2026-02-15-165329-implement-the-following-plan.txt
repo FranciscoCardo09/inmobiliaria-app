@@ -1,0 +1,1572 @@
+
+ ▐▛███▜▌   Claude Code v2.1.42
+▝▜█████▛▘  Opus 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/Excel/inmobiliaria-app/backend
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Plan to implement                                                            │
+│                                                                              │
+│ Plan: 6 Cambios en Inmobiliaria App                                          │
+│                                                                              │
+│ Contexto                                                                     │
+│                                                                              │
+│ El usuario necesita 6 mejoras en su sistema de gestión inmobiliaria:         │
+│ liquidación futura, honorarios en reportes, alias bancario, múltiples        │
+│ inquilinos por contrato, mejoras en recibo de efectivo, y validación de      │
+│ campos de formulario.                                                        │
+│                                                                              │
+│ Orden de implementación                                                      │
+│                                                                              │
+│ 1. Alias bancario (schema simple)                                            │
+│ 2. Mejoras campos de formularios (sin migración)                             │
+│ 3. Liquidación meses futuros (backend logic)                                 │
+│ 4. Honorarios en liquidación (parámetro de reporte)                          │
+│ 5. Recibo de pago efectivo (templates)                                       │
+│ 6. Múltiples inquilinos por contrato (cambio de schema complejo)             │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 1: Alias bancario para dueños                                         │
+│                                                                              │
+│ Schema                                                                       │
+│                                                                              │
+│ - backend/prisma/schema.prisma: Agregar bankAlias String? @map("bank_alias") │
+│  en modelo Owner (después de línea 212, bankCbu) y modelo Group (después de  │
+│ línea 73, bankCbu)                                                           │
+│ - Correr migración: npx prisma migrate dev --name add_bank_alias             │
+│                                                                              │
+│ Backend                                                                      │
+│                                                                              │
+│ - backend/src/controllers/ownersController.js: Agregar bankAlias al          │
+│ destructuring en create/update                                               │
+│ - backend/src/services/reportDataService.js:                                 │
+│   - getEmpresaData: incluir bankAlias en select del group, agregar alias al  │
+│ objeto banco                                                                 │
+│   - getLiquidacionData: agregar alias: owner.bankAlias || '' al objeto       │
+│ propietario.banco                                                            │
+│   - getImpuestosData: agregar alias al objeto banco                          │
+│                                                                              │
+│ Frontend                                                                     │
+│                                                                              │
+│ - frontend/src/pages/owners/OwnerForm.jsx: Agregar campo bankAlias al        │
+│ formData, useEffect, y al grid de datos bancarios                            │
+│ - frontend/src/pages/settings/SettingsPage.jsx: Agregar campo bankAlias al   │
+│ form state y al grid de cuenta bancaria                                      │
+│ - frontend/src/pages/reports/ReportsPage.jsx (ImpuestosTab línea ~1084):     │
+│ Mostrar alias en datos bancarios                                             │
+│                                                                              │
+│ Templates PDF/HTML                                                           │
+│                                                                              │
+│ - pdfTemplates.js: Agregar alias a la sección de datos bancarios en          │
+│ liquidación e impuestos                                                      │
+│ - htmlTemplates.js: Agregar alias a las secciones bancarias                  │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 2: Mejoras campos de formularios                                      │
+│                                                                              │
+│ OwnerForm.jsx                                                                │
+│                                                                              │
+│ - CBU: inputMode="numeric", maxLength={22}, filtrar solo dígitos en          │
+│ onChange, validar longitud exacta 22                                         │
+│ - DNI/CUIT: filtrar solo dígitos y guiones, placeholder "20-12345678-9 o     │
+│ 12345678"                                                                    │
+│ - CUIT Titular bancario: auto-formatear XX-XXXXXXXX-X, maxLength={13}        │
+│ - Tipo de Cuenta: cambiar de Input a <select> con opciones "Caja de Ahorro"  │
+│ / "Cuenta Corriente"                                                         │
+│ - N° de Cuenta: inputMode="numeric", filtrar solo dígitos                    │
+│ - Email: validar formato en validate()                                       │
+│                                                                              │
+│ TenantForm.jsx                                                               │
+│                                                                              │
+│ - DNI/CUIT: mismo tratamiento que en OwnerForm                               │
+│                                                                              │
+│ SettingsPage.jsx                                                             │
+│                                                                              │
+│ - CBU, CUIT, Tipo de Cuenta, N° de Cuenta: mismas mejoras que OwnerForm      │
+│                                                                              │
+│ ContractForm.jsx                                                             │
+│                                                                              │
+│ - El select de Índice de Ajuste (línea 247): cambiar de <select> nativo a    │
+│ SearchableSelect                                                             │
+│                                                                              │
+│ ReportsPage.jsx                                                              │
+│                                                                              │
+│ - ImpuestosTab (línea 1019): El select de dueños es un <select> nativo -     │
+│ cambiar a SearchableSelect                                                   │
+│ - EstadoCuentasTab (línea 383): El select de contratos es un <select> nativo │
+│  - cambiar a SearchableSelect                                                │
+│ - CartaDocumentoTab (línea 548): El select de contratos es un <select>       │
+│ nativo - cambiar a SearchableSelect                                          │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 3: Liquidación para meses futuros                                     │
+│                                                                              │
+│ Backend                                                                      │
+│                                                                              │
+│ - backend/src/services/reportDataService.js - getLiquidacionData (línea      │
+│ ~76): Si no encuentra MonthlyRecord, llamar a                                │
+│ getOrCreateMonthlyRecords(groupId, month, year) y re-buscar                  │
+│ - backend/src/services/reportDataService.js - getLiquidacionesAllContracts   │
+│ (línea ~217): Misma lógica - llamar getOrCreateMonthlyRecords antes de       │
+│ iterar                                                                       │
+│                                                                              │
+│ Frontend                                                                     │
+│                                                                              │
+│ - frontend/src/pages/reports/ReportsPage.jsx: Expandir rango de años de      │
+│ [2024, 2025, 2026, 2027] a rango dinámico (año actual - 2 hasta año actual + │
+│  3) en TODOS los tabs que usan año                                           │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 4: Honorarios en reporte de liquidación                               │
+│                                                                              │
+│ Frontend                                                                     │
+│                                                                              │
+│ - frontend/src/pages/reports/ReportsPage.jsx - LiquidacionTab (línea 131):   │
+│   - Agregar state honorariosPercent (default '')                             │
+│   - Agregar input numérico para porcentaje de honorarios en el grid de       │
+│ filtros                                                                      │
+│   - Incluir honorariosPercent en buildParams() como query param              │
+│                                                                              │
+│ Backend                                                                      │
+│                                                                              │
+│ - backend/src/controllers/reportsController.js: Leer honorariosPercent del   │
+│ query params en todos los endpoints de liquidación, pasarlo al service       │
+│ - backend/src/services/reportDataService.js:                                 │
+│   - getLiquidacionData: aceptar options = {} como 4to parámetro, si          │
+│ options.honorariosPercent > 0 calcular sobre el alquiler solamente y agregar │
+│  honorarios: { porcentaje, monto, netoTransferir } al return                 │
+│   - getLiquidacionesAllContracts: mismo tratamiento                          │
+│ - backend/src/services/pdfTemplates.js - generateLiquidacionPDF: Después del │
+│  total, si data.honorarios existe, dibujar sección "Honorarios (X%): $monto" │
+│  y "Neto a transferir: $neto"                                                │
+│ - backend/src/services/pdfTemplates.js - generateLiquidacionAllPDF: Lo mismo │
+│  al final                                                                    │
+│ - backend/src/services/htmlTemplates.js: Mismo tratamiento en HTML           │
+│ - backend/src/services/docxTemplates.js: Mismo tratamiento en DOCX (si       │
+│ existe)                                                                      │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 5: Recibo de pago en efectivo                                         │
+│                                                                              │
+│ Backend - Data                                                               │
+│                                                                              │
+│ - backend/src/services/reportDataService.js - getPagoEfectivoFromRecord      │
+│ (línea 493):                                                                 │
+│   - Agregar owner: true dentro del include de property en la query           │
+│   - Agregar propietario: { nombre: contract.property.owner?.name || '' } al  │
+│ objeto de retorno (línea ~545)                                               │
+│                                                                              │
+│ Backend - PDF Template                                                       │
+│                                                                              │
+│ - backend/src/services/pdfTemplates.js - generatePagoEfectivoPDF (líneas     │
+│ 660-721):                                                                    │
+│   - Después de "Período:" (línea 671), agregar línea "Por cuenta y orden de: │
+│  [nombre propietario]"                                                       │
+│   - ELIMINAR sección "Firma" (líneas 713-722): quitar sigW, sigX, línea, y   │
+│ texto "Firma"                                                                │
+│ - backend/src/services/pdfTemplates.js - generateMultiPagoEfectivoPDF        │
+│ (líneas ~838-850): Mismos cambios                                            │
+│                                                                              │
+│ Backend - HTML Template                                                      │
+│                                                                              │
+│ - backend/src/services/htmlTemplates.js - generatePagoEfectivoHTML:          │
+│   - Agregar párrafo "Por cuenta y orden de: [propietario]" después de        │
+│ Período                                                                      │
+│   - Eliminar div de firma                                                    │
+│                                                                              │
+│ ---                                                                          │
+│ Cambio 6: Múltiples inquilinos por contrato                                  │
+│                                                                              │
+│ Schema (mantener tenantId + agregar tabla intermedia)                        │
+│                                                                              │
+│ - backend/prisma/schema.prisma:                                              │
+│   - Crear modelo ContractTenant con campos: id, contractId, tenantId,        │
+│ isPrimary, createdAt. Con @@unique([contractId, tenantId]) y                 │
+│ @@map("contract_tenants")                                                    │
+│   - En Contract: MANTENER tenantId como nullable (backward compat), agregar  │
+│ contractTenants ContractTenant[]                                             │
+│   - En Tenant: agregar contractTenants ContractTenant[]                      │
+│ - Migración con script de datos: INSERT en contract_tenants para contratos   │
+│ existentes con tenantId no null                                              │
+│ - tenantId sigue funcionando como referencia al inquilino principal;         │
+│ contractTenants agrega soporte multi-inquilino                               │
+│                                                                              │
+│ Backend - Contracts Controller                                               │
+│                                                                              │
+│ - contractsController.js:                                                    │
+│   - createContract: Aceptar tenantIds: string[], crear ContractTenant rows.  │
+│ Si solo viene tenantId (compat), también crear row                           │
+│   - updateContract: Permitir agregar/quitar inquilinos via tenantIds         │
+│   - getContracts: Cambiar include a contractTenants: { include: { tenant:    │
+│ true } }. Enriquecer con tenants: contract.contractTenants.map(ct =>         │
+│ ct.tenant)                                                                   │
+│   - getContractById: Mismo cambio de includes                                │
+│   - Búsqueda: contractTenants: { some: { tenant: { name: { contains: search  │
+│ } } } }                                                                      │
+│                                                                              │
+│ Backend - Services                                                           │
+│                                                                              │
+│ - reportDataService.js: En todas las funciones que incluyen tenant:          │
+│   - Agregar include de contractTenants con tenant                            │
+│   - Mantener inquilino.nombre como string concatenado:                       │
+│ contract.contractTenants.map(ct => ct.tenant.name).join(' / ') ||            │
+│ contract.tenant?.name || 'Sin inquilino'                                     │
+│ - monthlyRecordService.js: Actualizar includes                               │
+│ - monthlyCloseService.js: Actualizar includes                                │
+│ - adjustmentService.js: Actualizar includes                                  │
+│                                                                              │
+│ Frontend - Contract Form                                                     │
+│                                                                              │
+│ - ContractForm.jsx:                                                          │
+│   - Cambiar tenantId: '' a tenantIds: [] en formData                         │
+│   - Importar y usar MultiSearchableSelect para inquilinos en lugar de        │
+│ SearchableSelect                                                             │
+│   - Adaptar handleSubmit para enviar tenantIds                               │
+│   - En edit: cargar IDs desde contract.contractTenants                       │
+│                                                                              │
+│ Frontend - Contract List                                                     │
+│                                                                              │
+│ - ContractList.jsx: Cambiar contract.tenant?.name a contract.tenants?.map(t  │
+│ => t.name).join(' / ') o similar                                             │
+│                                                                              │
+│ Frontend - Monthly Control                                                   │
+│                                                                              │
+│ - MonthlyControlPage.jsx: Actualizar referencia a tenant name                │
+│                                                                              │
+│ Frontend - Reports                                                           │
+│                                                                              │
+│ - ReportsPage.jsx: Actualizar donde se muestra contract.tenant?.name en      │
+│ EstadoCuentasTab, CartaDocumentoTab                                          │
+│                                                                              │
+│ ---                                                                          │
+│ Verificación                                                                 │
+│                                                                              │
+│ 1. Correr migraciones: cd inmobiliaria-app/backend && npx prisma migrate dev │
+│ 2. Verificar que el servidor backend inicia sin errores                      │
+│ 3. Verificar que el frontend compila sin errores                             │
+│ 4. Probar: crear dueño con alias bancario, crear contrato con múltiples      │
+│ inquilinos, generar liquidación para mes futuro con honorarios, generar      │
+│ recibo de efectivo y verificar "Por cuenta y orden de" sin firma             │
+│ 5. Verificar validación de campos: CBU 22 dígitos, CUIT con formato, tipo de │
+│  cuenta como select                                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+● I'll implement all 6 changes systematically. Let me start by reading the key
+  files to understand the current state.
+
+● Let me start by reading all the key files in parallel.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now let me read all the other key files in parallel.
+
+● Read 3 files (ctrl+o to expand)
+
+● Let me read the remaining key files.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now let me read the frontend files and remaining backend files.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now let me read the frontend files and the reports controller.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now let me read the frontend files. I'll use parallel reads.
+
+● Explore(Read all frontend files) Sonnet 4.5
+  ⎿  Done (7 tool uses · 75.1k tokens · 56s)
+  (ctrl+o to expand)
+
+● Let me read a few more key files.
+
+● Searched for 4 patterns (ctrl+o to expand)
+
+● Now let me read the SearchableSelect component to understand its API, and
+  docxTemplates.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now let me check if docxTemplates exists and read the relevant parts.
+
+● Searched for 1 pattern (ctrl+o to expand)
+
+● Good, now I have enough context. Let me start implementing all 6 changes. I'll
+   begin with Cambio 1 (bank alias schema + backend + frontend).
+
+● Cambio 1: Alias Bancario
+
+  Schema changes
+
+● Update(prisma/schema.prisma)
+  ⎿  Added 1 line
+      71    bankAccountType String?  @map("bank_account_type")
+      72    bankAccountNumber String? @map("bank_account_number")
+      73    bankCbu         String?  @map("bank_cbu")
+      74 +  bankAlias       String?  @map("bank_alias")                  
+      75  
+      76    isActive      Boolean  @default(true) @map("is_active")
+      77    createdAt     DateTime @default(now()) @map("created_at")
+
+● Update(prisma/schema.prisma)
+  ⎿  Added 1 line
+      211    bankAccountType String?  @map("bank_account_type")
+      212    bankAccountNumber String? @map("bank_account_number")
+      213    bankCbu         String?  @map("bank_cbu")
+      214 +  bankAlias       String?  @map("bank_alias")                 
+      215  
+      216    createdAt   DateTime @default(now()) @map("created_at")
+      217    updatedAt   DateTime @updatedAt @map("updated_at")
+
+● Backend - ownersController.js
+
+● Update(src/controllers/ownersController.js)
+  ⎿  Added 2 lines, removed 2 lines
+      66  const createOwner = async (req, res, next) => {
+      67    try {
+      68      const { groupId } = req.params;
+      69 -    const { name, dni, phone, email, bankName, bankHolder, bank
+         -Cuit, bankAccountType, bankAccountNumber, bankCbu } = req.body;
+      69 +    const { name, dni, phone, email, bankName, bankHolder, bank
+         +Cuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias } 
+         += req.body;                                                    
+      70  
+      71      if (!name || !dni || !phone) {
+      72        return ApiResponse.badRequest(res, 'Nombre, DNI y teléfon
+          o son requeridos');
+     ...
+      81      }
+      82  
+      83      const owner = await prisma.owner.create({
+      84 -      data: { groupId, name, dni, phone, email, bankName, bankH
+         -older, bankCuit, bankAccountType, bankAccountNumber, bankCbu },
+      84 +      data: { groupId, name, dni, phone, email, bankName, bankH
+         +older, bankCuit, bankAccountType, bankAccountNumber, bankCbu, b
+         +ankAlias },                                                    
+      85        include: { _count: { select: { properties: true } } },
+      86      });
+      87  
+
+● Update(src/controllers/ownersController.js)
+  ⎿  Added 1 line, removed 1 line
+       95  const updateOwner = async (req, res, next) => {
+       96    try {
+       97      const { groupId, id } = req.params;
+       98 -    const { name, dni, phone, email, bankName, bankHolder, ban
+          -kCuit, bankAccountType, bankAccountNumber, bankCbu } = req.bod
+          -y;                                                            
+       98 +    const { name, dni, phone, email, bankName, bankHolder, ban
+          +kCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias 
+          +} = req.body;                                                 
+       99  
+      100      const owner = await prisma.owner.findUnique({ where: { id 
+           } });
+      101      if (!owner || owner.groupId !== groupId) {
+
+● Update(src/controllers/ownersController.js)
+  ⎿  Added 1 line
+      124          ...(bankAccountType !== undefined && { bankAccountType
+            }),
+      125          ...(bankAccountNumber !== undefined && { bankAccountNu
+           mber }),
+      126          ...(bankCbu !== undefined && { bankCbu }),
+      127 +        ...(bankAlias !== undefined && { bankAlias }),        
+      128        },
+      129        include: { _count: { select: { properties: true } } },
+      130      });
+
+● Backend - reportDataService.js (alias in banco objects)
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 1 line
+      39        bankAccountType: true,
+      40        bankAccountNumber: true,
+      41        bankCbu: true,
+      42 +      bankAlias: true,                                         
+      43      },
+      44    });
+      45  
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 1 line
+      63        tipoCuenta: group?.bankAccountType || '',
+      64        numeroCuenta: group?.bankAccountNumber || '',
+      65        cbu: group?.bankCbu || '',
+      66 +      alias: group?.bankAlias || '',                           
+      67      },
+      68    };
+      69  };
+
+● Now update the liquidación owner banco object:
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 1 line
+      172          tipoCuenta: owner.bankAccountType || '',
+      173          numeroCuenta: owner.bankAccountNumber || '',
+      174          cbu: owner.bankCbu || '',
+      175 +        alias: owner.bankAlias || '',                         
+      176        } : null,
+      177      },
+      178      periodo: {
+
+● Now update the impuestos banco object:
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 1 line
+      771          tipoCuenta: owner.bankAccountType || '',
+      772          numeroCuenta: owner.bankAccountNumber || '',
+      773          cbu: owner.bankCbu || '',
+      774 +        alias: owner.bankAlias || '',                         
+      775        } : empresa.banco,
+      776      });
+      777    }
+
+● PDF Templates - Add alias to bank details
+
+● Update(src/services/pdfTemplates.js)
+  ⎿  Added 1 line
+      965            banco.tipoCuenta ? ['Tipo Cuenta', banco.tipoCuenta]
+            : null,
+      966            banco.numeroCuenta ? ['N° Cuenta', banco.numeroCuent
+           a] : null,
+      967            banco.cbu ? ['CBU', banco.cbu] : null,
+      968 +          banco.alias ? ['Alias', banco.alias] : null,        
+      969          ].filter(Boolean);
+      970  
+      971          // Owner name badge
+
+● Now let me read the frontend files directly to make precise edits.
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 1 line, removed 1 line
+      19    const { createOwner, updateOwner, isCreating, isUpdating, use
+          Owner } = useOwners(currentGroup?.id)
+      20    const { data: owner, isLoading } = isEditing ? useOwner(id) :
+           { data: null, isLoading: false }
+      21  
+      22 -  const [formData, setFormData] = useState({ name: '', dni: '',
+         - phone: '', email: '', bankName: '', bankHolder: '', bankCuit: 
+         -'', bankAccountType: '', bankAccountNumber: '', bankCbu: '' }) 
+      22 +  const [formData, setFormData] = useState({ name: '', dni: '',
+         + phone: '', email: '', bankName: '', bankHolder: '', bankCuit: 
+         +'', bankAccountType: '', bankAccountNumber: '', bankCbu: '', ba
+         +nkAlias: '' })                                                 
+      23    const [errors, setErrors] = useState({})
+      24  
+      25    useEffect(() => {
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 1 line
+      35          bankAccountType: owner.bankAccountType || '',
+      36          bankAccountNumber: owner.bankAccountNumber || '',
+      37          bankCbu: owner.bankCbu || '',
+      38 +        bankAlias: owner.bankAlias || '',                      
+      39        })
+      40      }
+      41    }, [owner])
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 1 line
+      101                <Input label="Tipo de Cuenta" name="bankAccountT
+           ype" value={formData.bankAccountType} onChange={handleChange} 
+           placeholder="Caja de Ahorro" />
+      102                <Input label="N° de Cuenta" name="bankAccountNum
+           ber" value={formData.bankAccountNumber} onChange={handleChange
+           } placeholder="1234567890" />
+      103                <Input label="CBU" name="bankCbu" value={formDat
+           a.bankCbu} onChange={handleChange} placeholder="00000000000000
+           00000000" />
+      104 +              <Input label="Alias" name="bankAlias" value={for
+          +mData.bankAlias} onChange={handleChange} placeholder="mi.alias
+          +.bancario" />                                                 
+      105              </div>
+      106            </div>
+      107  
+
+● SettingsPage.jsx - Add bankAlias
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/settings/SettingsPage.jsx)
+  ⎿  Added 1 line
+      36      bankAccountType: '',
+      37      bankAccountNumber: '',
+      38      bankCbu: '',
+      39 +    bankAlias: '',                                             
+      40    })
+      41    const [logoPreview, setLogoPreview] = useState('')
+      42    const [logoError, setLogoError] = useState('')
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/settings/SettingsPage.jsx)
+  ⎿  Added 1 line
+      62          bankAccountType: settings.bankAccountType || '',
+      63          bankAccountNumber: settings.bankAccountNumber || '',
+      64          bankCbu: settings.bankCbu || '',
+      65 +        bankAlias: settings.bankAlias || '',                   
+      66        })
+      67        if (settings.logo) {
+      68          setLogoPreview(settings.logo)
+
+● Now add the bankAlias input field in the settings bank section.
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/settings/SettingsPage.jsx)
+  ⎿  Added 11 lines
+      321                  placeholder="0000000000000000000000"
+      322                />
+      323              </div>
+      324 +            <div>                                             
+      325 +              <label className="label"><span className="label-
+          +text font-medium">Alias</span></label>                        
+      326 +              <input                                          
+      327 +                type="text"                                   
+      328 +                name="bankAlias"                              
+      329 +                className="input input-bordered w-full"       
+      330 +                value={form.bankAlias}                        
+      331 +                onChange={handleChange}                       
+      332 +                placeholder="mi.alias.bancario"               
+      333 +              />                                              
+      334 +            </div>                                            
+      335            </div>
+      336          </Card>
+      337  
+
+● Now let me run the migration.
+
+● Bash(cd /home/francisco/Excel/inmobiliaria-app/backend && npx prisma migrate
+      dev --name add_bank_alias 2>&1)
+  ⎿  Environment variables loaded from .env
+     Prisma schema loaded from prisma/schema.prisma
+     Datasource "db": SQLite database "dev.db" at "file:./dev.db"
+     … +16 lines (ctrl+o to expand)
+  ⎿  (timeout 30s)
+
+● Cambio 1 done. Let me move on to Cambio 2.
+
+● Cambio 2: Mejoras campos de formularios
+
+  OwnerForm.jsx - CBU validation, CUIT formatting, account type select, etc.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now I'll rewrite the OwnerForm with all the field improvements:
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 21 lines, removed 2 lines
+      42  
+      43    const handleChange = (e) => {
+      44      const { name, value } = e.target
+      45 -    setFormData({ ...formData, [name]: value })                
+      45 +    let processed = value                                      
+      46 +                                                               
+      47 +    // Filter/format specific fields                           
+      48 +    if (name === 'bankCbu') {                                  
+      49 +      processed = value.replace(/\D/g, '').slice(0, 22)        
+      50 +    } else if (name === 'bankAccountNumber') {                 
+      51 +      processed = value.replace(/\D/g, '')                     
+      52 +    } else if (name === 'dni') {                               
+      53 +      processed = value.replace(/[^0-9-]/g, '')                
+      54 +    } else if (name === 'bankCuit') {                          
+      55 +      // Auto-format XX-XXXXXXXX-X                             
+      56 +      const digits = value.replace(/\D/g, '').slice(0, 11)     
+      57 +      if (digits.length > 10) processed = `${digits.slice(0, 2)
+         +}-${digits.slice(2, 10)}-${digits.slice(10)}`                  
+      58 +      else if (digits.length > 2) processed = `${digits.slice(0
+         +, 2)}-${digits.slice(2)}`                                      
+      59 +      else processed = digits                                  
+      60 +    }                                                          
+      61 +                                                               
+      62 +    setFormData({ ...formData, [name]: processed })            
+      63      if (errors[name]) setErrors({ ...errors, [name]: '' })
+      64    }
+      65  
+      66    const validate = () => {
+      67      const newErrors = {}
+      68      if (!formData.name || formData.name.trim().length < 2) newE
+          rrors.name = 'Nombre requerido'
+      52 -    if (!formData.dni || formData.dni.trim().length < 7) newErr
+         -ors.dni = 'DNI requerido (mín. 7 dígitos)'                     
+      69 +    if (!formData.dni || formData.dni.replace(/-/g, '').length 
+         +< 7) newErrors.dni = 'DNI requerido (mín. 7 dígitos)'          
+      70      if (!formData.phone || formData.phone.trim().length < 6) ne
+          wErrors.phone = 'Teléfono requerido'
+      71 +    if (formData.bankCbu && formData.bankCbu.length !== 22) new
+         +Errors.bankCbu = 'El CBU debe tener 22 dígitos'                
+      72 +    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fo
+         +rmData.email)) newErrors.email = 'Email inválido'              
+      73      setErrors(newErrors)
+      74      return Object.keys(newErrors).length === 0
+      75    }
+
+● Now update the bank fields HTML to use improved inputs:
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 1 line, removed 1 line
+      104              <h2 className="text-xl font-semibold">Datos del Du
+           eño</h2>
+      105              <Input label="Nombre Completo *" name="name" value
+           ={formData.name} onChange={handleChange} placeholder="María Ga
+           rcía" error={errors.name} />
+      106              <div className="grid grid-cols-1 md:grid-cols-3 ga
+           p-4">
+      107 -              <Input label="DNI / CUIT *" name="dni" value={fo
+          -rmData.dni} onChange={handleChange} placeholder="20123456789" 
+          -error={errors.dni} />                                         
+      107 +              <Input label="DNI / CUIT *" name="dni" value={fo
+          +rmData.dni} onChange={handleChange} placeholder="20-12345678-9
+          + o 12345678" error={errors.dni} />                            
+      108                <PhoneInput label="Teléfono *" name="phone" valu
+           e={formData.phone} onChange={handleChange} error={errors.phone
+           } />
+      109                <Input label="Email" name="email" type="email" v
+           alue={formData.email} onChange={handleChange} placeholder="mar
+           ia@email.com" />
+      110              </div>
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 1 line, removed 1 line
+      106              <div className="grid grid-cols-1 md:grid-cols-3 ga
+           p-4">
+      107                <Input label="DNI / CUIT *" name="dni" value={fo
+           rmData.dni} onChange={handleChange} placeholder="20-12345678-9
+            o 12345678" error={errors.dni} />
+      108                <PhoneInput label="Teléfono *" name="phone" valu
+           e={formData.phone} onChange={handleChange} error={errors.phone
+           } />
+      109 -              <Input label="Email" name="email" type="email" v
+          -alue={formData.email} onChange={handleChange} placeholder="mar
+          -ia@email.com" />                                              
+      109 +              <Input label="Email" name="email" type="email" v
+          +alue={formData.email} onChange={handleChange} placeholder="mar
+          +ia@email.com" error={errors.email} />                         
+      110              </div>
+      111            </div>
+      112  
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/owners/OwnerForm.jsx)
+  ⎿  Added 11 lines, removed 4 lines
+      116              <div className="grid grid-cols-1 md:grid-cols-2 ga
+           p-4">
+      117                <Input label="Banco" name="bankName" value={form
+           Data.bankName} onChange={handleChange} placeholder="Banco Naci
+           on" />
+      118                <Input label="Titular" name="bankHolder" value={
+           formData.bankHolder} onChange={handleChange} placeholder="Nomb
+           re del titular" />
+      119 -              <Input label="CUIT Titular" name="bankCuit" valu
+          -e={formData.bankCuit} onChange={handleChange} placeholder="20-
+          -12345678-9" />                                                
+      120 -              <Input label="Tipo de Cuenta" name="bankAccountT
+          -ype" value={formData.bankAccountType} onChange={handleChange} 
+          -placeholder="Caja de Ahorro" />                               
+      121 -              <Input label="N° de Cuenta" name="bankAccountNum
+          -ber" value={formData.bankAccountNumber} onChange={handleChange
+          -} placeholder="1234567890" />                                 
+      122 -              <Input label="CBU" name="bankCbu" value={formDat
+          -a.bankCbu} onChange={handleChange} placeholder="00000000000000
+          -00000000" />                                                  
+      119 +              <Input label="CUIT Titular" name="bankCuit" valu
+          +e={formData.bankCuit} onChange={handleChange} placeholder="20-
+          +12345678-9" maxLength={13} />                                 
+      120 +              <div className="form-control w-full">           
+      121 +                <label className="label"><span className="labe
+          +l-text font-medium">Tipo de Cuenta</span></label>             
+      122 +                <select name="bankAccountType" className="sele
+          +ct select-bordered w-full" value={formData.bankAccountType} on
+          +Change={handleChange}>                                        
+      123 +                  <option value="">Seleccionar...</option>    
+      124 +                  <option value="Caja de Ahorro">Caja de Ahorr
+          +o</option>                                                    
+      125 +                  <option value="Cuenta Corriente">Cuenta Corr
+          +iente</option>                                                
+      126 +                </select>                                     
+      127 +              </div>                                          
+      128 +              <Input label="N° de Cuenta" name="bankAccountNum
+          +ber" value={formData.bankAccountNumber} onChange={handleChange
+          +} placeholder="1234567890" inputMode="numeric" />             
+      129 +              <Input label="CBU" name="bankCbu" value={formDat
+          +a.bankCbu} onChange={handleChange} placeholder="00000000000000
+          +00000000" inputMode="numeric" maxLength={22} error={errors.ban
+          +kCbu} />                                                      
+      130                <Input label="Alias" name="bankAlias" value={for
+           mData.bankAlias} onChange={handleChange} placeholder="mi.alias
+           .bancario" />
+      131              </div>
+      132            </div>
+
+● TenantForm.jsx - DNI improvements
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/tenants/TenantForm.jsx)
+  ⎿  Added 7 lines, removed 2 lines
+      61  
+      62    const handleChange = (e) => {
+      63      const { name, value } = e.target
+      64 -    setFormData({ ...formData, [name]: value })                
+      64 +    let processed = value                                      
+      65 +    if (name === 'dni') {                                      
+      66 +      processed = value.replace(/[^0-9-]/g, '')                
+      67 +    }                                                          
+      68 +    setFormData({ ...formData, [name]: processed })            
+      69      if (errors[name]) {
+      70        setErrors({ ...errors, [name]: '' })
+      71      }
+     ...
+      73  
+      74    const handleGuarantorChange = (index, field, value) => {
+      75      const updated = [...guarantors]
+      72 -    updated[index] = { ...updated[index], [field]: value }     
+      76 +    const processed = field === 'dni' ? value.replace(/[^0-9-]/
+         +g, '') : value                                                 
+      77 +    updated[index] = { ...updated[index], [field]: processed } 
+      78      setGuarantors(updated)
+      79      // Clear guarantor-specific errors
+      80      if (errors[`guarantor_${index}_${field}`]) {
+
+● Now update the DNI placeholder in TenantForm:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/tenants/TenantForm.jsx)
+  ⎿  Added 1 line, removed 1 line
+      178                  name="dni"
+      179                  value={formData.dni}
+      180                  onChange={handleChange}
+      181 -                placeholder="12345678"                        
+      181 +                placeholder="20-12345678-9 o 12345678"        
+      182                  error={errors.dni}
+      183                />
+      184                <PhoneInput
+
+● SettingsPage.jsx - Bank field improvements
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/settings/SettingsPage.jsx)
+  ⎿  Added 14 lines, removed 1 line
+      72  
+      73    const handleChange = (e) => {
+      74      const { name, value } = e.target
+      75 -    setForm((prev) => ({ ...prev, [name]: value }))            
+      75 +    let processed = value                                      
+      76 +                                                               
+      77 +    if (name === 'bankCbu') {                                  
+      78 +      processed = value.replace(/\D/g, '').slice(0, 22)        
+      79 +    } else if (name === 'bankAccountNumber') {                 
+      80 +      processed = value.replace(/\D/g, '')                     
+      81 +    } else if (name === 'bankCuit') {                          
+      82 +      const digits = value.replace(/\D/g, '').slice(0, 11)     
+      83 +      if (digits.length > 10) processed = `${digits.slice(0, 2)
+         +}-${digits.slice(2, 10)}-${digits.slice(10)}`                  
+      84 +      else if (digits.length > 2) processed = `${digits.slice(0
+         +, 2)}-${digits.slice(2)}`                                      
+      85 +      else processed = digits                                  
+      86 +    }                                                          
+      87 +                                                               
+      88 +    setForm((prev) => ({ ...prev, [name]: processed }))        
+      89    }
+      90  
+      91    const handleLogoChange = (e) => {
+
+● Now update the SettingsPage bank fields HTML (CUIT, Tipo de Cuenta, N° Cuenta,
+   CBU):
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/settings/SettingsPage.jsx)
+  ⎿  Added 11 lines, removed 5 lines
+      299                  value={form.bankCuit}
+      300                  onChange={handleChange}
+      301                  placeholder="20-12345678-9"
+      302 +                maxLength={13}                                
+      303                />
+      304              </div>
+      305              <div>
+      306                <label className="label"><span className="label-
+           text font-medium">Tipo de Cuenta</span></label>
+      306 -              <input                                          
+      307 -                type="text"                                   
+      307 +              <select                                         
+      308                  name="bankAccountType"
+      309 -                className="input input-bordered w-full"       
+      309 +                className="select select-bordered w-full"     
+      310                  value={form.bankAccountType}
+      311                  onChange={handleChange}
+      312 -                placeholder="Caja de Ahorro"                  
+      313 -              />                                              
+      312 +              >                                               
+      313 +                <option value="">Seleccionar...</option>      
+      314 +                <option value="Caja de Ahorro">Caja de Ahorro<
+          +/option>                                                      
+      315 +                <option value="Cuenta Corriente">Cuenta Corrie
+          +nte</option>                                                  
+      316 +              </select>                                       
+      317              </div>
+      318              <div>
+      319                <label className="label"><span className="label-
+           text font-medium">N° de Cuenta</span></label>
+     ...
+      324                  value={form.bankAccountNumber}
+      325                  onChange={handleChange}
+      326                  placeholder="1234567890"
+      327 +                inputMode="numeric"                           
+      328                />
+      329              </div>
+      330              <div>
+     ...
+      336                  value={form.bankCbu}
+      337                  onChange={handleChange}
+      338                  placeholder="0000000000000000000000"
+      339 +                inputMode="numeric"                           
+      340 +                maxLength={22}                                
+      341                />
+      342              </div>
+      343              <div>
+
+● ContractForm.jsx - SearchableSelect for adjustment index
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/contracts/ContractForm.jsx)
+  ⎿  Added 9 lines, removed 14 lines
+      240            <div className="space-y-4">
+      241              <h2 className="text-xl font-semibold">Índice de Aj
+           uste</h2>
+      242  
+      243 -            <div className="form-control">                    
+      244 -              <label className="label">                       
+      245 -                <span className="label-text">Índice de ajuste 
+          -periódico</span>                                              
+      246 -              </label>                                        
+      247 -              <select                                         
+      243 +            <div className="form-control max-w-md">           
+      244 +              <SearchableSelect                               
+      245 +                label="Índice de ajuste periódico"            
+      246                  name="adjustmentIndexId"
+      249 -                className="select select-bordered w-full max-w
+          --md"                                                          
+      247 +                options={(indices || []).map((idx) => ({      
+      248 +                  value: idx.id,                              
+      249 +                  label: `${idx.name} (cada ${idx.frequencyMon
+          +ths} ${idx.frequencyMonths === 1 ? 'mes' : 'meses'})`,        
+      250 +                }))}                                          
+      251                  value={formData.adjustmentIndexId}
+      252                  onChange={handleChange}
+      252 -              >                                               
+      253 -                <option value="">Sin ajuste automático</option
+          ->                                                             
+      254 -                {indices?.map((idx) => (                      
+      255 -                  <option key={idx.id} value={idx.id}>        
+      256 -                    {idx.name} (cada {idx.frequencyMonths} {id
+          -x.frequencyMonths === 1 ? 'mes' : 'meses'})                   
+      257 -                  </option>                                   
+      258 -                ))}                                           
+      259 -              </select>                                       
+      253 +                placeholder="Sin ajuste automático"           
+      254 +              />                                              
+      255                <label className="label">
+      256                  <span className="label-text-alt text-base-cont
+           ent/60">
+      257                    El sistema calculará automáticamente el próx
+           imo mes de ajuste
+
+● ReportsPage.jsx - SearchableSelect for selects, dynamic years
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 1 line
+      17    useSendReportEmail,
+      18  } from '../../hooks/useReports'
+      19  import MultiSearchableSelect from '../../components/ui/MultiSea
+          rchableSelect'
+      20 +import SearchableSelect from '../../components/ui/SearchableSel
+         +ect'                                                           
+      21  import api from '../../services/api'
+      22  import Card from '../../components/ui/Card'
+      23  import Button from '../../components/ui/Button'
+
+● Now let me find and update all the year arrays and the native selects. Let me
+  read the relevant sections.
+
+● Searched for 1 pattern (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 5 lines, removed 5 lines
+      216            <div>
+      217              <label className="label"><span className="label-te
+           xt text-xs">Año</span></label>
+      218              <select className="select select-bordered select-s
+           m w-full" value={year} onChange={(e) => setYear(parseInt(e.tar
+           get.value))}>
+      219 -              {[2024, 2025, 2026, 2027].map((y) => (          
+      219 +              {Array.from({ length: 6 }, (_, i) => new Date().
+          +getFullYear() - 2 + i).map((y) => (                           
+      220                  <option key={y} value={y}>{y}</option>
+      221                ))}
+      222              </select>
+     ...
+      649            <div>
+      650              <label className="label"><span className="label-te
+           xt text-xs">Año</span></label>
+      651              <select className="select select-bordered select-s
+           m w-full" value={year} onChange={(e) => { setYear(parseInt(e.t
+           arget.value)); setSelectedIds([]) }}>
+      652 -              {[2024, 2025, 2026, 2027].map((y) => (          
+      652 +              {Array.from({ length: 6 }, (_, i) => new Date().
+          +getFullYear() - 2 + i).map((y) => (                           
+      653                  <option key={y} value={y}>{y}</option>
+      654                ))}
+      655              </select>
+     ...
+      752            <div>
+      753              <label className="label"><span className="label-te
+           xt text-xs">Año</span></label>
+      754              <select className="select select-bordered select-s
+           m w-full" value={year} onChange={(e) => setYear(parseInt(e.tar
+           get.value))}>
+      755 -              {[2024, 2025, 2026, 2027].map((y) => (          
+      755 +              {Array.from({ length: 6 }, (_, i) => new Date().
+          +getFullYear() - 2 + i).map((y) => (                           
+      756                  <option key={y} value={y}>{y}</option>
+      757                ))}
+      758              </select>
+     ...
+      843            <div>
+      844              <label className="label"><span className="label-te
+           xt text-xs">Año</span></label>
+      845              <select className="select select-bordered select-s
+           m w-full" value={year} onChange={(e) => setYear(parseInt(e.tar
+           get.value))}>
+      846 -              {[2024, 2025, 2026, 2027].map((y) => (          
+      846 +              {Array.from({ length: 6 }, (_, i) => new Date().
+          +getFullYear() - 2 + i).map((y) => (                           
+      847                  <option key={y} value={y}>{y}</option>
+      848                ))}
+      849              </select>
+     ...
+      991            <div>
+      992              <label className="label"><span className="label-te
+           xt text-xs">Año</span></label>
+      993              <select className="select select-bordered select-s
+           m w-full" value={year} onChange={(e) => setYear(parseInt(e.tar
+           get.value))}>
+      994 -              {[2024, 2025, 2026, 2027].map((y) => (          
+      994 +              {Array.from({ length: 6 }, (_, i) => new Date().
+          +getFullYear() - 2 + i).map((y) => (                           
+      995                  <option key={y} value={y}>{y}</option>
+      996                ))}
+      997              </select>
+
+● Now let me update the native selects in ReportsPage to SearchableSelect. Let
+  me find the EstadoCuentasTab contract select.
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 11 lines, removed 9 lines
+      380        <Card title="Filtros">
+      381          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 
+           mt-2">
+      382            <div className="sm:col-span-2">
+      383 -            <label className="label"><span className="label-te
+          -xt text-xs">Contrato / Inquilino</span></label>               
+      384 -            <select className="select select-bordered select-s
+          -m w-full" value={contractId} onChange={(e) => setContractId(e.
+          -target.value)}>                                               
+      385 -              <option value="">Seleccionar contrato...</option
+          ->                                                             
+      386 -              {contracts.map((c) => (                         
+      387 -                <option key={c.id} value={c.id}>              
+      388 -                  {c.tenant?.name} - {c.property?.address}    
+      389 -                </option>                                     
+      390 -              ))}                                             
+      391 -            </select>                                         
+      383 +            <SearchableSelect                                 
+      384 +              label="Contrato / Inquilino"                    
+      385 +              name="contractId"                               
+      386 +              options={contracts.map((c) => ({                
+      387 +                value: c.id,                                  
+      388 +                label: `${c.tenant?.name || 'Sin inquilino'} -
+          + ${c.property?.address}`,                                     
+      389 +              }))}                                            
+      390 +              value={contractId}                              
+      391 +              onChange={(e) => setContractId(e.target.value)} 
+      392 +              placeholder="Buscar contrato..."                
+      393 +            />                                                
+      394            </div>
+      395            <div className="flex items-end gap-2">
+      396              {contractId && (
+
+● Now let me find and update the CartaDocumentoTab contract select.
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 11 lines, removed 9 lines
+      547        <Card title="Carta Documento - Intimación de Pago">
+      548          <div className="space-y-4 mt-2">
+      549            <div>
+      550 -            <label className="label"><span className="label-te
+          -xt text-xs">Contrato / Inquilino (con deuda)</span></label>   
+      551 -            <select className="select select-bordered select-s
+          -m w-full" value={contractId} onChange={(e) => setContractId(e.
+          -target.value)}>                                               
+      552 -              <option value="">Seleccionar contrato...</option
+          ->                                                             
+      553 -              {contracts.map((c) => (                         
+      554 -                <option key={c.id} value={c.id}>              
+      555 -                  {c.tenant?.name} - {c.property?.address}    
+      556 -                </option>                                     
+      557 -              ))}                                             
+      558 -            </select>                                         
+      550 +            <SearchableSelect                                 
+      551 +              label="Contrato / Inquilino (con deuda)"        
+      552 +              name="contractId"                               
+      553 +              options={contracts.map((c) => ({                
+      554 +                value: c.id,                                  
+      555 +                label: `${c.tenant?.name || 'Sin inquilino'} -
+          + ${c.property?.address}`,                                     
+      556 +              }))}                                            
+      557 +              value={contractId}                              
+      558 +              onChange={(e) => setContractId(e.target.value)} 
+      559 +              placeholder="Buscar contrato..."                
+      560 +            />                                                
+      561            </div>
+      562            <div>
+      563              <label className="label"><span className="label-te
+           xt text-xs">Mensaje personalizado (opcional)</span></label>
+
+● Now find and update the ImpuestosTab owner select.
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 10 lines, removed 10 lines
+      1020              )}
+      1021            </div>
+      1022            <div>
+      1023 -            <label className="label"><span className="label-t
+           -ext text-xs">Filtrar por dueño (opcional)</span></label>     
+      1024 -            <select                                          
+      1025 -              className="select select-bordered select-sm w-f
+           -ull"                                                         
+      1026 -              value={selectedOwnerId}                        
+      1023 +            <SearchableSelect                                
+      1024 +              label="Filtrar por dueño (opcional)"           
+      1025 +              name="ownerId"                                 
+      1026 +              options={(owners || []).map((owner) => ({      
+      1027 +                value: owner.id,                             
+      1028 +                label: owner.name,                           
+      1029 +              }))}                                           
+      1030 +              value={selectedOwnerId}                        
+      1031                onChange={(e) => setSelectedOwnerId(e.target.va
+            lue)}
+      1028 -            >                                                
+      1029 -              <option value="">Todos los dueños</option>     
+      1030 -              {(owners || []).map((owner) => (               
+      1031 -                <option key={owner.id} value={owner.id}>{owne
+           -r.name}</option>                                             
+      1032 -              ))}                                            
+      1033 -            </select>                                        
+      1032 +              placeholder="Todos los dueños..."              
+      1033 +            />                                               
+      1034            </div>
+      1035          </div>
+      1036        </Card>
+
+● Cambio 2 complete.
+
+● Cambio 3: Liquidación para meses futuros
+
+  Backend - reportDataService.js - Auto-create monthly records for future months
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 25 lines, removed 2 lines
+      75  /**
+      76   * Obtiene datos de liquidación para un contrato en un mes/año
+      77   */
+      78 -const getLiquidacionData = async (groupId, contractId, month, y
+         -ear) => {                                                      
+      79 -  const monthlyRecord = await prisma.monthlyRecord.findFirst({ 
+      78 +const getLiquidacionData = async (groupId, contractId, month, y
+         +ear, options = {}) => {                                        
+      79 +  let monthlyRecord = await prisma.monthlyRecord.findFirst({   
+      80      where: {
+      81        groupId,
+      82        contractId,
+     ...
+      102      },
+      103    });
+      104  
+      105 +  // If no record exists, try to auto-create records for that 
+          +period                                                        
+      106 +  if (!monthlyRecord) {                                       
+      107 +    try {                                                     
+      108 +      const { getOrCreateMonthlyRecords } = require('./monthly
+          +RecordService');                                              
+      109 +      await getOrCreateMonthlyRecords(groupId, month, year);  
+      110 +      monthlyRecord = await prisma.monthlyRecord.findFirst({  
+      111 +        where: { groupId, contractId, periodMonth: month, peri
+          +odYear: year },                                               
+      112 +        include: {                                            
+      113 +          contract: {                                         
+      114 +            include: {                                        
+      115 +              tenant: true,                                   
+      116 +              property: { include: { owner: true } },         
+      117 +            },                                                
+      118 +          },                                                  
+      119 +          services: { include: { conceptType: true } },       
+      120 +          transactions: { include: { concepts: true }, orderBy
+          +: { paymentDate: 'asc' } },                                   
+      121 +        },                                                    
+      122 +      });                                                     
+      123 +    } catch (e) {                                             
+      124 +      // silently fail - record may not be applicable         
+      125 +    }                                                         
+      126 +  }                                                           
+      127 +                                                              
+      128    if (!monthlyRecord) return null;
+      129  
+      130    const { contract } = monthlyRecord;
+
+● Now update getLiquidacionesAllContracts to also auto-create records:
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 11 lines, removed 3 lines
+      240   * @param {number} year
+      241   * @param {string[]} propertyIds - Opcional: IDs de propiedade
+           s para filtrar
+      242   */
+      243 -const getLiquidacionesAllContracts = async (groupId, month, ye
+          -ar, propertyIds = null) => {                                  
+      243 +const getLiquidacionesAllContracts = async (groupId, month, ye
+          +ar, propertyIds = null, options = {}) => {                    
+      244 +  // Auto-create monthly records for the period before queryin
+          +g                                                             
+      245 +  try {                                                       
+      246 +    const { getOrCreateMonthlyRecords } = require('./monthlyRe
+          +cordService');                                                
+      247 +    await getOrCreateMonthlyRecords(groupId, month, year);    
+      248 +  } catch (e) {                                               
+      249 +    // silently fail                                          
+      250 +  }                                                           
+      251 +                                                              
+      252    const where = { groupId, active: true };
+      245 -                                                              
+      253 +                                                              
+      254    // Si se proporcionan propertyIds, filtrar por ellos
+      255    if (propertyIds && propertyIds.length > 0) {
+      256      where.propertyId = { in: propertyIds };
+     ...
+      263  
+      264    const liquidaciones = [];
+      265    for (const contract of contracts) {
+      258 -    const data = await getLiquidacionData(groupId, contract.id
+          -, month, year);                                               
+      266 +    const data = await getLiquidacionData(groupId, contract.id
+          +, month, year, options);                                      
+      267      if (data) liquidaciones.push(data);
+      268    }
+      269  
+
+● Cambio 4: Honorarios en reporte de liquidación
+
+  Frontend - Add honorariosPercent to LiquidacionTab
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 5 lines, removed 3 lines
+      134    const [month, setMonth] = useState(now.getMonth() + 1)
+      135    const [year, setYear] = useState(now.getFullYear())
+      136    const [selectedPropertyIds, setSelectedPropertyIds] = useSta
+           te([])
+      137 +  const [honorariosPercent, setHonorariosPercent] = useState('
+          +')                                                            
+      138  
+      139    const { properties } = useProperties(groupId, { isActive: tr
+           ue })
+      139 -  const { data: allData, isLoading } = useLiquidacionAll(group
+          -Id, {                                                         
+      140 -    month: String(month),                                     
+      140 +  const { data: allData, isLoading } = useLiquidacionAll(group
+          +Id, {                                                         
+      141 +    month: String(month),                                     
+      142      year: String(year),
+      142 -    propertyIds: selectedPropertyIds.length > 0 ? selectedProp
+          -ertyIds : undefined                                           
+      143 +    propertyIds: selectedPropertyIds.length > 0 ? selectedProp
+          +ertyIds : undefined,                                          
+      144 +    honorariosPercent: honorariosPercent || undefined,        
+      145    })
+      146    const { downloadPDF, downloadExcel, downloadDOCX, downloadHT
+           ML } = useReportDownload(groupId)
+      147  
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 2 lines, removed 1 line
+      160  
+      161    const buildParams = () => {
+      162      const propertyIdsParam = selectedPropertyIds.length > 0 ? 
+           `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+      163 -    return `month=${month}&year=${year}${propertyIdsParam}`   
+      163 +    const honorariosParam = honorariosPercent ? `&honorariosPe
+          +rcent=${honorariosPercent}` : ''                              
+      164 +    return `month=${month}&year=${year}${propertyIdsParam}${ho
+          +norariosParam}`                                               
+      165    }
+      166  
+      167    const handleDownloadPDF = () => {
+
+● Now add the honorarios input to the UI grid:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/pages/reports/ReportsPage.jsx)
+  ⎿  Added 13 lines
+      224                ))}
+      225              </select>
+      226            </div>
+      227 +          <div>                                               
+      228 +            <label className="label"><span className="label-te
+          +xt text-xs">Honorarios %</span></label>                       
+      229 +            <input                                            
+      230 +              type="number"                                   
+      231 +              className="input input-bordered input-sm w-full"
+      232 +              placeholder="Ej: 5"                             
+      233 +              value={honorariosPercent}                       
+      234 +              onChange={(e) => setHonorariosPercent(e.target.v
+          +alue)}                                                        
+      235 +              min="0"                                         
+      236 +              max="100"                                       
+      237 +              step="0.5"                                      
+      238 +            />                                                
+      239 +          </div>                                              
+      240          </div>
+      241          <div className="mt-4">
+      242            <label className="label"><span className="label-text
+            text-xs">Filtrar por propiedades (opcional)</span></label>
+
+● Now let me check how useLiquidacionAll passes params to the API.
+
+● Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● Update(~/Excel/inmobiliaria-app/frontend/src/hooks/useReports.js)
+  ⎿  Added 5 lines, removed 2 lines
+      22    }
+      23  }
+      24  
+      25 -export const useLiquidacionAll = (groupId, { month, year, prope
+         -rtyIds } = {}) => {                                            
+      25 +export const useLiquidacionAll = (groupId, { month, year, prope
+         +rtyIds, honorariosPercent } = {}) => {                         
+      26    const query = useQuery({
+      27 -    queryKey: ['report', 'liquidacion-all', groupId, month, yea
+         -r, propertyIds],                                               
+      27 +    queryKey: ['report', 'liquidacion-all', groupId, month, yea
+         +r, propertyIds, honorariosPercent],                            
+      28      queryFn: async () => {
+      29        const params = new URLSearchParams({ month, year })
+      30        if (propertyIds && propertyIds.length > 0) {
+      31          params.append('propertyIds', propertyIds.join(','))
+      32        }
+      33 +      if (honorariosPercent) {                                 
+      34 +        params.append('honorariosPercent', honorariosPercent)  
+      35 +      }                                                        
+      36        const response = await api.get(`/groups/${groupId}/report
+          s/liquidacion-all?${params}`)
+      37        return response.data.data
+      38      },
+
+● Backend - reportsController.js - Read honorariosPercent and pass to service
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 14 lines, removed 4 lines
+      49  const getLiquidacion = async (req, res, next) => {
+      50    try {
+      51      const { groupId } = req.params;
+      52 -    const { month, year, contractId } = req.query;             
+      52 +    const { month, year, contractId, honorariosPercent } = req.
+         +query;                                                         
+      53  
+      54      if (!month || !year || !contractId) {
+      55        return ApiResponse.badRequest(res, 'Se requiere month, ye
+          ar y contractId');
+      56      }
+      57  
+      58 -    const data = await getLiquidacionData(groupId, contractId, 
+         -parseInt(month), parseInt(year));                              
+      58 +    const options = {};                                        
+      59 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0)
+         + {                                                             
+      60 +      options.honorariosPercent = parseFloat(honorariosPercent)
+         +;                                                              
+      61 +    }                                                          
+      62  
+      63 +    const data = await getLiquidacionData(groupId, contractId, 
+         +parseInt(month), parseInt(year), options);                     
+      64 +                                                               
+      65      if (!data) {
+      66        return ApiResponse.notFound(res, 'No se encontró registro
+           mensual para ese período');
+      67      }
+     ...
+      75  const getLiquidacionAll = async (req, res, next) => {
+      76    try {
+      77      const { groupId } = req.params;
+      73 -    const { month, year } = req.query;                         
+      78 +    const { month, year, honorariosPercent } = req.query;      
+      79  
+      80      if (!month || !year) {
+      81        return ApiResponse.badRequest(res, 'Se requiere month y y
+          ear');
+      82      }
+      83  
+      79 -    const data = await getLiquidacionesAllContracts(groupId, pa
+         -rseInt(month), parseInt(year));                                
+      84 +    const options = {};                                        
+      85 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0)
+         + {                                                             
+      86 +      options.honorariosPercent = parseFloat(honorariosPercent)
+         +;                                                              
+      87 +    }                                                          
+      88 +                                                               
+      89 +    const data = await getLiquidacionesAllContracts(groupId, pa
+         +rseInt(month), parseInt(year), null, options);                 
+      90      return ApiResponse.success(res, data);
+      91    } catch (error) {
+      92      next(error);
+
+● Now update the PDF download endpoints to also pass honorarios:
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      211  const downloadLiquidacionPDF = async (req, res, next) => {
+      212    try {
+      213      const { groupId } = req.params;
+      214 -    const { month, year, contractId } = req.query;            
+      214 +    const { month, year, contractId, honorariosPercent } = req
+          +.query;                                                       
+      215  
+      216      if (!month || !year || !contractId) {
+      217        return ApiResponse.badRequest(res, 'Se requiere month, y
+           ear y contractId');
+      218      }
+      219  
+      220 -    const data = await getLiquidacionData(groupId, contractId,
+          - parseInt(month), parseInt(year));                            
+      220 +    const options = {};                                       
+      221 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      222 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      223 +    }                                                         
+      224  
+      225 +    const data = await getLiquidacionData(groupId, contractId,
+          + parseInt(month), parseInt(year), options);                   
+      226 +                                                              
+      227      if (!data) {
+      228        return ApiResponse.notFound(res, 'No se encontró registr
+           o mensual para ese período');
+      229      }
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      245  const downloadLiquidacionAllPDF = async (req, res, next) => {
+      246    try {
+      247      const { groupId } = req.params;
+      248 -    const { month, year } = req.query;                        
+      248 +    const { month, year, honorariosPercent } = req.query;     
+      249  
+      250      if (!month || !year) {
+      251        return ApiResponse.badRequest(res, 'Se requiere month y 
+           year');
+      252      }
+      253  
+      254 -    const dataArray = await getLiquidacionesAllContracts(group
+          -Id, parseInt(month), parseInt(year));                         
+      254 +    const options = {};                                       
+      255 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      256 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      257 +    }                                                         
+      258  
+      259 +    const dataArray = await getLiquidacionesAllContracts(group
+          +Id, parseInt(month), parseInt(year), null, options);          
+      260 +                                                              
+      261      if (dataArray.length === 0) {
+      262        return ApiResponse.notFound(res, 'No se encontraron liqu
+           idaciones para ese período');
+      263      }
+
+● Also update the DOCX and HTML download endpoints:
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      641  const downloadLiquidacionDOCX = async (req, res, next) => {
+      642    try {
+      643      const { groupId } = req.params;
+      644 -    const { month, year, contractId } = req.query;            
+      644 +    const { month, year, contractId, honorariosPercent } = req
+          +.query;                                                       
+      645  
+      646      if (!month || !year || !contractId) {
+      647        return ApiResponse.badRequest(res, 'Se requiere month, y
+           ear y contractId');
+      648      }
+      649  
+      650 -    const data = await getLiquidacionData(groupId, contractId,
+          - parseInt(month), parseInt(year));                            
+      650 +    const options = {};                                       
+      651 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      652 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      653 +    }                                                         
+      654 +                                                              
+      655 +    const data = await getLiquidacionData(groupId, contractId,
+          + parseInt(month), parseInt(year), options);                   
+      656      if (!data) return ApiResponse.notFound(res, 'No se encontr
+           ó registro mensual para ese período');
+      657  
+      658      const docxBuffer = await generateLiquidacionDOCX(data);
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      671  const downloadLiquidacionAllDOCX = async (req, res, next) => {
+      672    try {
+      673      const { groupId } = req.params;
+      674 -    const { month, year } = req.query;                        
+      674 +    const { month, year, honorariosPercent } = req.query;     
+      675  
+      676      if (!month || !year) {
+      677        return ApiResponse.badRequest(res, 'Se requiere month y 
+           year');
+      678      }
+      679  
+      680 -    const dataArray = await getLiquidacionesAllContracts(group
+          -Id, parseInt(month), parseInt(year));                         
+      680 +    const options = {};                                       
+      681 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      682 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      683 +    }                                                         
+      684 +                                                              
+      685 +    const dataArray = await getLiquidacionesAllContracts(group
+          +Id, parseInt(month), parseInt(year), null, options);          
+      686      if (dataArray.length === 0) return ApiResponse.notFound(re
+           s, 'No se encontraron liquidaciones');
+      687  
+      688      const docxBuffer = await generateLiquidacionAllDOCX(dataAr
+           ray);
+
+● Update HTML download endpoints similarly:
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      705  const downloadLiquidacionHTMLEndpoint = async (req, res, next)
+            => {
+      706    try {
+      707      const { groupId } = req.params;
+      708 -    const { month, year, contractId } = req.query;            
+      708 +    const { month, year, contractId, honorariosPercent } = req
+          +.query;                                                       
+      709  
+      710      if (!month || !year || !contractId) {
+      711        return ApiResponse.badRequest(res, 'Se requiere month, y
+           ear y contractId');
+      712      }
+      713  
+      714 -    const data = await getLiquidacionData(groupId, contractId,
+          - parseInt(month), parseInt(year));                            
+      714 +    const options = {};                                       
+      715 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      716 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      717 +    }                                                         
+      718 +                                                              
+      719 +    const data = await getLiquidacionData(groupId, contractId,
+          + parseInt(month), parseInt(year), options);                   
+      720      if (!data) return ApiResponse.notFound(res, 'No se encontr
+           ó registro mensual para ese período');
+      721  
+      722      const html = generateLiquidacionHTML(data);
+
+● Update(src/controllers/reportsController.js)
+  ⎿  Added 7 lines, removed 2 lines
+      734  const downloadLiquidacionAllHTMLEndpoint = async (req, res, ne
+           xt) => {
+      735    try {
+      736      const { groupId } = req.params;
+      737 -    const { month, year } = req.query;                        
+      737 +    const { month, year, honorariosPercent } = req.query;     
+      738  
+      739      if (!month || !year) {
+      740        return ApiResponse.badRequest(res, 'Se requiere month y 
+           year');
+      741      }
+      742  
+      743 -    const dataArray = await getLiquidacionesAllContracts(group
+          -Id, parseInt(month), parseInt(year));                         
+      743 +    const options = {};                                       
+      744 +    if (honorariosPercent && parseFloat(honorariosPercent) > 0
+          +) {                                                           
+      745 +      options.honorariosPercent = parseFloat(honorariosPercent
+          +);                                                            
+      746 +    }                                                         
+      747 +                                                              
+      748 +    const dataArray = await getLiquidacionesAllContracts(group
+          +Id, parseInt(month), parseInt(year), null, options);          
+      749      if (dataArray.length === 0) return ApiResponse.notFound(re
+           s, 'No se encontraron liquidaciones');
+      750  
+      751      const html = generateLiquidacionAllHTML(dataArray);
+
+● Backend - reportDataService.js - Calculate honorarios in getLiquidacionData
+
+  Now I need to add the honorarios calculation to the return data. Let me find
+  where the data is returned:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(src/services/reportDataService.js)
+  ⎿  Added 10 lines
+      215      estado: monthlyRecord.status,
+      216      isPaid: monthlyRecord.isPaid,
+      217      fechaPago: monthlyRecord.fullPaymentDate,
+      218 +    // Honorarios (calculated on rent only)                   
+      219 +    honorarios: options.honorariosPercent > 0 ? (() => {      
+      220 +      const pct = options.honorariosPercent;                  
+      221 +      const monto = Math.round(monthlyRecord.rentAmount * pct 
+          +/ 100 * 100) / 100;                                           
+      222 +      return {                                                
+      223 +        porcentaje: pct,                                      
+      224 +        monto,                                                
+      225 +        netoTransferir: Math.round((monthlyRecord.totalDue - m
+          +onto) * 100) / 100,                                           
+      226 +      };                                                      
+      227 +    })() : null,                                              
+      228      transacciones: monthlyRecord.transactions.map((t) => ({
+      229        fecha: t.paymentDate,
+      230        monto: t.amount,
+  ⎿  You've hit your limit · resets 9pm (America/Cordoba)
+     /upgrade or /extra-usage to finish what you’re working on.
+
+✻ Worked for 9m 18s
+
+❯ Unknown skill: rate-limit-options 
+
+❯ continue 
+  ⎿  You've hit your limit · resets 9pm (America/Cordoba)
+     /upgrade or /extra-usage to finish what you’re working on.
+
+❯ Unknown skill: rate-limit-options 

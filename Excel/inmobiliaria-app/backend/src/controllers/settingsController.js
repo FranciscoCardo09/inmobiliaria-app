@@ -1,8 +1,7 @@
 // Settings Controller - Group company configuration
-const { PrismaClient } = require('@prisma/client');
 const ApiResponse = require('../utils/apiResponse');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const SETTINGS_FIELDS = {
   logo: true,
