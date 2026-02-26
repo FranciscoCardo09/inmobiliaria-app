@@ -241,7 +241,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       const start = new Date(contract.startDate);
       const now = new Date();
       const mDiff = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-      const realCurrentMonth = Math.max(1, Math.min(mDiff + 1, contract.durationMonths));
+      const sm = contract.startMonth || 1;
+      const realCurrentMonth = Math.max(sm, Math.min(sm + mDiff, sm + contract.durationMonths - 1));
       if (effectiveNextAdj < realCurrentMonth) {
         effectiveNextAdj = calculateNextAdjustmentMonth(
           contract.startMonth, realCurrentMonth, contract.adjustmentIndex.frequencyMonths, contract.durationMonths

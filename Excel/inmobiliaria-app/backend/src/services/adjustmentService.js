@@ -6,13 +6,16 @@
 const prisma = require('../lib/prisma');
 
 // Helper: compute real current month from startDate
+// When startMonth > 1, the contract was loaded mid-way, so current = startMonth + elapsed
 const computeCurrentMonth = (contract) => {
   const start = new Date(contract.startDate);
   const now = new Date();
   const monthsDiff =
     (now.getFullYear() - start.getFullYear()) * 12 +
     (now.getMonth() - start.getMonth());
-  return Math.max(1, Math.min(monthsDiff + 1, contract.durationMonths));
+  const sm = contract.startMonth || 1;
+  const endMonth = sm + contract.durationMonths - 1;
+  return Math.max(sm, Math.min(sm + monthsDiff, endMonth));
 };
 
 // Helper: get effective nextAdjustmentMonth, recalculating if DB value is stale
@@ -62,7 +65,9 @@ const calculateNextAdjustmentMonth = (startMonth, currentMonth, frequencyMonths,
   }
 
   // Verificar que no exceda la duración del contrato
-  return nextAdjustment <= durationMonths ? nextAdjustment : null;
+  // Cuando startMonth > 1, el último mes es startMonth + durationMonths - 1
+  const endMonth = startMonth + durationMonths - 1;
+  return nextAdjustment <= endMonth ? nextAdjustment : null;
 };
 
 /**

@@ -15,10 +15,11 @@ const parseLocalDate = (dateStr) => {
 };
 
 // Helper: compute period label from startDate + currentMonth
-const getPeriodLabel = (startDate, currentMonth) => {
+// startMonth maps to startDate, so offset = currentMonth - startMonth
+const getPeriodLabel = (startDate, currentMonth, startMonth = 1) => {
   const start = new Date(startDate);
   const date = new Date(start);
-  date.setMonth(date.getMonth() + currentMonth - 1);
+  date.setMonth(date.getMonth() + currentMonth - startMonth);
   const months = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
@@ -31,15 +32,17 @@ const enrichContract = (c) => {
   const adjustmentIndex = c.adjustmentIndex;
 
   // Dynamically compute currentMonth from startDate vs now
+  // When startMonth > 1, contract was loaded mid-way: current = startMonth + elapsed
   const start = new Date(c.startDate);
   const now = new Date();
   const monthsDiff =
     (now.getFullYear() - start.getFullYear()) * 12 +
     (now.getMonth() - start.getMonth());
-  // currentMonth is 1-based: month 1 = the month the contract started
-  const computedCurrentMonth = Math.max(1, Math.min(monthsDiff + 1, c.durationMonths));
+  const sm = c.startMonth || 1;
+  const endMonth = sm + c.durationMonths - 1;
+  const computedCurrentMonth = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
 
-  const currentPeriodLabel = getPeriodLabel(c.startDate, computedCurrentMonth);
+  const currentPeriodLabel = getPeriodLabel(c.startDate, computedCurrentMonth, sm);
 
   let nextAdjustmentLabel = null;
   let nextAdjustmentIsThisMonth = false;
@@ -57,7 +60,7 @@ const enrichContract = (c) => {
     if (nextAdjustmentIsThisMonth) {
       nextAdjustmentLabel = `Ajuste este mes (Mes ${computedCurrentMonth})`;
     } else {
-      const adjLabel = getPeriodLabel(c.startDate, effectiveNextAdj);
+      const adjLabel = getPeriodLabel(c.startDate, effectiveNextAdj, sm);
       nextAdjustmentLabel = `${adjLabel} (${adjustmentIndex.name})`;
     }
   }
@@ -68,7 +71,7 @@ const enrichContract = (c) => {
   endDate.setDate(endDate.getDate() - 1);
 
   // Remaining months
-  const remainingMonths = Math.max(0, c.durationMonths - computedCurrentMonth);
+  const remainingMonths = Math.max(0, endMonth - computedCurrentMonth);
 
   // Determine status string for frontend
   let status;
@@ -316,7 +319,8 @@ const createContract = async (req, res, next) => {
       const monthsDiff =
         (now.getFullYear() - parsedStart.getFullYear()) * 12 +
         (now.getMonth() - parsedStart.getMonth());
-      const realCurrentMonth = Math.max(startMonthVal, Math.min(monthsDiff + 1, parseInt(durationMonths, 10)));
+      const dur = parseInt(durationMonths, 10);
+      const realCurrentMonth = Math.max(startMonthVal, Math.min(startMonthVal + monthsDiff, startMonthVal + dur - 1));
 
       nextAdjMonth = calculateNextAdjustmentMonth(
         startMonthVal,
@@ -454,7 +458,7 @@ const updateContract = async (req, res, next) => {
         const mDiff =
           (nowUpdate.getFullYear() - contractStart.getFullYear()) * 12 +
           (nowUpdate.getMonth() - contractStart.getMonth());
-        const realCurrentM = Math.max(startM, Math.min(mDiff + 1, dur));
+        const realCurrentM = Math.max(startM, Math.min(startM + mDiff, startM + dur - 1));
         data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths, dur);
       } else {
         data.nextAdjustmentMonth = null;
