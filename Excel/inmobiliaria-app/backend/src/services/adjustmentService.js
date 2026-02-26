@@ -5,6 +5,16 @@
 
 const prisma = require('../lib/prisma');
 
+// Helper: compute real current month from startDate
+const computeCurrentMonth = (contract) => {
+  const start = new Date(contract.startDate);
+  const now = new Date();
+  const monthsDiff =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    (now.getMonth() - start.getMonth());
+  return Math.max(1, Math.min(monthsDiff + 1, contract.durationMonths));
+};
+
 // Helper: get tenant name(s) from contract (supports multi-tenant)
 const getTenantsNameAdj = (contract) => {
   if (contract.contractTenants && contract.contractTenants.length > 0) {
@@ -187,7 +197,7 @@ const getContractsWithAdjustmentThisMonth = async (groupId) => {
     include: contractInclude,
   });
 
-  return contracts.filter((c) => c.nextAdjustmentMonth === c.currentMonth);
+  return contracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c));
 };
 
 /**
@@ -219,7 +229,7 @@ const getContractsWithAdjustmentNextMonth = async (groupId) => {
     include: contractInclude,
   });
 
-  return contracts.filter((c) => c.nextAdjustmentMonth === c.currentMonth + 1);
+  return contracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c) + 1);
 };
 
 /**
@@ -278,17 +288,18 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
   });
 
   // Solo contratos donde nextAdjustmentMonth === currentMonth + 1
-  const contractsToAdjust = allContracts.filter((c) => c.nextAdjustmentMonth === c.currentMonth + 1);
+  const contractsToAdjust = allContracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c) + 1);
 
   const results = [];
 
   for (const contract of contractsToAdjust) {
+    const realCurrentMonth = computeCurrentMonth(contract);
     const newRent = contract.baseRent * (1 + percentageIncrease / 100);
 
     // Calcular el siguiente mes de ajuste despues del que estamos aplicando
     const newNextAdjustmentMonth = calculateNextAdjustmentMonth(
       contract.startMonth,
-      contract.currentMonth + 1, // +1 porque estamos aplicando para el mes que viene
+      realCurrentMonth + 1, // +1 porque estamos aplicando para el mes que viene
       contract.adjustmentIndex.frequencyMonths,
       contract.durationMonths
     );
@@ -297,7 +308,7 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
     await prisma.rentHistory.create({
       data: {
         contractId: contract.id,
-        effectiveFromMonth: contract.currentMonth + 1, // Aplica desde el próximo mes
+        effectiveFromMonth: realCurrentMonth + 1, // Aplica desde el próximo mes
         rentAmount: newRent,
         adjustmentPercent: percentageIncrease,
         reason: 'AJUSTE_AUTOMATICO',

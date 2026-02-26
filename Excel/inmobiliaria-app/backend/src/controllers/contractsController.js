@@ -299,10 +299,18 @@ const createContract = async (req, res, next) => {
       if (!adjIndex || adjIndex.groupId !== groupId) {
         return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
       }
-      // CORREGIDO: usar startMonth para calcular
+      // Calcular el mes real del contrato desde startDate para que
+      // contratos cargados a mitad de camino salten ajustes pasados
+      const parsedStart = parseLocalDate(startDate);
+      const now = new Date();
+      const monthsDiff =
+        (now.getFullYear() - parsedStart.getFullYear()) * 12 +
+        (now.getMonth() - parsedStart.getMonth());
+      const realCurrentMonth = Math.max(startMonthVal, Math.min(monthsDiff + 1, parseInt(durationMonths, 10)));
+
       nextAdjMonth = calculateNextAdjustmentMonth(
         startMonthVal,
-        startMonthVal,
+        realCurrentMonth,
         adjIndex.frequencyMonths,
         parseInt(durationMonths, 10)
       );
@@ -429,9 +437,15 @@ const updateContract = async (req, res, next) => {
           return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
         }
         const startM = contract.startMonth;
-        const currentM = data.currentMonth || contract.currentMonth;
         const dur = data.durationMonths || contract.durationMonths;
-        data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, currentM, adjIndex.frequencyMonths, dur);
+        // Calcular mes real desde startDate para no quedarse en ajustes pasados
+        const contractStart = new Date(data.startDate || contract.startDate);
+        const nowUpdate = new Date();
+        const mDiff =
+          (nowUpdate.getFullYear() - contractStart.getFullYear()) * 12 +
+          (nowUpdate.getMonth() - contractStart.getMonth());
+        const realCurrentM = Math.max(startM, Math.min(mDiff + 1, dur));
+        data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths, dur);
       } else {
         data.nextAdjustmentMonth = null;
       }
