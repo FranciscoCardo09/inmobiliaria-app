@@ -15,6 +15,18 @@ const computeCurrentMonth = (contract) => {
   return Math.max(1, Math.min(monthsDiff + 1, contract.durationMonths));
 };
 
+// Helper: get effective nextAdjustmentMonth, recalculating if DB value is stale
+const getEffectiveNextAdj = (contract) => {
+  if (!contract.nextAdjustmentMonth || !contract.adjustmentIndex) return contract.nextAdjustmentMonth;
+  const realMonth = computeCurrentMonth(contract);
+  if (contract.nextAdjustmentMonth < realMonth) {
+    return calculateNextAdjustmentMonth(
+      contract.startMonth, realMonth, contract.adjustmentIndex.frequencyMonths, contract.durationMonths
+    );
+  }
+  return contract.nextAdjustmentMonth;
+};
+
 // Helper: get tenant name(s) from contract (supports multi-tenant)
 const getTenantsNameAdj = (contract) => {
   if (contract.contractTenants && contract.contractTenants.length > 0) {
@@ -197,7 +209,7 @@ const getContractsWithAdjustmentThisMonth = async (groupId) => {
     include: contractInclude,
   });
 
-  return contracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c));
+  return contracts.filter((c) => getEffectiveNextAdj(c) === computeCurrentMonth(c));
 };
 
 /**
@@ -229,7 +241,7 @@ const getContractsWithAdjustmentNextMonth = async (groupId) => {
     include: contractInclude,
   });
 
-  return contracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c) + 1);
+  return contracts.filter((c) => getEffectiveNextAdj(c) === computeCurrentMonth(c) + 1);
 };
 
 /**
@@ -266,8 +278,8 @@ const getContractsWithAdjustmentInMonth = async (groupId, targetMonth) => {
     include: contractInclude,
   });
 
-  // Filtrar contratos donde nextAdjustmentMonth === targetMonth
-  return contracts.filter((c) => c.nextAdjustmentMonth === targetMonth);
+  // Filtrar contratos donde el próximo ajuste efectivo === targetMonth
+  return contracts.filter((c) => getEffectiveNextAdj(c) === targetMonth);
 };
 
 /**
@@ -287,8 +299,8 @@ const applyAdjustmentToNextMonthContracts = async (groupId, indexId, percentageI
     },
   });
 
-  // Solo contratos donde nextAdjustmentMonth === currentMonth + 1
-  const contractsToAdjust = allContracts.filter((c) => c.nextAdjustmentMonth === computeCurrentMonth(c) + 1);
+  // Solo contratos donde el próximo ajuste efectivo === currentMonth + 1
+  const contractsToAdjust = allContracts.filter((c) => getEffectiveNextAdj(c) === computeCurrentMonth(c) + 1);
 
   const results = [];
 
@@ -356,16 +368,19 @@ const applyAdjustmentToSpecificMonth = async (groupId, indexId, percentageIncrea
       groupId,
       active: true,
       adjustmentIndexId: indexId,
-      nextAdjustmentMonth: targetMonth,
+      nextAdjustmentMonth: { not: null },
     },
     include: {
       adjustmentIndex: { select: { frequencyMonths: true } },
     },
   });
 
+  // Filtrar por el próximo ajuste efectivo (recalculado si el DB value es viejo)
+  const contractsToApply = allContracts.filter((c) => getEffectiveNextAdj(c) === targetMonth);
+
   const results = [];
 
-  for (const contract of allContracts) {
+  for (const contract of contractsToApply) {
     const newRent = contract.baseRent * (1 + percentageIncrease / 100);
 
     // Calcular el siguiente mes de ajuste después del que estamos aplicando

@@ -44,12 +44,21 @@ const enrichContract = (c) => {
   let nextAdjustmentLabel = null;
   let nextAdjustmentIsThisMonth = false;
 
-  if (adjustmentIndex && c.nextAdjustmentMonth) {
-    nextAdjustmentIsThisMonth = computedCurrentMonth === c.nextAdjustmentMonth;
+  // Recalcular nextAdjustmentMonth si el valor de DB quedó en el pasado
+  let effectiveNextAdj = c.nextAdjustmentMonth;
+  if (adjustmentIndex && effectiveNextAdj && effectiveNextAdj < computedCurrentMonth) {
+    effectiveNextAdj = calculateNextAdjustmentMonth(
+      c.startMonth, computedCurrentMonth, adjustmentIndex.frequencyMonths, c.durationMonths
+    );
+  }
+
+  if (adjustmentIndex && effectiveNextAdj) {
+    nextAdjustmentIsThisMonth = computedCurrentMonth === effectiveNextAdj;
     if (nextAdjustmentIsThisMonth) {
       nextAdjustmentLabel = `Ajuste este mes (Mes ${computedCurrentMonth})`;
     } else {
-      nextAdjustmentLabel = `Mes ${c.nextAdjustmentMonth} (${adjustmentIndex.name})`;
+      const adjLabel = getPeriodLabel(c.startDate, effectiveNextAdj);
+      nextAdjustmentLabel = `${adjLabel} (${adjustmentIndex.name})`;
     }
   }
 
@@ -77,6 +86,7 @@ const enrichContract = (c) => {
   return {
     ...c,
     currentMonth: computedCurrentMonth,
+    nextAdjustmentMonth: effectiveNextAdj,
     endDate,
     status,
     rentAmount: c.baseRent,
