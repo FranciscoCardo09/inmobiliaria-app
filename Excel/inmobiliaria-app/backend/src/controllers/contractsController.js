@@ -53,9 +53,10 @@ const enrichContract = (c) => {
     }
   }
 
-  // Compute end date from startDate + durationMonths
+  // Compute end date from startDate + durationMonths (last day of contract, not first day after)
   const endDate = new Date(start);
   endDate.setMonth(endDate.getMonth() + c.durationMonths);
+  endDate.setDate(endDate.getDate() - 1);
 
   // Remaining months
   const remainingMonths = Math.max(0, c.durationMonths - computedCurrentMonth);

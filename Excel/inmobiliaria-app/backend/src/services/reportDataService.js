@@ -905,6 +905,7 @@ const getVencimientosData = async (groupId) => {
     const startDate = new Date(contract.startDate);
     const endDate = new Date(startDate);
     endDate.setMonth(endDate.getMonth() + contract.durationMonths);
+    endDate.setDate(endDate.getDate() - 1);
 
     // Compare by month only (ignore day/time/timezone issues)
     const monthsDiff = (endDate.getFullYear() - now.getFullYear()) * 12 + (endDate.getMonth() - now.getMonth());
