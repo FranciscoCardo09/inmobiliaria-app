@@ -506,6 +506,8 @@ export const AdjustmentIndexList = () => {
                     <th>Índice</th>
                     <th>Inquilino</th>
                     <th>Propiedad</th>
+                    <th>Inicio Contrato</th>
+                    <th className="text-center">Mes Actual</th>
                     <th className="text-right">Alquiler Actual</th>
                     <th className="text-right">Ajuste Aplicado</th>
                     <th>Estado</th>
@@ -515,7 +517,7 @@ export const AdjustmentIndexList = () => {
                   {contractsForMonth.map((contract) => {
                     const hasHistory = contract.rentHistory?.length > 0
                     const adjustedRent = hasHistory ? contract.rentHistory[0]?.rentAmount : null
-                    
+
                     return (
                       <tr key={contract.id}>
                         <td>
@@ -525,6 +527,14 @@ export const AdjustmentIndexList = () => {
                         </td>
                         <td>{contract.tenant?.name}</td>
                         <td>{contract.property?.address}</td>
+                        <td className="text-sm text-gray-600">
+                          {contract.startDate ? new Date(contract.startDate).toLocaleDateString('es-AR') : '-'}
+                        </td>
+                        <td className="text-center">
+                          <span className="badge badge-sm badge-ghost font-mono">
+                            {contract.contractMonth || '-'} / {contract.durationMonths || '-'}
+                          </span>
+                        </td>
                         <td className="text-right font-mono">
                           ${contract.baseRent?.toLocaleString()}
                         </td>
