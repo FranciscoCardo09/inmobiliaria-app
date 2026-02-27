@@ -154,16 +154,17 @@ const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, cale
       continue;
     }
 
-    // Buscar TODOS los registros de historial para este mes
+    // Buscar registros de ajuste automático para este mes
     const rentHistoryRecords = await prisma.rentHistory.findMany({
       where: {
         contractId: contract.id,
         effectiveFromMonth: contractMonth,
+        reason: 'AJUSTE_AUTOMATICO',
       },
       orderBy: { createdAt: 'desc' },
     });
-    
-    // Determinar si ya fue aplicado (tiene al menos un registro de historial)
+
+    // Determinar si ya fue aplicado (solo cuenta AJUSTE_AUTOMATICO, no INICIAL)
     const applied = rentHistoryRecords.length > 0;
     
     // El alquiler vigente en este período: buscar el último historial anterior o igual a este mes
