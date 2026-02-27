@@ -416,19 +416,17 @@ const updateContract = async (req, res, next) => {
     if (startDate) data.startDate = parseLocalDate(startDate);
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
 
-    // Always recalculate startMonth when startDate, durationMonths, or currentMonth changes
-    // This ensures enrichContract() computes the correct current month display
+    // Recalculate startMonth when relevant fields change.
+    // startMonth represents the contract month corresponding to startDate.
+    // For virtually all contracts, startDate IS the real start, so startMonth = 1.
+    // The only exception is when creating a mid-way contract (handled in createContract).
+    // On edit, we always reset startMonth to 1 because enrichContract() computes
+    // the correct display month dynamically from startDate + elapsed time.
     if (startDate || durationMonths || currentMonth) {
-      const effectiveStartDate = parseLocalDate(startDate) || new Date(contract.startDate);
-      const nowUpdate2 = new Date();
-      const elapsedM =
-        (nowUpdate2.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
-        (nowUpdate2.getMonth() - effectiveStartDate.getMonth());
-      const userCurMonth = currentMonth
-        ? parseInt(currentMonth, 10)
-        : Math.max(1, (contract.startMonth || 1) + elapsedM);
-      data.startMonth = Math.max(1, userCurMonth - elapsedM);
-      data.currentMonth = userCurMonth;
+      data.startMonth = 1;
+      if (currentMonth) {
+        data.currentMonth = parseInt(currentMonth, 10);
+      }
     }
 
     if (baseRent) data.baseRent = parseFloat(baseRent);
