@@ -415,18 +415,22 @@ const updateContract = async (req, res, next) => {
     const data = {};
     if (startDate) data.startDate = parseLocalDate(startDate);
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
-    if (currentMonth) {
-      // Derive startMonth the same way as createContract:
-      // subtract elapsed months from user's "current month" value
+
+    // Always recalculate startMonth when startDate, durationMonths, or currentMonth changes
+    // This ensures enrichContract() computes the correct current month display
+    if (startDate || durationMonths || currentMonth) {
       const effectiveStartDate = parseLocalDate(startDate) || new Date(contract.startDate);
       const nowUpdate2 = new Date();
       const elapsedM =
         (nowUpdate2.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
         (nowUpdate2.getMonth() - effectiveStartDate.getMonth());
-      const userCurMonth = parseInt(currentMonth, 10);
+      const userCurMonth = currentMonth
+        ? parseInt(currentMonth, 10)
+        : Math.max(1, (contract.startMonth || 1) + elapsedM);
       data.startMonth = Math.max(1, userCurMonth - elapsedM);
       data.currentMonth = userCurMonth;
     }
+
     if (baseRent) data.baseRent = parseFloat(baseRent);
     if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
@@ -458,17 +462,18 @@ const updateContract = async (req, res, next) => {
       }
     }
 
-    // Handle adjustment index change - LÓGICA CORREGIDA
-    if (adjustmentIndexId !== undefined) {
-      data.adjustmentIndexId = adjustmentIndexId || null;
-      if (adjustmentIndexId) {
-        const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
-        if (!adjIndex || adjIndex.groupId !== groupId) {
-          return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
-        }
+    // Recalculate nextAdjustmentMonth when adjustment index changes OR when
+    // startDate/durationMonths change (which shift the adjustment schedule)
+    const adjIndexChanged = adjustmentIndexId !== undefined;
+    const scheduleChanged = startDate || durationMonths || currentMonth;
+    const effectiveAdjIndexId = adjIndexChanged ? adjustmentIndexId : contract.adjustmentIndexId;
+
+    if ((adjIndexChanged || scheduleChanged) && effectiveAdjIndexId) {
+      if (adjIndexChanged) data.adjustmentIndexId = adjustmentIndexId || null;
+      const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: effectiveAdjIndexId } });
+      if (adjIndex && adjIndex.groupId === groupId) {
         const startM = data.startMonth || contract.startMonth;
         const dur = data.durationMonths || contract.durationMonths;
-        // Calcular mes real desde startDate para no quedarse en ajustes pasados
         const contractStart = new Date(data.startDate || contract.startDate);
         const nowUpdate = new Date();
         const mDiff =
@@ -476,9 +481,13 @@ const updateContract = async (req, res, next) => {
           (nowUpdate.getMonth() - contractStart.getMonth());
         const realCurrentM = Math.max(startM, Math.min(startM + mDiff, startM + dur - 1));
         data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths, dur);
-      } else {
+      } else if (adjIndexChanged && !adjustmentIndexId) {
+        data.adjustmentIndexId = null;
         data.nextAdjustmentMonth = null;
       }
+    } else if (adjIndexChanged && !adjustmentIndexId) {
+      data.adjustmentIndexId = null;
+      data.nextAdjustmentMonth = null;
     }
 
     const updated = await prisma.contract.update({
