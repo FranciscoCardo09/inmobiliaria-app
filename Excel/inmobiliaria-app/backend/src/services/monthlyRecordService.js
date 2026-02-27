@@ -405,6 +405,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         punitoryPercent: contract.punitoryPercent,
         nextAdjustmentMonth: contract.nextAdjustmentMonth,
         adjustmentIndex: contract.adjustmentIndex,
+        pagaIva: contract.pagaIva,
       },
       tenant: contract.tenant || null,
       tenants: contract.contractTenants?.length > 0
