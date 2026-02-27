@@ -248,7 +248,7 @@ export const ContractForm = () => {
                 onChange={handleChange}
                 placeholder="1"
                 error={errors.currentMonth}
-                helperText="En qué mes del contrato está actualmente"
+                helperText="¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)"
               />
             </div>
           </div>

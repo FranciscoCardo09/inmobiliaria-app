@@ -40,7 +40,10 @@ const enrichContract = (c) => {
     (now.getMonth() - start.getMonth());
   const sm = c.startMonth || 1;
   const endMonth = sm + c.durationMonths - 1;
-  const computedCurrentMonth = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+  let computedCurrentMonth = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+  // Safety net: never display a month number greater than durationMonths
+  // (can happen with legacy data where startMonth was set too high)
+  computedCurrentMonth = Math.min(computedCurrentMonth, c.durationMonths);
 
   const currentPeriodLabel = getPeriodLabel(c.startDate, computedCurrentMonth, sm);
 
@@ -304,23 +307,25 @@ const createContract = async (req, res, next) => {
       );
     }
 
-    // Verify adjustment index if provided and calculate next adjustment
-    const startMonthVal = currentMonth ? parseInt(currentMonth, 10) : 1;
+    // Derive startMonth: user provides "current month of contract today",
+    // we subtract elapsed months since startDate to get what month the contract
+    // was at when it started.  This prevents double-counting in enrichContract().
+    const parsedStartDate = parseLocalDate(startDate);
+    const nowForStart = new Date();
+    const elapsedMonths =
+      (nowForStart.getFullYear() - parsedStartDate.getFullYear()) * 12 +
+      (nowForStart.getMonth() - parsedStartDate.getMonth());
+    const userCurrentMonth = currentMonth ? parseInt(currentMonth, 10) : 1;
+    const startMonthVal = Math.max(1, userCurrentMonth - elapsedMonths);
+
     let nextAdjMonth = null;
     if (adjustmentIndexId) {
       const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
       if (!adjIndex || adjIndex.groupId !== groupId) {
         return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
       }
-      // Calcular el mes real del contrato desde startDate para que
-      // contratos cargados a mitad de camino salten ajustes pasados
-      const parsedStart = parseLocalDate(startDate);
-      const now = new Date();
-      const monthsDiff =
-        (now.getFullYear() - parsedStart.getFullYear()) * 12 +
-        (now.getMonth() - parsedStart.getMonth());
       const dur = parseInt(durationMonths, 10);
-      const realCurrentMonth = Math.max(startMonthVal, Math.min(startMonthVal + monthsDiff, startMonthVal + dur - 1));
+      const realCurrentMonth = Math.max(startMonthVal, Math.min(startMonthVal + elapsedMonths, startMonthVal + dur - 1));
 
       nextAdjMonth = calculateNextAdjustmentMonth(
         startMonthVal,
@@ -410,7 +415,18 @@ const updateContract = async (req, res, next) => {
     const data = {};
     if (startDate) data.startDate = parseLocalDate(startDate);
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
-    if (currentMonth) data.currentMonth = parseInt(currentMonth, 10);
+    if (currentMonth) {
+      // Derive startMonth the same way as createContract:
+      // subtract elapsed months from user's "current month" value
+      const effectiveStartDate = parseLocalDate(startDate) || new Date(contract.startDate);
+      const nowUpdate2 = new Date();
+      const elapsedM =
+        (nowUpdate2.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
+        (nowUpdate2.getMonth() - effectiveStartDate.getMonth());
+      const userCurMonth = parseInt(currentMonth, 10);
+      data.startMonth = Math.max(1, userCurMonth - elapsedM);
+      data.currentMonth = userCurMonth;
+    }
     if (baseRent) data.baseRent = parseFloat(baseRent);
     if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
@@ -450,7 +466,7 @@ const updateContract = async (req, res, next) => {
         if (!adjIndex || adjIndex.groupId !== groupId) {
           return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
         }
-        const startM = contract.startMonth;
+        const startM = data.startMonth || contract.startMonth;
         const dur = data.durationMonths || contract.durationMonths;
         // Calcular mes real desde startDate para no quedarse en ajustes pasados
         const contractStart = new Date(data.startDate || contract.startDate);
