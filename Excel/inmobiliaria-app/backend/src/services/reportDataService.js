@@ -806,27 +806,10 @@ const getControlMensualData = async (groupId, month, year) => {
 const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerId = null) => {
   const empresa = await getEmpresaData(groupId);
 
-  // Build where clause with optional filters
+  // Build where clause
   const where = { groupId, periodMonth: month, periodYear: year };
-  
-  // Add property filter if provided
-  if (propertyIds && propertyIds.length > 0) {
-    where.contract = {
-      propertyId: { in: propertyIds },
-    };
-  }
-  
-  // Add owner filter if provided
-  if (ownerId) {
-    where.contract = {
-      ...where.contract,
-      property: {
-        ownerId: ownerId,
-      },
-    };
-  }
 
-  const records = await prisma.monthlyRecord.findMany({
+  let records = await prisma.monthlyRecord.findMany({
     where,
     include: {
       contract: {
@@ -845,6 +828,16 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       },
     },
   });
+
+  // Apply property filter
+  if (propertyIds && propertyIds.length > 0) {
+    records = records.filter(r => propertyIds.includes(r.contract.propertyId));
+  }
+
+  // Apply owner filter
+  if (ownerId) {
+    records = records.filter(r => r.contract.property?.ownerId === ownerId);
+  }
 
   // "Mes vencido" logic: the period displayed is the previous month
   const mesVencido = month === 1 ? 12 : month - 1;
