@@ -108,16 +108,18 @@ export const ContractForm = () => {
   const validate = () => {
     const newErrors = {}
     if (!formData.propertyId) newErrors.propertyId = 'Seleccione una propiedad'
-    if (!formData.startDate) newErrors.startDate = 'Fecha de inicio es requerida'
-    // baseRent is only required for INQUILINO
-    if (!isPropietario && (!formData.baseRent || parseFloat(formData.baseRent) <= 0)) {
-      newErrors.baseRent = 'Monto de alquiler es requerido'
-    }
-    if (!formData.durationMonths || parseInt(formData.durationMonths, 10) <= 0) {
-      newErrors.durationMonths = 'Duración es requerida'
-    }
-    if (!formData.currentMonth || parseInt(formData.currentMonth, 10) <= 0) {
-      newErrors.currentMonth = 'Mes actual es requerido'
+    // For PROPIETARIO, only property is required
+    if (!isPropietario) {
+      if (!formData.startDate) newErrors.startDate = 'Fecha de inicio es requerida'
+      if (!formData.baseRent || parseFloat(formData.baseRent) <= 0) {
+        newErrors.baseRent = 'Monto de alquiler es requerido'
+      }
+      if (!formData.durationMonths || parseInt(formData.durationMonths, 10) <= 0) {
+        newErrors.durationMonths = 'Duración es requerida'
+      }
+      if (!formData.currentMonth || parseInt(formData.currentMonth, 10) <= 0) {
+        newErrors.currentMonth = 'Mes actual es requerido'
+      }
     }
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -132,12 +134,13 @@ export const ContractForm = () => {
       contractType: formData.contractType,
       tenantIds: isPropietario ? [] : formData.tenantIds,
       baseRent: isPropietario ? 0 : parseFloat(formData.baseRent),
-      durationMonths: parseInt(formData.durationMonths, 10),
-      currentMonth: parseInt(formData.currentMonth, 10),
+      durationMonths: isPropietario ? 120 : parseInt(formData.durationMonths, 10),
+      currentMonth: isPropietario ? 1 : parseInt(formData.currentMonth, 10),
+      startDate: isPropietario ? (formData.startDate || new Date().toISOString().split('T')[0]) : formData.startDate,
       adjustmentIndexId: isPropietario ? null : (formData.adjustmentIndexId || null),
-      punitoryStartDay: parseInt(formData.punitoryStartDay, 10),
-      punitoryPercent: parseFloat(formData.punitoryPercent) / 100,
-      pagaIva: formData.pagaIva,
+      punitoryStartDay: isPropietario ? 10 : parseInt(formData.punitoryStartDay, 10),
+      punitoryPercent: isPropietario ? 0.006 : parseFloat(formData.punitoryPercent) / 100,
+      pagaIva: isPropietario ? false : formData.pagaIva,
     }
 
     if (isEditing) {
@@ -262,7 +265,8 @@ export const ContractForm = () => {
             </div>
           </div>
 
-          {/* Período */}
+          {/* Período - only for INQUILINO */}
+          {!isPropietario && (
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Período</h2>
 
@@ -304,12 +308,11 @@ export const ContractForm = () => {
                 onChange={handleChange}
                 placeholder="1"
                 error={errors.currentMonth}
-                helperText={isPropietario
-                  ? '¿En qué mes de la obligación se encuentra hoy?'
-                  : '¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)'}
+                helperText="¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)"
               />
             </div>
           </div>
+          )}
 
           {/* Montos - only for INQUILINO */}
           {!isPropietario && (
@@ -370,7 +373,8 @@ export const ContractForm = () => {
             </div>
           )}
 
-          {/* IVA */}
+          {/* IVA - only for INQUILINO */}
+          {!isPropietario && (
           <div className="form-control">
             <label className="label cursor-pointer justify-start gap-4">
               <input
@@ -388,6 +392,7 @@ export const ContractForm = () => {
               </div>
             </label>
           </div>
+          )}
 
           {/* Ajustes - only for INQUILINO */}
           {!isPropietario && (
@@ -415,7 +420,8 @@ export const ContractForm = () => {
             </div>
           )}
 
-          {/* Punitorios */}
+          {/* Punitorios - only for INQUILINO */}
+          {!isPropietario && (
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Punitorios por Pago Tardío</h2>
 
@@ -454,6 +460,7 @@ export const ContractForm = () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Estado (solo en edición) */}
           {isEditing && (

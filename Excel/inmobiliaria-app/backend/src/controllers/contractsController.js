@@ -281,20 +281,29 @@ const createContract = async (req, res, next) => {
 
     const resolvedContractType = contractType === 'PROPIETARIO' ? 'PROPIETARIO' : 'INQUILINO';
 
-    if (!propertyId || !startDate || !durationMonths) {
-      return ApiResponse.badRequest(
-        res,
-        'Propiedad, fecha inicio y duración son requeridos'
-      );
+    if (!propertyId) {
+      return ApiResponse.badRequest(res, 'Propiedad es requerida');
     }
 
-    // For INQUILINO contracts, baseRent is required
-    if (resolvedContractType === 'INQUILINO' && (!baseRent || parseFloat(baseRent) <= 0)) {
-      return ApiResponse.badRequest(
-        res,
-        'Monto de alquiler es requerido para contratos de inquilino'
-      );
+    // For INQUILINO, startDate and durationMonths are required
+    if (resolvedContractType === 'INQUILINO') {
+      if (!startDate || !durationMonths) {
+        return ApiResponse.badRequest(
+          res,
+          'Fecha inicio y duración son requeridos para contratos de inquilino'
+        );
+      }
+      if (!baseRent || parseFloat(baseRent) <= 0) {
+        return ApiResponse.badRequest(
+          res,
+          'Monto de alquiler es requerido para contratos de inquilino'
+        );
+      }
     }
+
+    // For PROPIETARIO, auto-default startDate and durationMonths
+    const resolvedStartDate = startDate || new Date().toISOString().split('T')[0];
+    const resolvedDurationMonths = durationMonths ? parseInt(durationMonths, 10) : 120;
 
     // Resolve tenant IDs: prefer tenantIds array, fallback to single tenantId
     const resolvedTenantIds = tenantIds && tenantIds.length > 0
@@ -331,7 +340,7 @@ const createContract = async (req, res, next) => {
     // Derive startMonth: user provides "current month of contract today",
     // we subtract elapsed months since startDate to get what month the contract
     // was at when it started.  This prevents double-counting in enrichContract().
-    const parsedStartDate = parseLocalDate(startDate);
+    const parsedStartDate = parseLocalDate(resolvedStartDate);
     const nowForStart = new Date();
     const elapsedMonths =
       (nowForStart.getFullYear() - parsedStartDate.getFullYear()) * 12 +
@@ -345,19 +354,19 @@ const createContract = async (req, res, next) => {
       if (!adjIndex || adjIndex.groupId !== groupId) {
         return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
       }
-      const dur = parseInt(durationMonths, 10);
-      const realCurrentMonth = Math.max(startMonthVal, Math.min(startMonthVal + elapsedMonths, startMonthVal + dur - 1));
+      const realCurrentMonth = Math.max(startMonthVal, Math.min(startMonthVal + elapsedMonths, startMonthVal + resolvedDurationMonths - 1));
 
       nextAdjMonth = calculateNextAdjustmentMonth(
         startMonthVal,
         realCurrentMonth,
         adjIndex.frequencyMonths,
-        parseInt(durationMonths, 10)
+        resolvedDurationMonths
       );
     }
 
     const primaryTenantId = resolvedTenantIds.length > 0 ? resolvedTenantIds[0] : null;
     const resolvedBaseRent = resolvedContractType === 'PROPIETARIO' ? 0 : parseFloat(baseRent);
+    const resolvedPagaIva = resolvedContractType === 'PROPIETARIO' ? false : !!pagaIva;
 
     const contract = await prisma.contract.create({
       data: {
@@ -365,16 +374,16 @@ const createContract = async (req, res, next) => {
         tenantId: primaryTenantId,
         propertyId,
         contractType: resolvedContractType,
-        startDate: parseLocalDate(startDate),
+        startDate: parsedStartDate,
         startMonth: startMonthVal,
-        durationMonths: parseInt(durationMonths, 10),
+        durationMonths: resolvedDurationMonths,
         currentMonth: startMonthVal,
         baseRent: resolvedBaseRent,
         adjustmentIndexId: adjustmentIndexId || null,
         nextAdjustmentMonth: nextAdjMonth,
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
-        pagaIva: !!pagaIva,
+        pagaIva: resolvedPagaIva,
         observations,
         contractTenants: resolvedTenantIds.length > 0 ? {
           create: resolvedTenantIds.map((tid, i) => ({
