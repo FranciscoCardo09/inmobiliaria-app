@@ -850,11 +850,11 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
   const mesVencido = month === 1 ? 12 : month - 1;
   const anioVencido = month === 1 ? year - 1 : year;
 
-  // Filter records that have services with category 'IMPUESTO'
+  // Filter records that have services with category 'IMPUESTO' or 'SERVICIO'
   const impuestos = [];
   for (const record of records) {
     const taxServices = record.services.filter(
-      (s) => s.conceptType?.category === 'IMPUESTO'
+      (s) => s.conceptType?.category === 'IMPUESTO' || s.conceptType?.category === 'SERVICIO'
     );
     if (taxServices.length === 0) continue;
 
@@ -864,7 +864,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       propiedad: record.contract.property.address,
       propietario: owner?.name || 'Sin propietario',
       impuestos: taxServices.map((s) => ({
-        concepto: s.conceptType?.label || s.description || 'Impuesto',
+        concepto: s.conceptType?.label || s.description || 'Impuesto/Servicio',
         monto: s.amount,
       })),
       totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),

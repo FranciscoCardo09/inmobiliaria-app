@@ -900,7 +900,7 @@ const generateImpuestosPDF = (data) => {
 
     // Metric card with grand total
     y = drawMetrics(doc, y, [
-      { label: 'Total Impuestos', value: fmt(data.grandTotal, data.currency) },
+      { label: 'Total Impuestos y Servicios', value: fmt(data.grandTotal, data.currency) },
       { label: 'Propiedades', value: String(data.impuestos.length) },
     ]);
 

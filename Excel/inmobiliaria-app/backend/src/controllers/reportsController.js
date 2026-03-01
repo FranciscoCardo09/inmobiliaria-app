@@ -181,13 +181,14 @@ const getControlMensual = async (req, res, next) => {
 const getImpuestos = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, propertyIds, ownerId } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year));
+    const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
+    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null);
     return ApiResponse.success(res, data);
   } catch (error) {
     next(error);
@@ -415,13 +416,14 @@ const downloadMultiPagoEfectivoPDF = async (req, res, next) => {
 const downloadImpuestosPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year } = req.query;
+    const { month, year, propertyIds, ownerId } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year));
+    const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
+    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null);
     const pdfBuffer = await generateImpuestosPDF(data);
 
     const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;

@@ -73,7 +73,7 @@ const TABS = [
   { id: 'liquidacion', label: 'Liquidación', icon: DocumentTextIcon },
   { id: 'ajustes', label: 'Ajustes', icon: AdjustmentsHorizontalIcon },
   { id: 'control-mensual', label: 'Control Mensual', icon: CalendarDaysIcon },
-  { id: 'impuestos', label: 'Impuestos', icon: ReceiptPercentIcon },
+  { id: 'impuestos', label: 'Impuestos y Servicios', icon: ReceiptPercentIcon },
   { id: 'vencimientos', label: 'Vencimientos', icon: BellAlertIcon },
   { id: 'estado-cuentas', label: 'Estado Cuentas', icon: DocumentDuplicateIcon },
   { id: 'carta-documento', label: 'Carta Documento', icon: ExclamationTriangleIcon },
@@ -998,7 +998,7 @@ function ImpuestosTab({ groupId }) {
 
   return (
     <div className="space-y-4">
-      <Card title="Reporte de Impuestos">
+      <Card title="Reporte de Impuestos y Servicios">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
           <div>
             <label className="label"><span className="label-text text-xs">Mes</span></label>
@@ -1054,7 +1054,7 @@ function ImpuestosTab({ groupId }) {
       {isLoading && <LoadingPage />}
 
       {data && data.impuestos.length === 0 && (
-        <Card><p className="text-base-content/60 text-center py-4">No hay impuestos registrados para este período</p></Card>
+        <Card><p className="text-base-content/60 text-center py-4">No hay impuestos ni servicios registrados para este período</p></Card>
       )}
 
       {data && data.impuestos.length > 0 && (
