@@ -91,6 +91,7 @@ const enrichContract = (c) => {
 
   return {
     ...c,
+    contractType: c.contractType || 'INQUILINO',
     currentMonth: computedCurrentMonth,
     nextAdjustmentMonth: effectiveNextAdj,
     endDate,
@@ -108,12 +109,14 @@ const enrichContract = (c) => {
 const getContracts = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { status, propertyId, tenantId, search, limit, offset } = req.query;
+    const { status, propertyId, tenantId, contractType, search, limit, offset } = req.query;
 
     const where = { groupId };
 
     if (status === 'ACTIVE') where.active = true;
     else if (status === 'INACTIVE') where.active = false;
+
+    if (contractType) where.contractType = contractType;
 
     if (propertyId) where.propertyId = propertyId;
     if (tenantId) {
@@ -134,7 +137,12 @@ const getContracts = async (req, res, next) => {
       include: {
         tenant: { select: { id: true, name: true, dni: true, phone: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true } },
+        property: {
+          select: {
+            id: true, address: true,
+            owner: { select: { id: true, name: true } },
+          },
+        },
         adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
       },
       orderBy: { startDate: 'desc' },
@@ -147,7 +155,7 @@ const getContracts = async (req, res, next) => {
       const tenants = c.contractTenants.length > 0
         ? c.contractTenants.map((ct) => ct.tenant)
         : c.tenant ? [c.tenant] : [];
-      return { ...enrichContract(c), tenants };
+      return { ...enrichContract(c), tenants, ownerName: c.property?.owner?.name || null };
     });
 
     return ApiResponse.success(res, enriched);
@@ -259,6 +267,7 @@ const createContract = async (req, res, next) => {
       tenantId,
       tenantIds,
       propertyId,
+      contractType,
       startDate,
       durationMonths,
       currentMonth,
@@ -270,10 +279,20 @@ const createContract = async (req, res, next) => {
       observations,
     } = req.body;
 
-    if (!propertyId || !startDate || !baseRent || !durationMonths) {
+    const resolvedContractType = contractType === 'PROPIETARIO' ? 'PROPIETARIO' : 'INQUILINO';
+
+    if (!propertyId || !startDate || !durationMonths) {
       return ApiResponse.badRequest(
         res,
-        'Propiedad, fecha inicio, duración y monto son requeridos'
+        'Propiedad, fecha inicio y duración son requeridos'
+      );
+    }
+
+    // For INQUILINO contracts, baseRent is required
+    if (resolvedContractType === 'INQUILINO' && (!baseRent || parseFloat(baseRent) <= 0)) {
+      return ApiResponse.badRequest(
+        res,
+        'Monto de alquiler es requerido para contratos de inquilino'
       );
     }
 
@@ -296,14 +315,16 @@ const createContract = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Propiedad invalida');
     }
 
-    // Check no other active contract on this property
+    // Check no other active contract of the SAME TYPE on this property
+    // (allows 1 INQUILINO + 1 PROPIETARIO active simultaneously)
     const activeContract = await prisma.contract.findFirst({
-      where: { propertyId, active: true },
+      where: { propertyId, active: true, contractType: resolvedContractType },
     });
     if (activeContract) {
+      const typeLabel = resolvedContractType === 'PROPIETARIO' ? 'obligación de propietario' : 'contrato de inquilino';
       return ApiResponse.conflict(
         res,
-        'Esta propiedad ya tiene un contrato activo. Finalícelo primero.'
+        `Esta propiedad ya tiene un/a ${typeLabel} activo/a. Finalícelo primero.`
       );
     }
 
@@ -336,17 +357,19 @@ const createContract = async (req, res, next) => {
     }
 
     const primaryTenantId = resolvedTenantIds.length > 0 ? resolvedTenantIds[0] : null;
+    const resolvedBaseRent = resolvedContractType === 'PROPIETARIO' ? 0 : parseFloat(baseRent);
 
     const contract = await prisma.contract.create({
       data: {
         groupId,
         tenantId: primaryTenantId,
         propertyId,
+        contractType: resolvedContractType,
         startDate: parseLocalDate(startDate),
         startMonth: startMonthVal,
         durationMonths: parseInt(durationMonths, 10),
         currentMonth: startMonthVal,
-        baseRent: parseFloat(baseRent),
+        baseRent: resolvedBaseRent,
         adjustmentIndexId: adjustmentIndexId || null,
         nextAdjustmentMonth: nextAdjMonth,
         punitoryStartDay: punitoryStartDay ? parseInt(punitoryStartDay, 10) : 10,
@@ -373,7 +396,7 @@ const createContract = async (req, res, next) => {
       data: {
         contractId: contract.id,
         effectiveFromMonth: startMonthVal,
-        rentAmount: parseFloat(baseRent),
+        rentAmount: resolvedBaseRent,
         adjustmentPercent: null,
         reason: 'INICIAL',
       },
@@ -412,6 +435,7 @@ const updateContract = async (req, res, next) => {
       return ApiResponse.notFound(res, 'Contrato no encontrado');
     }
 
+    // NOTE: contractType is intentionally not mutable after creation
     const data = {};
     if (startDate) data.startDate = parseLocalDate(startDate);
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
@@ -579,7 +603,7 @@ const assignTenantToProperty = async (req, res, next) => {
     }
 
     const activeContract = await prisma.contract.findFirst({
-      where: { propertyId, active: true },
+      where: { propertyId, active: true, contractType: 'INQUILINO' },
     });
     if (activeContract) {
       return ApiResponse.conflict(res, 'Esta propiedad ya tiene un contrato activo');

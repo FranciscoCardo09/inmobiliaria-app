@@ -1,4 +1,4 @@
-// Contract Form Page - Create/Edit contract with Phase 3 fields
+// Contract Form Page - Create/Edit contract with Phase 3 fields + contractType
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
@@ -30,6 +30,7 @@ export const ContractForm = () => {
   const { data: contract, isLoading: isLoadingContract } = isEditing ? useContract(id) : { data: null, isLoading: false }
 
   const [formData, setFormData] = useState({
+    contractType: searchParams.get('contractType') || 'INQUILINO',
     tenantIds: searchParams.get('tenantId') ? [searchParams.get('tenantId')] : [],
     propertyId: searchParams.get('propertyId') || '',
     startDate: '',
@@ -45,10 +46,13 @@ export const ContractForm = () => {
   })
   const [errors, setErrors] = useState({})
 
+  const isPropietario = formData.contractType === 'PROPIETARIO'
+
   // Load contract data when editing
   useEffect(() => {
     if (contract) {
       setFormData({
+        contractType: contract.contractType || 'INQUILINO',
         tenantIds: contract.contractTenants?.length > 0
           ? contract.contractTenants.map((ct) => ct.tenantId || ct.tenant?.id).filter(Boolean)
           : contract.tenantId ? [contract.tenantId] : [],
@@ -71,13 +75,14 @@ export const ContractForm = () => {
   // Auto-check pagaIva when property category is LOCAL or LOCAL COMERCIAL
   useEffect(() => {
     if (isEditing) return // Don't auto-change when editing
+    if (isPropietario) return // Don't auto-change for PROPIETARIO
     const selected = properties.find(p => p.id === formData.propertyId)
     if (selected?.category?.name === 'LOCAL COMERCIAL' || selected?.category?.name === 'LOCAL') {
       setFormData(prev => ({ ...prev, pagaIva: true }))
     } else {
       setFormData(prev => ({ ...prev, pagaIva: false }))
     }
-  }, [formData.propertyId, properties, isEditing])
+  }, [formData.propertyId, properties, isEditing, isPropietario])
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -100,16 +105,12 @@ export const ContractForm = () => {
     return Number(num).toLocaleString('es-AR')
   }
 
-  // Parse formatted number back to raw digits
-  const parseFormattedNumber = (str) => {
-    return str.replace(/\D/g, '')
-  }
-
   const validate = () => {
     const newErrors = {}
     if (!formData.propertyId) newErrors.propertyId = 'Seleccione una propiedad'
     if (!formData.startDate) newErrors.startDate = 'Fecha de inicio es requerida'
-    if (!formData.baseRent || parseFloat(formData.baseRent) <= 0) {
+    // baseRent is only required for INQUILINO
+    if (!isPropietario && (!formData.baseRent || parseFloat(formData.baseRent) <= 0)) {
       newErrors.baseRent = 'Monto de alquiler es requerido'
     }
     if (!formData.durationMonths || parseInt(formData.durationMonths, 10) <= 0) {
@@ -128,11 +129,12 @@ export const ContractForm = () => {
 
     const data = {
       ...formData,
-      tenantIds: formData.tenantIds,
-      baseRent: parseFloat(formData.baseRent),
+      contractType: formData.contractType,
+      tenantIds: isPropietario ? [] : formData.tenantIds,
+      baseRent: isPropietario ? 0 : parseFloat(formData.baseRent),
       durationMonths: parseInt(formData.durationMonths, 10),
       currentMonth: parseInt(formData.currentMonth, 10),
-      adjustmentIndexId: formData.adjustmentIndexId || null,
+      adjustmentIndexId: isPropietario ? null : (formData.adjustmentIndexId || null),
       punitoryStartDay: parseInt(formData.punitoryStartDay, 10),
       punitoryPercent: parseFloat(formData.punitoryPercent) / 100,
       pagaIva: formData.pagaIva,
@@ -158,6 +160,10 @@ export const ContractForm = () => {
     )
   }
 
+  const title = isPropietario
+    ? (isEditing ? 'Editar Obligación de Propietario' : 'Nueva Obligación de Propietario')
+    : (isEditing ? 'Editar Contrato' : 'Nuevo Contrato')
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
@@ -166,29 +172,79 @@ export const ContractForm = () => {
           <ArrowLeftIcon className="w-4 h-4" />
           Volver
         </Button>
-        <h1 className="text-3xl font-bold">{isEditing ? 'Editar Contrato' : 'Nuevo Contrato'}</h1>
+        <h1 className="text-3xl font-bold">{title}</h1>
         <p className="text-base-content/60 mt-1">{currentGroup?.name}</p>
       </div>
 
       {/* Form */}
       <Card>
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Contract Type Selector */}
+          {!isEditing && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Tipo de Contrato</h2>
+              <div className="flex gap-4">
+                <label className={`flex-1 cursor-pointer border-2 rounded-lg p-4 transition-colors ${!isPropietario ? 'border-primary bg-primary/5' : 'border-base-300'}`}>
+                  <input
+                    type="radio"
+                    name="contractType"
+                    value="INQUILINO"
+                    checked={!isPropietario}
+                    onChange={handleChange}
+                    className="radio radio-primary radio-sm mr-2"
+                  />
+                  <span className="font-medium">Contrato de Inquilino</span>
+                  <p className="text-xs text-base-content/60 mt-1 ml-6">
+                    Contrato de alquiler con monto mensual, ajustes y seguimiento de pagos
+                  </p>
+                </label>
+                <label className={`flex-1 cursor-pointer border-2 rounded-lg p-4 transition-colors ${isPropietario ? 'border-secondary bg-secondary/5' : 'border-base-300'}`}>
+                  <input
+                    type="radio"
+                    name="contractType"
+                    value="PROPIETARIO"
+                    checked={isPropietario}
+                    onChange={handleChange}
+                    className="radio radio-secondary radio-sm mr-2"
+                  />
+                  <span className="font-medium">Obligación de Propietario</span>
+                  <p className="text-xs text-base-content/60 mt-1 ml-6">
+                    Seguimiento de servicios que paga el dueño (expensas, impuestos, etc.)
+                  </p>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Type badge when editing */}
+          {isEditing && (
+            <div className="flex items-center gap-2">
+              <span className={`badge ${isPropietario ? 'badge-secondary' : 'badge-primary'}`}>
+                {isPropietario ? 'Obligación de Propietario' : 'Contrato de Inquilino'}
+              </span>
+            </div>
+          )}
+
           {/* Partes del contrato */}
           <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Partes del Contrato</h2>
+            <h2 className="text-xl font-semibold">
+              {isPropietario ? 'Propiedad' : 'Partes del Contrato'}
+            </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <MultiSearchableSelect
-                label="Inquilinos (opcional)"
-                options={tenants.map((t) => ({
-                  value: t.id,
-                  label: `${t.name} - DNI: ${t.dni}`,
-                }))}
-                value={formData.tenantIds}
-                onChange={(ids) => setFormData({ ...formData, tenantIds: ids })}
-                placeholder="Buscar inquilinos..."
-                disabled={isEditing}
-              />
+            <div className={`grid grid-cols-1 ${isPropietario ? '' : 'md:grid-cols-2'} gap-4`}>
+              {!isPropietario && (
+                <MultiSearchableSelect
+                  label="Inquilinos (opcional)"
+                  options={tenants.map((t) => ({
+                    value: t.id,
+                    label: `${t.name} - DNI: ${t.dni}`,
+                  }))}
+                  value={formData.tenantIds}
+                  onChange={(ids) => setFormData({ ...formData, tenantIds: ids })}
+                  placeholder="Buscar inquilinos..."
+                  disabled={isEditing}
+                />
+              )}
 
               <SearchableSelect
                 label="Propiedad *"
@@ -208,7 +264,7 @@ export const ContractForm = () => {
 
           {/* Período */}
           <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Período del Contrato</h2>
+            <h2 className="text-xl font-semibold">Período</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="form-control w-full">
@@ -248,54 +304,71 @@ export const ContractForm = () => {
                 onChange={handleChange}
                 placeholder="1"
                 error={errors.currentMonth}
-                helperText="¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)"
+                helperText={isPropietario
+                  ? '¿En qué mes de la obligación se encuentra hoy?'
+                  : '¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)'}
               />
             </div>
           </div>
 
-          {/* Montos */}
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Condiciones Económicas</h2>
+          {/* Montos - only for INQUILINO */}
+          {!isPropietario && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Condiciones Económicas</h2>
 
-            <div className="form-control w-full">
-              <label className="label">
-                <span className="label-text font-medium">Alquiler Mensual Base *</span>
-              </label>
-              <label className="input input-bordered flex items-center gap-2">
-                <span className="text-base-content/60">$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  name="baseRent"
-                  className="grow bg-transparent outline-none"
-                  value={formData.baseRentDisplay ?? (formData.baseRent ? formatNumber(formData.baseRent) : '')}
-                  onChange={(e) => {
-                    const display = e.target.value.replace(/[^\d.,]/g, '')
-                    // Parse: remove dots (thousands), replace comma with dot (decimal)
-                    const raw = display.replace(/\./g, '').replace(',', '.')
-                    setFormData({ ...formData, baseRent: raw, baseRentDisplay: display })
-                    if (errors.baseRent) setErrors({ ...errors, baseRent: '' })
-                  }}
-                  onBlur={() => {
-                    // On blur, reformat nicely
-                    if (formData.baseRent) {
-                      const num = parseFloat(formData.baseRent)
-                      if (!isNaN(num)) {
-                        const formatted = num.toLocaleString('es-AR', { minimumFractionDigits: num % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })
-                        setFormData((prev) => ({ ...prev, baseRentDisplay: formatted }))
-                      }
-                    }
-                  }}
-                  placeholder="1.250.000,50"
-                />
-              </label>
-              {errors.baseRent && (
+              <div className="form-control w-full">
                 <label className="label">
-                  <span className="label-text-alt text-error">{errors.baseRent}</span>
+                  <span className="label-text font-medium">Alquiler Mensual Base *</span>
                 </label>
-              )}
+                <label className="input input-bordered flex items-center gap-2">
+                  <span className="text-base-content/60">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    name="baseRent"
+                    className="grow bg-transparent outline-none"
+                    value={formData.baseRentDisplay ?? (formData.baseRent ? formatNumber(formData.baseRent) : '')}
+                    onChange={(e) => {
+                      const display = e.target.value.replace(/[^\d.,]/g, '')
+                      // Parse: remove dots (thousands), replace comma with dot (decimal)
+                      const raw = display.replace(/\./g, '').replace(',', '.')
+                      setFormData({ ...formData, baseRent: raw, baseRentDisplay: display })
+                      if (errors.baseRent) setErrors({ ...errors, baseRent: '' })
+                    }}
+                    onBlur={() => {
+                      // On blur, reformat nicely
+                      if (formData.baseRent) {
+                        const num = parseFloat(formData.baseRent)
+                        if (!isNaN(num)) {
+                          const formatted = num.toLocaleString('es-AR', { minimumFractionDigits: num % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })
+                          setFormData((prev) => ({ ...prev, baseRentDisplay: formatted }))
+                        }
+                      }
+                    }}
+                    placeholder="1.250.000,50"
+                  />
+                </label>
+                {errors.baseRent && (
+                  <label className="label">
+                    <span className="label-text-alt text-error">{errors.baseRent}</span>
+                  </label>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Info box for PROPIETARIO */}
+          {isPropietario && (
+            <div className="alert alert-info">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <div>
+                <div className="font-medium">Obligación de Propietario</div>
+                <div className="text-sm">
+                  No se cobra alquiler. Los servicios (expensas, impuestos, etc.) se cargan mes a mes desde el Control Mensual.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* IVA */}
           <div className="form-control">
@@ -316,29 +389,31 @@ export const ContractForm = () => {
             </label>
           </div>
 
-          {/* Ajustes */}
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Índice de Ajuste</h2>
+          {/* Ajustes - only for INQUILINO */}
+          {!isPropietario && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Índice de Ajuste</h2>
 
-            <div className="form-control max-w-md">
-              <SearchableSelect
-                label="Índice de ajuste periódico"
-                name="adjustmentIndexId"
-                options={(indices || []).map((idx) => ({
-                  value: idx.id,
-                  label: `${idx.name} (cada ${idx.frequencyMonths} ${idx.frequencyMonths === 1 ? 'mes' : 'meses'})`,
-                }))}
-                value={formData.adjustmentIndexId}
-                onChange={handleChange}
-                placeholder="Sin ajuste automático"
-              />
-              <label className="label">
-                <span className="label-text-alt text-base-content/60">
-                  El sistema calculará automáticamente el próximo mes de ajuste
-                </span>
-              </label>
+              <div className="form-control max-w-md">
+                <SearchableSelect
+                  label="Índice de ajuste periódico"
+                  name="adjustmentIndexId"
+                  options={(indices || []).map((idx) => ({
+                    value: idx.id,
+                    label: `${idx.name} (cada ${idx.frequencyMonths} ${idx.frequencyMonths === 1 ? 'mes' : 'meses'})`,
+                  }))}
+                  value={formData.adjustmentIndexId}
+                  onChange={handleChange}
+                  placeholder="Sin ajuste automático"
+                />
+                <label className="label">
+                  <span className="label-text-alt text-base-content/60">
+                    El sistema calculará automáticamente el próximo mes de ajuste
+                  </span>
+                </label>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Punitorios */}
           <div className="space-y-4">
@@ -393,7 +468,7 @@ export const ContractForm = () => {
                     checked={formData.active}
                     onChange={handleChange}
                   />
-                  <span className="label-text">Contrato Activo</span>
+                  <span className="label-text">{isPropietario ? 'Obligación Activa' : 'Contrato Activo'}</span>
                 </label>
               </div>
             </div>
@@ -409,7 +484,7 @@ export const ContractForm = () => {
               className="textarea textarea-bordered w-full h-24"
               value={formData.observations}
               onChange={handleChange}
-              placeholder="Notas adicionales sobre el contrato..."
+              placeholder="Notas adicionales..."
             />
           </div>
 
@@ -421,7 +496,7 @@ export const ContractForm = () => {
               className="flex-1"
               loading={isCreating || isUpdating}
             >
-              {isEditing ? 'Actualizar' : 'Crear'} Contrato
+              {isEditing ? 'Actualizar' : 'Crear'} {isPropietario ? 'Obligación' : 'Contrato'}
             </Button>
             <Button type="button" variant="outline" onClick={() => navigate('/contracts')}>
               Cancelar

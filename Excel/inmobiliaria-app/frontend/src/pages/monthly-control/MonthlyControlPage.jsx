@@ -80,6 +80,7 @@ export default function MonthlyControlPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [contractTypeFilter, setContractTypeFilter] = useState('')
 
   // Table zoom/scale
   const [tableZoom, setTableZoom] = useState(100)
@@ -106,13 +107,18 @@ export default function MonthlyControlPage() {
     { status: backendStatus, categoryId: categoryFilter }
   )
 
-  // Apply local filters (search + debt) so results show instantly without API calls
+  // Apply local filters (search + debt + contractType) so results show instantly without API calls
   const records = useMemo(() => {
     let filtered = allRecords
 
     // Debt filter
     if (statusFilter === 'HAS_DEBT') {
       filtered = filtered.filter((r) => r.debtInfo && r.debtInfo.status !== 'PAID')
+    }
+
+    // Contract type filter
+    if (contractTypeFilter) {
+      filtered = filtered.filter((r) => (r.contractType || 'INQUILINO') === contractTypeFilter)
     }
 
     // Text search filter (client-side, instant)
@@ -127,7 +133,7 @@ export default function MonthlyControlPage() {
     }
 
     return filtered
-  }, [allRecords, statusFilter, searchFilter])
+  }, [allRecords, statusFilter, searchFilter, contractTypeFilter])
 
   // Detect if IVA column should be shown
   const showIvaColumn = useMemo(() => {
@@ -356,7 +362,7 @@ export default function MonthlyControlPage() {
           <FunnelIcon className="w-4 h-4" />
           <span className="text-sm font-semibold">Filtros</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <select
             className="select select-bordered select-sm w-full"
             value={statusFilter}
@@ -367,6 +373,16 @@ export default function MonthlyControlPage() {
             <option value="PARTIAL">Parcial</option>
             <option value="PENDING">Pendiente</option>
             <option value="HAS_DEBT">Con deuda</option>
+          </select>
+
+          <select
+            className="select select-bordered select-sm w-full"
+            value={contractTypeFilter}
+            onChange={(e) => setContractTypeFilter(e.target.value)}
+          >
+            <option value="">Todos los tipos</option>
+            <option value="INQUILINO">Inquilinos</option>
+            <option value="PROPIETARIO">Propietarios</option>
           </select>
 
           <select
@@ -389,6 +405,7 @@ export default function MonthlyControlPage() {
             className="btn btn-ghost btn-sm"
             onClick={() => {
               setStatusFilter('')
+              setContractTypeFilter('')
               setCategoryFilter('')
               setSearchFilter('')
             }}
@@ -543,10 +560,14 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
   record, idx, isExpanded, showIvaColumn, groupId,
   onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory,
 }) {
+  const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
+
   const rowClass = record.status === 'COMPLETE'
     ? 'bg-success/10'
     : record.status === 'PARTIAL'
     ? 'bg-warning/10'
+    : isPropietario
+    ? 'bg-secondary/5'
     : idx % 2 === 1
     ? 'bg-base-200/50'
     : ''
@@ -580,9 +601,16 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           {record.owner?.name || '-'}
         </td>
         <td className="text-xs font-medium">
-          {record.tenants?.length > 0
-            ? record.tenants.map(t => t.name).join(' / ')
-            : record.tenant?.name || 'Sin inquilino'}
+          {isPropietario ? (
+            <div className="flex items-center gap-1">
+              <span className="badge badge-secondary badge-xs">PROP</span>
+              <span>{record.owner?.name || 'Propietario'}</span>
+            </div>
+          ) : (
+            record.tenants?.length > 0
+              ? record.tenants.map(t => t.name).join(' / ')
+              : record.tenant?.name || 'Sin inquilino'
+          )}
         </td>
         <td className="text-xs whitespace-nowrap">
           {record.periodLabel}

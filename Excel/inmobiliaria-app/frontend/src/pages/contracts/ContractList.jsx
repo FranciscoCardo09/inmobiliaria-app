@@ -75,10 +75,16 @@ export const ContractList = () => {
           <h1 className="text-3xl font-bold">Contratos</h1>
           <p className="text-base-content/60 mt-1">{currentGroup.name}</p>
         </div>
-        <Button variant="primary" onClick={() => navigate('/contracts/new')}>
-          <PlusIcon className="w-4 h-4" />
-          Nuevo Contrato
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="primary" onClick={() => navigate('/contracts/new')}>
+            <PlusIcon className="w-4 h-4" />
+            Nuevo Contrato
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/contracts/new?contractType=PROPIETARIO')}>
+            <PlusIcon className="w-4 h-4" />
+            Obligación Propietario
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -132,7 +138,8 @@ export const ContractList = () => {
           <table className="table table-zebra">
             <thead>
               <tr>
-                <th>Inquilino</th>
+                <th>Tipo</th>
+                <th>Inquilino / Propietario</th>
                 <th>Propiedad</th>
                 <th>Inicio</th>
                 <th>Fin</th>
@@ -143,15 +150,24 @@ export const ContractList = () => {
               </tr>
             </thead>
             <tbody>
-              {contracts.map((contract) => (
+              {contracts.map((contract) => {
+                const isProp = contract.contractType === 'PROPIETARIO'
+                return (
                 <tr key={contract.id} className={`hover ${contract.isExpiringSoon ? 'bg-warning/10' : ''}`}>
                   <td>
+                    <span className={`badge badge-sm ${isProp ? 'badge-secondary' : 'badge-primary'}`}>
+                      {isProp ? 'PROP' : 'INQ'}
+                    </span>
+                  </td>
+                  <td>
                     <div className="font-semibold">
-                      {contract.tenants?.length > 0
-                        ? contract.tenants.map((t) => t.name).join(' / ')
-                        : contract.tenant?.name || 'Sin inquilino'}
+                      {isProp
+                        ? (contract.ownerName || 'Propietario')
+                        : (contract.tenants?.length > 0
+                            ? contract.tenants.map((t) => t.name).join(' / ')
+                            : contract.tenant?.name || 'Sin inquilino')}
                     </div>
-                    {(contract.tenants?.[0]?.dni || contract.tenant?.dni) && (
+                    {!isProp && (contract.tenants?.[0]?.dni || contract.tenant?.dni) && (
                       <div className="text-xs text-base-content/60">DNI: {contract.tenants?.[0]?.dni || contract.tenant?.dni}</div>
                     )}
                   </td>
@@ -174,7 +190,7 @@ export const ContractList = () => {
                     />
                   </td>
                   <td className="font-semibold">
-                    ${Math.round(contract.rentAmount || 0).toLocaleString('es-AR')}
+                    {isProp ? <span className="text-base-content/40">-</span> : `$${Math.round(contract.rentAmount || 0).toLocaleString('es-AR')}`}
                   </td>
                   <td>{getStatusBadge(contract)}</td>
                   <td>
@@ -196,7 +212,8 @@ export const ContractList = () => {
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -226,13 +243,17 @@ export const ContractList = () => {
       {confirmDelete && (
         <div className="modal modal-open">
           <div className="modal-box">
-            <h3 className="font-bold text-lg text-error">Eliminar Contrato</h3>
+            <h3 className="font-bold text-lg text-error">
+              Eliminar {confirmDelete.contractType === 'PROPIETARIO' ? 'Obligación' : 'Contrato'}
+            </h3>
             <p className="py-4">
-              ¿Estás seguro de eliminar el contrato de{' '}
+              ¿Estás seguro de eliminar {confirmDelete.contractType === 'PROPIETARIO' ? 'la obligación de' : 'el contrato de'}{' '}
               <span className="font-semibold">
-                {confirmDelete.tenants?.length > 0
-                  ? confirmDelete.tenants.map((t) => t.name).join(' / ')
-                  : confirmDelete.tenant?.name || 'Sin inquilino'}
+                {confirmDelete.contractType === 'PROPIETARIO'
+                  ? (confirmDelete.ownerName || 'Propietario')
+                  : (confirmDelete.tenants?.length > 0
+                    ? confirmDelete.tenants.map((t) => t.name).join(' / ')
+                    : confirmDelete.tenant?.name || 'Sin inquilino')}
               </span>{' '}
               en <span className="font-semibold">{confirmDelete.property?.address}</span>?
             </p>

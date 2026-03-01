@@ -29,7 +29,12 @@ const previewCloseMonth = async (groupId, month, year) => {
         include: {
           tenant: { select: { id: true, name: true, dni: true } },
           contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-          property: { select: { id: true, address: true } },
+          property: {
+            select: {
+              id: true, address: true,
+              owner: { select: { id: true, name: true } },
+            },
+          },
         },
       },
       services: {
@@ -47,13 +52,19 @@ const previewCloseMonth = async (groupId, month, year) => {
 
   const debtsPreview = recordsToClose.map((record) => {
     const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(record);
+    const isPropietario = record.contract.contractType === 'PROPIETARIO';
 
     return {
       monthlyRecordId: record.id,
-      tenant: record.contract.tenant || null,
-      tenants: record.contract.contractTenants?.length > 0
-        ? record.contract.contractTenants.map((ct) => ct.tenant)
-        : record.contract.tenant ? [record.contract.tenant] : [],
+      contractType: record.contract.contractType || 'INQUILINO',
+      tenant: isPropietario
+        ? { name: record.contract.property?.owner?.name || 'Propietario' }
+        : (record.contract.tenant || null),
+      tenants: isPropietario
+        ? [{ name: record.contract.property?.owner?.name || 'Propietario' }]
+        : (record.contract.contractTenants?.length > 0
+          ? record.contract.contractTenants.map((ct) => ct.tenant)
+          : record.contract.tenant ? [record.contract.tenant] : []),
       property: record.contract.property,
       periodLabel: `${monthNames[periodMonth]} ${periodYear}`,
       status: record.status,

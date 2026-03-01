@@ -77,7 +77,7 @@ export default function CloseMonthWizard({ groupId, month, year, onClose, onSucc
                   <table className="table table-xs table-zebra">
                     <thead>
                       <tr className="bg-base-200">
-                        <th>Inquilino</th>
+                        <th>Inquilino / Propietario</th>
                         <th>Propiedad</th>
                         <th className="text-right">Total</th>
                         <th className="text-right">Pagado</th>
@@ -90,7 +90,14 @@ export default function CloseMonthWizard({ groupId, month, year, onClose, onSucc
                     <tbody>
                       {previewData.debtsPreview.map((item) => (
                         <tr key={item.monthlyRecordId}>
-                          <td className="text-xs font-medium">{item.tenant?.name}</td>
+                          <td className="text-xs font-medium">
+                            {item.contractType === 'PROPIETARIO' && (
+                              <span className="badge badge-secondary badge-xs mr-1">PROP</span>
+                            )}
+                            {item.tenants?.length > 0
+                              ? item.tenants.map(t => t.name).join(' / ')
+                              : item.tenant?.name || 'Sin inquilino'}
+                          </td>
                           <td className="text-xs">{item.property?.address}</td>
                           <td className="text-xs text-right font-mono">
                             {formatCurrency(item.totalOriginal)}
@@ -166,7 +173,7 @@ export default function CloseMonthWizard({ groupId, month, year, onClose, onSucc
                 {formatCurrency(previewData?.summary?.totalDebtAmount)}.
               </div>
               <div className="text-sm mt-1">
-                Los inquilinos con deudas abiertas NO podran registrar pagos del mes actual.
+                Los inquilinos/propietarios con deudas abiertas NO podrán registrar pagos del mes actual.
               </div>
             </div>
           </div>

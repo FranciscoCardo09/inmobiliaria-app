@@ -332,17 +332,18 @@ model Guarantor {
   @@map("guarantors")
 }
 
-// Contract - Contratos de alquiler
+// Contract - Contratos de alquiler (INQUILINO) u obligaciones de propietario (PROPIETARIO)
 model Contract {
   id                  String   @id @default(uuid())
   groupId             String   @map("group_id")
   tenantId            String?  @map("tenant_id")
   propertyId          String   @map("property_id")
+  contractType        String   @default("INQUILINO") @map("contract_type") // INQUILINO o PROPIETARIO
   startDate           DateTime @map("start_date")          // Fecha inicio
   startMonth          Int      @default(1) @map("start_month") // Mes de inicio del contrato (para calcular ajustes)
   durationMonths      Int      @map("duration_months")     // Duración total en meses
   currentMonth        Int      @default(1) @map("current_month") // Mes actual (1..durationMonths)
-  baseRent            Float    @map("base_rent")           // Monto alquiler mensual base
+  baseRent            Float    @map("base_rent")           // Monto alquiler mensual base (0 para PROPIETARIO)
   active              Boolean  @default(true)               // true = activo, false = finalizado
 
   // Ajustes periódicos

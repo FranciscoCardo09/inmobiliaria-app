@@ -395,8 +395,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       totalAbonado,                // Total pagado (record + deuda)
       totalHistorico,              // Total real (alquiler + servicios + todos los punitorios)
       // Enriched data
+      contractType: contract.contractType || 'INQUILINO',
       contract: {
         id: contract.id,
+        contractType: contract.contractType || 'INQUILINO',
         startDate: contract.startDate,
         durationMonths: contract.durationMonths,
         currentMonth: contract.currentMonth,
@@ -407,10 +409,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         adjustmentIndex: contract.adjustmentIndex,
         pagaIva: contract.pagaIva,
       },
-      tenant: contract.tenant || null,
-      tenants: contract.contractTenants?.length > 0
-        ? contract.contractTenants.map((ct) => ct.tenant)
-        : contract.tenant ? [contract.tenant] : [],
+      tenant: contract.contractType === 'PROPIETARIO'
+        ? null
+        : (contract.tenant || null),
+      tenants: contract.contractType === 'PROPIETARIO'
+        ? []
+        : (contract.contractTenants?.length > 0
+          ? contract.contractTenants.map((ct) => ct.tenant)
+          : contract.tenant ? [contract.tenant] : []),
       property: contract.property,
       owner: contract.property?.owner,
       periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,

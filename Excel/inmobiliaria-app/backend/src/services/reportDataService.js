@@ -8,8 +8,11 @@ const MONTH_NAMES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
-// Helper: get tenant name(s) from contract (supports multi-tenant)
+// Helper: get tenant name(s) from contract (supports multi-tenant and PROPIETARIO)
 const getTenantsName = (contract) => {
+  if (contract.contractType === 'PROPIETARIO') {
+    return contract.property?.owner?.name || 'Propietario';
+  }
   if (contract.contractTenants && contract.contractTenants.length > 0) {
     return contract.contractTenants.map((ct) => ct.tenant.name).join(' / ');
   }
@@ -147,16 +150,19 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
   const { contract } = monthlyRecord;
   const empresa = await getEmpresaData(groupId);
   const owner = contract.property.owner;
+  const isPropietario = contract.contractType === 'PROPIETARIO';
 
   // Build conceptos
   const conceptos = [];
 
-  // Alquiler
-  conceptos.push({
-    concepto: 'Alquiler',
-    base: monthlyRecord.rentAmount,
-    importe: monthlyRecord.rentAmount,
-  });
+  // Alquiler (skip for PROPIETARIO with rent=0)
+  if (monthlyRecord.rentAmount > 0) {
+    conceptos.push({
+      concepto: 'Alquiler',
+      base: monthlyRecord.rentAmount,
+      importe: monthlyRecord.rentAmount,
+    });
+  }
 
   // Services (expensas, IVA, servicios, etc.)
   for (const svc of monthlyRecord.services) {
@@ -201,12 +207,21 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
 
   return {
     empresa,
-    inquilino: {
-      nombre: getTenantsName(contract),
-      dni: (getPrimaryTenant(contract))?.dni || '',
-      email: (getPrimaryTenant(contract))?.email || '',
-      telefono: (getPrimaryTenant(contract))?.phone || '',
-    },
+    contractType: contract.contractType || 'INQUILINO',
+    inquilino: isPropietario
+      ? {
+          nombre: owner?.name || 'Propietario',
+          dni: owner?.dni || '',
+          email: owner?.email || '',
+          telefono: owner?.phone || '',
+          esPropietario: true,
+        }
+      : {
+          nombre: getTenantsName(contract),
+          dni: (getPrimaryTenant(contract))?.dni || '',
+          email: (getPrimaryTenant(contract))?.email || '',
+          telefono: (getPrimaryTenant(contract))?.phone || '',
+        },
     propiedad: {
       direccion: contract.property.address,
       piso: contract.property.floor,
@@ -599,10 +614,12 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
 
   // Build conceptos
   const conceptos = [];
-  conceptos.push({
-    concepto: 'Alquiler',
-    importe: record.rentAmount,
-  });
+  if (record.rentAmount > 0) {
+    conceptos.push({
+      concepto: 'Alquiler',
+      importe: record.rentAmount,
+    });
+  }
 
   for (const svc of record.services) {
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
@@ -743,6 +760,7 @@ const getControlMensualData = async (groupId, month, year) => {
 
   const registros = records.map((r) => ({
     monthlyRecordId: r.id,
+    contractType: r.contract.contractType || 'INQUILINO',
     inquilino: getTenantsName(r.contract),
     propiedad: r.contract.property.address,
     mesContrato: r.monthNumber,

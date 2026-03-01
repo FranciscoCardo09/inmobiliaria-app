@@ -8,6 +8,7 @@ export const useContracts = (groupId, filters = {}) => {
 
   const params = new URLSearchParams()
   if (filters.status) params.append('status', filters.status)
+  if (filters.contractType) params.append('contractType', filters.contractType)
   if (filters.propertyId) params.append('propertyId', filters.propertyId)
   if (filters.tenantId) params.append('tenantId', filters.tenantId)
   if (filters.search) params.append('search', filters.search)
