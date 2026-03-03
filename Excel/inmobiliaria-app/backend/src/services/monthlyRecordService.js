@@ -75,6 +75,7 @@ async function calculateRentForMonth(contract, monthNumber) {
 const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const month = parseInt(periodMonth);
   const year = parseInt(periodYear);
+  console.log(`[monthlyRecords] START month=${month} year=${year} groupId=${groupId}`);
 
   // Get all active contracts with related data
   const contracts = await prisma.contract.findMany({
@@ -102,6 +103,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     activeContracts.push({ contract, monthNumber });
   }
 
+  console.log(`[monthlyRecords] activeContracts=${activeContracts.length} of ${contracts.length} total`);
   if (activeContracts.length === 0) return [];
 
   const contractIds = activeContracts.map(ac => ac.contract.id);
@@ -220,12 +222,26 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     });
   }
 
+  console.log(`[monthlyRecords] existing=${existingRecords.length} toCreate=${recordsToCreate.length}`);
+
   if (recordsToCreate.length > 0) {
-    // skipDuplicates handles race conditions (another request already created the record)
-    await prisma.monthlyRecord.createMany({
-      data: recordsToCreate,
-      skipDuplicates: true,
-    });
+    try {
+      // skipDuplicates handles race conditions (another request already created the record)
+      await prisma.monthlyRecord.createMany({
+        data: recordsToCreate,
+        skipDuplicates: true,
+      });
+    } catch (createErr) {
+      // If createMany fails, fall back to individual creates with P2002 handling
+      console.error(`[monthlyRecords] createMany failed, falling back to individual creates:`, createErr.message);
+      for (const data of recordsToCreate) {
+        try {
+          await prisma.monthlyRecord.create({ data });
+        } catch (err) {
+          if (err.code !== 'P2002') throw err;
+        }
+      }
+    }
 
     // Fetch the newly created records with full includes
     const newContractIds = recordsToCreate.map(r => r.contractId);
@@ -253,6 +269,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         },
       },
     });
+    console.log(`[monthlyRecords] fetched ${newRecords.length} newly created records`);
     for (const r of newRecords) {
       recordsByContractId.set(r.contractId, r);
     }
@@ -267,6 +284,11 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
   for (const { contract, monthNumber } of activeContracts) {
     let record = recordsByContractId.get(contract.id);
+
+    if (!record) {
+      console.error(`[monthlyRecords] MISSING record for contract ${contract.id} month=${monthNumber}`);
+      continue; // Skip this contract instead of crashing
+    }
 
     // Refresh rentAmount and previousBalance for non-complete existing records
     if (record && record.status !== 'COMPLETE') {
