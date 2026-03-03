@@ -184,34 +184,48 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         },
       });
     } else {
-      // Record exists — refresh previousBalance from latest state of previous month
-      // This handles the case where previous month was paid after this record was created
-      const prevMonthNumber = monthNumber - 1;
-      if (prevMonthNumber >= 1 && record.status !== 'COMPLETE') {
-        const prevRecord = await prisma.monthlyRecord.findUnique({
-          where: {
-            contractId_monthNumber: {
-              contractId: contract.id,
-              monthNumber: prevMonthNumber,
-            },
-          },
-          select: { balance: true },
-        });
-        const latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
+      // Record exists — refresh rentAmount and previousBalance from latest state
+      // This handles rent adjustments applied after the record was created
+      if (record.status !== 'COMPLETE') {
+        const currentRent = await calculateRentForMonth(contract, monthNumber);
+        const rentChanged = currentRent !== record.rentAmount;
 
-        if (latestPrevBalance !== record.previousBalance) {
-          // Update the record with the fresh previous balance
-          const recordIva = record.includeIva ? record.rentAmount * 0.21 : 0;
-          const newTotalDue = record.rentAmount + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
+        // Refresh previousBalance from latest state of previous month
+        const prevMonthNumber = monthNumber - 1;
+        let latestPrevBalance = record.previousBalance;
+        if (prevMonthNumber >= 1) {
+          const prevRecord = await prisma.monthlyRecord.findUnique({
+            where: {
+              contractId_monthNumber: {
+                contractId: contract.id,
+                monthNumber: prevMonthNumber,
+              },
+            },
+            select: { balance: true },
+          });
+          latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
+        }
+        const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
+
+        if (rentChanged || prevBalanceChanged) {
+          const effectiveRent = rentChanged ? currentRent : record.rentAmount;
+          const recordIva = record.includeIva ? effectiveRent * 0.21 : 0;
+          const newTotalDue = effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
           const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
+
+          const updateData = {
+            previousBalance: latestPrevBalance,
+            totalDue: Math.max(newTotalDue, 0),
+            balance: newBalance,
+          };
+          if (rentChanged) {
+            updateData.rentAmount = currentRent;
+            updateData.ivaAmount = recordIva;
+          }
 
           record = await prisma.monthlyRecord.update({
             where: { id: record.id },
-            data: {
-              previousBalance: latestPrevBalance,
-              totalDue: Math.max(newTotalDue, 0),
-              balance: newBalance,
-            },
+            data: updateData,
             include: {
               services: {
                 include: {
