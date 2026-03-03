@@ -24,7 +24,7 @@ export const usePaymentTransactions = (groupId, filters = {}) => {
       return response.data.data
     },
     enabled: !!groupId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
   })
 
   const invalidateAll = async () => {
@@ -94,6 +94,6 @@ export const usePunitoryPreview = (groupId, monthlyRecordId, paymentDate) => {
       return response.data.data
     },
     enabled: !!groupId && !!monthlyRecordId && !!paymentDate,
-    staleTime: 30 * 1000,
+    staleTime: 2 * 60 * 1000,
   })
 }

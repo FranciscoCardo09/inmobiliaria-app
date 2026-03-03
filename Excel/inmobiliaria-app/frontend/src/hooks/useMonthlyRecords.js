@@ -22,7 +22,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
       return response.data.data
     },
     enabled: !!groupId && !!periodMonth && !!periodYear,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
   })
 
   const updateMutation = useMutation({
@@ -97,6 +97,6 @@ export const useMonthlyRecordDetail = (groupId, recordId) => {
       return response.data.data
     },
     enabled: !!groupId && !!recordId,
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000,
   })
 }

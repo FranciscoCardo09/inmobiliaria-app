@@ -67,6 +67,10 @@ async function calculateRentForMonth(contract, monthNumber) {
 /**
  * Get or create monthly records for all active contracts in a group for a given period.
  * This is the core auto-generation function.
+ *
+ * OPTIMIZED: Uses batched queries instead of per-contract queries.
+ * Before: 4-8 queries × N contracts = 600-1200 queries for 150 contracts
+ * After: ~5 batch queries + individual creates/updates only for missing/changed records
  */
 const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const month = parseInt(periodMonth);
@@ -90,119 +94,194 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     },
   });
 
-  const records = [];
-
+  // Pre-filter active contracts and compute monthNumbers in memory
+  const activeContracts = [];
   for (const contract of contracts) {
     const monthNumber = getMonthNumber(contract, month, year);
-
-    // Skip if contract is not active for this month
     if (!isContractActiveForMonth(contract, monthNumber)) continue;
+    activeContracts.push({ contract, monthNumber });
+  }
 
-    // Check if record already exists
-    let record = await prisma.monthlyRecord.findUnique({
-      where: {
-        contractId_periodMonth_periodYear: {
-          contractId: contract.id,
-          periodMonth: month,
-          periodYear: year,
+  if (activeContracts.length === 0) return [];
+
+  const contractIds = activeContracts.map(ac => ac.contract.id);
+
+  // --- BATCH 1: Fetch ALL existing monthly records for this period (1 query) ---
+  const existingRecords = await prisma.monthlyRecord.findMany({
+    where: {
+      groupId,
+      periodMonth: month,
+      periodYear: year,
+      contractId: { in: contractIds },
+    },
+    include: {
+      services: {
+        include: {
+          conceptType: { select: { id: true, name: true, label: true, category: true } },
         },
       },
-      include: {
-        services: {
-          include: {
-            conceptType: { select: { id: true, name: true, label: true, category: true } },
-          },
-        },
-        transactions: {
-          include: { concepts: true },
-          orderBy: { createdAt: 'asc' },
-        },
-        debt: {
-          include: {
-            payments: { orderBy: { createdAt: 'asc' } },
-          },
+      transactions: {
+        include: { concepts: true },
+        orderBy: { createdAt: 'asc' },
+      },
+      debt: {
+        include: {
+          payments: { orderBy: { createdAt: 'asc' } },
         },
       },
+    },
+  });
+  const recordsByContractId = new Map();
+  for (const r of existingRecords) {
+    recordsByContractId.set(r.contractId, r);
+  }
+
+  // --- BATCH 2: Fetch ALL rent histories for active contracts (1 query) ---
+  const allRentHistories = await prisma.rentHistory.findMany({
+    where: { contractId: { in: contractIds } },
+    orderBy: [
+      { contractId: 'asc' },
+      { effectiveFromMonth: 'desc' },
+    ],
+  });
+  // Group by contractId, sorted desc by effectiveFromMonth
+  const rentHistoriesByContractId = new Map();
+  for (const rh of allRentHistories) {
+    if (!rentHistoriesByContractId.has(rh.contractId)) {
+      rentHistoriesByContractId.set(rh.contractId, []);
+    }
+    rentHistoriesByContractId.get(rh.contractId).push(rh);
+  }
+
+  // Helper: get rent for a specific month from batched data
+  function getBatchedRentForMonth(contractId, monthNumber, baseRent) {
+    const histories = rentHistoriesByContractId.get(contractId) || [];
+    for (const rh of histories) {
+      if (rh.effectiveFromMonth <= monthNumber) return rh.rentAmount;
+    }
+    return baseRent;
+  }
+
+  // --- BATCH 3: Fetch ALL previous month records for balance calculation (1 query) ---
+  const prevMonthConditions = activeContracts
+    .filter(ac => ac.monthNumber - 1 >= 1)
+    .map(ac => ({ contractId: ac.contract.id, monthNumber: ac.monthNumber - 1 }));
+
+  const prevRecordsByContractId = new Map();
+  if (prevMonthConditions.length > 0) {
+    const prevRecords = await prisma.monthlyRecord.findMany({
+      where: { OR: prevMonthConditions },
+      select: { contractId: true, balance: true },
     });
+    for (const pr of prevRecords) {
+      prevRecordsByContractId.set(pr.contractId, pr);
+    }
+  }
+
+  // --- BATCH 4: Get holidays once for the year (1 call instead of N) ---
+  const holidays = await getHolidaysForYear(year);
+
+  const monthNames = [
+    '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  ];
+
+  const records = [];
+
+  for (const { contract, monthNumber } of activeContracts) {
+    let record = recordsByContractId.get(contract.id) || null;
 
     if (!record) {
-      // Auto-generate the record
-      const rentAmount = await calculateRentForMonth(contract, monthNumber);
+      // Auto-generate the record using batched data
+      const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
 
-      // Get previous month balance
-      const prevMonthNumber = monthNumber - 1;
+      // Get previous month balance from batch
       let previousBalance = 0;
-      if (prevMonthNumber >= 1) {
-        const prevRecord = await prisma.monthlyRecord.findUnique({
-          where: {
-            contractId_monthNumber: {
-              contractId: contract.id,
-              monthNumber: prevMonthNumber,
-            },
-          },
-          select: { balance: true },
-        });
+      if (monthNumber - 1 >= 1) {
+        const prevRecord = prevRecordsByContractId.get(contract.id);
         if (prevRecord && prevRecord.balance > 0) {
-          previousBalance = prevRecord.balance; // positive = a favor
+          previousBalance = prevRecord.balance;
         }
       }
 
-      // Auto-apply IVA if contract has pagaIva enabled
       const includeIva = !!contract.pagaIva;
       const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
-
       const totalDue = rentAmount + ivaAmount - previousBalance;
 
-      record = await prisma.monthlyRecord.create({
-        data: {
-          groupId,
-          contractId: contract.id,
-          monthNumber,
-          periodMonth: month,
-          periodYear: year,
-          rentAmount,
-          includeIva,
-          ivaAmount,
-          servicesTotal: 0,
-          previousBalance,
-          punitoryAmount: 0,
-          punitoryDays: 0,
-          totalDue: Math.max(totalDue, 0),
-          amountPaid: 0,
-          balance: -Math.max(totalDue, 0),
-        },
-        include: {
-          services: {
-            include: {
-              conceptType: { select: { id: true, name: true, label: true, category: true } },
+      try {
+        record = await prisma.monthlyRecord.create({
+          data: {
+            groupId,
+            contractId: contract.id,
+            monthNumber,
+            periodMonth: month,
+            periodYear: year,
+            rentAmount,
+            includeIva,
+            ivaAmount,
+            servicesTotal: 0,
+            previousBalance,
+            punitoryAmount: 0,
+            punitoryDays: 0,
+            totalDue: Math.max(totalDue, 0),
+            amountPaid: 0,
+            balance: -Math.max(totalDue, 0),
+          },
+          include: {
+            services: {
+              include: {
+                conceptType: { select: { id: true, name: true, label: true, category: true } },
+              },
+            },
+            transactions: {
+              include: { concepts: true },
+              orderBy: { createdAt: 'asc' },
             },
           },
-          transactions: {
-            include: { concepts: true },
-            orderBy: { createdAt: 'asc' },
-          },
-        },
-      });
+        });
+      } catch (err) {
+        // P2002 = unique constraint violation (race condition: another request created it first)
+        if (err.code === 'P2002') {
+          record = await prisma.monthlyRecord.findUnique({
+            where: {
+              contractId_periodMonth_periodYear: {
+                contractId: contract.id,
+                periodMonth: month,
+                periodYear: year,
+              },
+            },
+            include: {
+              services: {
+                include: {
+                  conceptType: { select: { id: true, name: true, label: true, category: true } },
+                },
+              },
+              transactions: {
+                include: { concepts: true },
+                orderBy: { createdAt: 'asc' },
+              },
+              debt: {
+                include: {
+                  payments: { orderBy: { createdAt: 'asc' } },
+                },
+              },
+            },
+          });
+        } else {
+          throw err;
+        }
+      }
     } else {
       // Record exists — refresh rentAmount and previousBalance from latest state
       // This handles rent adjustments applied after the record was created
       if (record.status !== 'COMPLETE') {
-        const currentRent = await calculateRentForMonth(contract, monthNumber);
+        const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
         const rentChanged = currentRent !== record.rentAmount;
 
-        // Refresh previousBalance from latest state of previous month
-        const prevMonthNumber = monthNumber - 1;
+        // Refresh previousBalance from batch
         let latestPrevBalance = record.previousBalance;
-        if (prevMonthNumber >= 1) {
-          const prevRecord = await prisma.monthlyRecord.findUnique({
-            where: {
-              contractId_monthNumber: {
-                contractId: contract.id,
-                monthNumber: prevMonthNumber,
-              },
-            },
-            select: { balance: true },
-          });
+        if (monthNumber - 1 >= 1) {
+          const prevRecord = prevRecordsByContractId.get(contract.id);
           latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
         }
         const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
@@ -264,18 +343,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
       if (effectiveNextAdj) {
         const adjPeriod = getCalendarPeriod(contract, effectiveNextAdj);
-        const monthNames = [
-          '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-          'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-        ];
         nextAdjustmentLabel = `${monthNames[adjPeriod.periodMonth]} ${adjPeriod.periodYear}`;
       }
     }
-
-    const monthNames = [
-      '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-    ];
 
     // Calcular datos de deuda en vivo si existe
     let debtInfo = null;
@@ -313,7 +383,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         const prevBalance = record.previousBalance || 0;
         const frozenPunitory = record.punitoryAmount || 0;
         const totalCredits = amountPaid + prevBalance;
-        
+
         // Credits cover: services → rent → frozen punitorios
         let remaining = totalCredits;
         const servicesCovered = Math.min(remaining, servicesTotal);
@@ -322,7 +392,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         remaining -= rentCovered;
         const punitoryCovered = Math.min(remaining, frozenPunitory);
         remaining -= punitoryCovered;
-        
+
         const unpaidRent = Math.max(record.rentAmount - rentCovered, 0);
         const unpaidFrozenPunitory = Math.max(frozenPunitory - punitoryCovered, 0);
 
@@ -335,8 +405,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
         // Calculate ADDITIONAL live punitorios on remaining unpaid rent since last payment
         const calculationDate = new Date();
-        const holidays = await getHolidaysForYear(year);
-        
+        // NOTE: `holidays` was pre-fetched once before the loop (batch optimization)
+
         if (unpaidRent > 0) {
           // There's still unpaid rent → calculate live punitorios on it
           const liveResult = calculatePunitoryV2(
