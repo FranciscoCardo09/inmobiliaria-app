@@ -185,7 +185,7 @@ const getExpiringContracts = async (req, res, next) => {
       orderBy: { startDate: 'asc' },
     });
 
-    // Filter: remaining months <= 2
+    // Filter: remaining months <= 2, ordered by nearest expiration first
     const expiring = contracts
       .map((c) => {
         const tenants = c.contractTenants.length > 0
@@ -193,7 +193,8 @@ const getExpiringContracts = async (req, res, next) => {
           : c.tenant ? [c.tenant] : [];
         return { ...enrichContract(c), tenants };
       })
-      .filter((c) => c.isExpiringSoon);
+      .filter((c) => c.isExpiringSoon)
+      .sort((a, b) => a.remainingMonths - b.remainingMonths || new Date(a.endDate) - new Date(b.endDate));
 
     return ApiResponse.success(res, expiring);
   } catch (error) {

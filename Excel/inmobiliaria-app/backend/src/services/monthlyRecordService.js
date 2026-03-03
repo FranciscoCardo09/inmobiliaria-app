@@ -225,6 +225,55 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   console.log(`[monthlyRecords] existing=${existingRecords.length} toCreate=${recordsToCreate.length}`);
 
   if (recordsToCreate.length > 0) {
+    // --- FIX: Correct stale monthNumbers that would block createMany ---
+    // When a contract's startDate is edited, existing records keep old monthNumbers.
+    // This causes unique constraint conflicts when creating records for new periods.
+    const monthNumbersNeeded = new Map(); // monthNumber -> contractId
+    for (const r of recordsToCreate) {
+      monthNumbersNeeded.set(`${r.contractId}_${r.monthNumber}`, r.contractId);
+    }
+
+    // Find existing records that occupy those monthNumbers but for a DIFFERENT period
+    const contractIdsToCreate = [...new Set(recordsToCreate.map(r => r.contractId))];
+    const monthNumberValues = recordsToCreate.map(r => r.monthNumber);
+    const conflictingRecords = await prisma.monthlyRecord.findMany({
+      where: {
+        contractId: { in: contractIdsToCreate },
+        monthNumber: { in: monthNumberValues },
+        NOT: { periodMonth: month, periodYear: year },
+      },
+      select: { id: true, contractId: true, monthNumber: true, periodMonth: true, periodYear: true, amountPaid: true },
+    });
+
+    if (conflictingRecords.length > 0) {
+      console.log(`[monthlyRecords] Fixing ${conflictingRecords.length} stale monthNumber conflicts`);
+      const contractMap = new Map(activeContracts.map(ac => [ac.contract.id, ac.contract]));
+
+      for (const cr of conflictingRecords) {
+        const contract = contractMap.get(cr.contractId);
+        if (!contract) continue;
+
+        // Recalculate the correct monthNumber for the old record's actual period
+        const correctMN = getMonthNumber(contract, cr.periodMonth, cr.periodYear);
+        const endMonth = contract.startMonth + contract.durationMonths - 1;
+
+        if (correctMN < contract.startMonth || correctMN > endMonth) {
+          // Record is for a period outside the contract's active range
+          if (cr.amountPaid > 0) {
+            console.warn(`[monthlyRecords] Skipping out-of-range record with payments: ${cr.id}`);
+            continue;
+          }
+          await prisma.monthlyRecord.delete({ where: { id: cr.id } });
+        } else {
+          // Update to the correct monthNumber
+          await prisma.monthlyRecord.update({
+            where: { id: cr.id },
+            data: { monthNumber: correctMN },
+          });
+        }
+      }
+    }
+
     try {
       // skipDuplicates handles race conditions (another request already created the record)
       await prisma.monthlyRecord.createMany({
