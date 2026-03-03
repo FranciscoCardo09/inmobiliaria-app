@@ -162,24 +162,101 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     return baseRent;
   }
 
-  // --- BATCH 3: Fetch ALL previous month records for balance calculation (1 query) ---
-  const prevMonthConditions = activeContracts
-    .filter(ac => ac.monthNumber - 1 >= 1)
-    .map(ac => ({ contractId: ac.contract.id, monthNumber: ac.monthNumber - 1 }));
-
+  // --- BATCH 3: Fetch previous month records for balance calculation (1 simple query) ---
+  // All contracts in the same calendar period have prevMonthNumber = monthNumber - 1,
+  // which corresponds to the previous calendar month. Use simple period-based query.
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
   const prevRecordsByContractId = new Map();
-  if (prevMonthConditions.length > 0) {
-    const prevRecords = await prisma.monthlyRecord.findMany({
-      where: { OR: prevMonthConditions },
-      select: { contractId: true, balance: true },
-    });
-    for (const pr of prevRecords) {
-      prevRecordsByContractId.set(pr.contractId, pr);
-    }
+  const prevRecords = await prisma.monthlyRecord.findMany({
+    where: {
+      groupId,
+      periodMonth: prevMonth,
+      periodYear: prevYear,
+      contractId: { in: contractIds },
+    },
+    select: { contractId: true, balance: true },
+  });
+  for (const pr of prevRecords) {
+    prevRecordsByContractId.set(pr.contractId, pr);
   }
 
   // --- BATCH 4: Get holidays once for the year (1 call instead of N) ---
   const holidays = await getHolidaysForYear(year);
+
+  // --- BATCH 5: Bulk-create missing records (1 createMany instead of N creates) ---
+  const recordsToCreate = [];
+  for (const { contract, monthNumber } of activeContracts) {
+    if (recordsByContractId.has(contract.id)) continue;
+
+    const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
+    let previousBalance = 0;
+    if (monthNumber - 1 >= 1) {
+      const prevRecord = prevRecordsByContractId.get(contract.id);
+      if (prevRecord && prevRecord.balance > 0) {
+        previousBalance = prevRecord.balance;
+      }
+    }
+    const includeIva = !!contract.pagaIva;
+    const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
+    const totalDue = rentAmount + ivaAmount - previousBalance;
+
+    recordsToCreate.push({
+      groupId,
+      contractId: contract.id,
+      monthNumber,
+      periodMonth: month,
+      periodYear: year,
+      rentAmount,
+      includeIva,
+      ivaAmount,
+      servicesTotal: 0,
+      previousBalance,
+      punitoryAmount: 0,
+      punitoryDays: 0,
+      totalDue: Math.max(totalDue, 0),
+      amountPaid: 0,
+      balance: -Math.max(totalDue, 0),
+    });
+  }
+
+  if (recordsToCreate.length > 0) {
+    // skipDuplicates handles race conditions (another request already created the record)
+    await prisma.monthlyRecord.createMany({
+      data: recordsToCreate,
+      skipDuplicates: true,
+    });
+
+    // Fetch the newly created records with full includes
+    const newContractIds = recordsToCreate.map(r => r.contractId);
+    const newRecords = await prisma.monthlyRecord.findMany({
+      where: {
+        groupId,
+        periodMonth: month,
+        periodYear: year,
+        contractId: { in: newContractIds },
+      },
+      include: {
+        services: {
+          include: {
+            conceptType: { select: { id: true, name: true, label: true, category: true } },
+          },
+        },
+        transactions: {
+          include: { concepts: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        debt: {
+          include: {
+            payments: { orderBy: { createdAt: 'asc' } },
+          },
+        },
+      },
+    });
+    for (const r of newRecords) {
+      recordsByContractId.set(r.contractId, r);
+    }
+  }
 
   const monthNames = [
     '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -189,44 +266,40 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const records = [];
 
   for (const { contract, monthNumber } of activeContracts) {
-    let record = recordsByContractId.get(contract.id) || null;
+    let record = recordsByContractId.get(contract.id);
 
-    if (!record) {
-      // Auto-generate the record using batched data
-      const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
+    // Refresh rentAmount and previousBalance for non-complete existing records
+    if (record && record.status !== 'COMPLETE') {
+      const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
+      const rentChanged = currentRent !== record.rentAmount;
 
-      // Get previous month balance from batch
-      let previousBalance = 0;
+      // Refresh previousBalance from batch
+      let latestPrevBalance = record.previousBalance;
       if (monthNumber - 1 >= 1) {
         const prevRecord = prevRecordsByContractId.get(contract.id);
-        if (prevRecord && prevRecord.balance > 0) {
-          previousBalance = prevRecord.balance;
-        }
+        latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
       }
+      const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
 
-      const includeIva = !!contract.pagaIva;
-      const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
-      const totalDue = rentAmount + ivaAmount - previousBalance;
+      if (rentChanged || prevBalanceChanged) {
+        const effectiveRent = rentChanged ? currentRent : record.rentAmount;
+        const recordIva = record.includeIva ? effectiveRent * 0.21 : 0;
+        const newTotalDue = effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
+        const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
 
-      try {
-        record = await prisma.monthlyRecord.create({
-          data: {
-            groupId,
-            contractId: contract.id,
-            monthNumber,
-            periodMonth: month,
-            periodYear: year,
-            rentAmount,
-            includeIva,
-            ivaAmount,
-            servicesTotal: 0,
-            previousBalance,
-            punitoryAmount: 0,
-            punitoryDays: 0,
-            totalDue: Math.max(totalDue, 0),
-            amountPaid: 0,
-            balance: -Math.max(totalDue, 0),
-          },
+        const updateData = {
+          previousBalance: latestPrevBalance,
+          totalDue: Math.max(newTotalDue, 0),
+          balance: newBalance,
+        };
+        if (rentChanged) {
+          updateData.rentAmount = currentRent;
+          updateData.ivaAmount = recordIva;
+        }
+
+        record = await prisma.monthlyRecord.update({
+          where: { id: record.id },
+          data: updateData,
           include: {
             services: {
               include: {
@@ -237,92 +310,13 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
               include: { concepts: true },
               orderBy: { createdAt: 'asc' },
             },
+            debt: {
+              include: {
+                payments: { orderBy: { createdAt: 'asc' } },
+              },
+            },
           },
         });
-      } catch (err) {
-        // P2002 = unique constraint violation (race condition: another request created it first)
-        if (err.code === 'P2002') {
-          record = await prisma.monthlyRecord.findUnique({
-            where: {
-              contractId_periodMonth_periodYear: {
-                contractId: contract.id,
-                periodMonth: month,
-                periodYear: year,
-              },
-            },
-            include: {
-              services: {
-                include: {
-                  conceptType: { select: { id: true, name: true, label: true, category: true } },
-                },
-              },
-              transactions: {
-                include: { concepts: true },
-                orderBy: { createdAt: 'asc' },
-              },
-              debt: {
-                include: {
-                  payments: { orderBy: { createdAt: 'asc' } },
-                },
-              },
-            },
-          });
-        } else {
-          throw err;
-        }
-      }
-    } else {
-      // Record exists — refresh rentAmount and previousBalance from latest state
-      // This handles rent adjustments applied after the record was created
-      if (record.status !== 'COMPLETE') {
-        const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
-        const rentChanged = currentRent !== record.rentAmount;
-
-        // Refresh previousBalance from batch
-        let latestPrevBalance = record.previousBalance;
-        if (monthNumber - 1 >= 1) {
-          const prevRecord = prevRecordsByContractId.get(contract.id);
-          latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
-        }
-        const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
-
-        if (rentChanged || prevBalanceChanged) {
-          const effectiveRent = rentChanged ? currentRent : record.rentAmount;
-          const recordIva = record.includeIva ? effectiveRent * 0.21 : 0;
-          const newTotalDue = effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
-          const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
-
-          const updateData = {
-            previousBalance: latestPrevBalance,
-            totalDue: Math.max(newTotalDue, 0),
-            balance: newBalance,
-          };
-          if (rentChanged) {
-            updateData.rentAmount = currentRent;
-            updateData.ivaAmount = recordIva;
-          }
-
-          record = await prisma.monthlyRecord.update({
-            where: { id: record.id },
-            data: updateData,
-            include: {
-              services: {
-                include: {
-                  conceptType: { select: { id: true, name: true, label: true, category: true } },
-                },
-              },
-              transactions: {
-                include: { concepts: true },
-                orderBy: { createdAt: 'asc' },
-              },
-              debt: {
-                include: {
-                  payments: { orderBy: { createdAt: 'asc' } },
-                },
-              },
-            },
-          });
-        }
       }
     }
 
