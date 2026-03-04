@@ -983,7 +983,7 @@ function ImpuestosTab({ groupId }) {
       if (item.banco && item.banco.nombre) {
         const key = item.banco.cbu || item.banco.nombre + item.banco.titular
         if (!seen.has(key)) {
-          seen.set(key, { propietario: item.propietario, banco: item.banco })
+          seen.set(key, { propietario: item.propietario, banco: item.banco, beneficiario: item.beneficiario || null })
         }
       }
     }
@@ -1095,7 +1095,16 @@ function ImpuestosTab({ groupId }) {
             <Card title="Datos Bancarios por Propietario">
               {ownerBanks.map((ob, idx) => (
                 <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
-                  <h3 className="font-semibold text-sm mb-2">{ob.propietario}</h3>
+                  <h3 className="font-semibold text-sm mb-2">
+                    {ob.beneficiario
+                      ? `Transferir a: ${ob.beneficiario}`
+                      : ob.propietario}
+                    {ob.beneficiario && (
+                      <span className="text-xs font-normal text-base-content/60 ml-2">
+                        (propietario: {ob.propietario})
+                      </span>
+                    )}
+                  </h3>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                     {ob.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {ob.banco.nombre}</div>}
                     {ob.banco.titular && <div><span className="text-base-content/60">Titular:</span> {ob.banco.titular}</div>}

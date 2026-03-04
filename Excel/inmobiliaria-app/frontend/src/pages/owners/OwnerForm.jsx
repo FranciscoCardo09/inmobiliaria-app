@@ -8,6 +8,7 @@ import Input from '../../components/ui/Input'
 import PhoneInput from '../../components/ui/PhoneInput'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 
 // Helper: split semicolon-delimited values into array, filter empty
 const splitMulti = (val) => (val || '').split(';').map(v => v.trim()).filter(Boolean)
@@ -21,13 +22,19 @@ export const OwnerForm = () => {
 
   const { groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
-  const { createOwner, updateOwner, isCreating, isUpdating, useOwner } = useOwners(currentGroup?.id)
+  const { createOwner, updateOwner, isCreating, isUpdating, useOwner, owners: allOwners } = useOwners(currentGroup?.id)
   const { data: owner, isLoading } = isEditing ? useOwner(id) : { data: null, isLoading: false }
+
+  // Build options for transfer beneficiary (exclude self)
+  const beneficiaryOptions = (allOwners || [])
+    .filter((o) => o.id !== id)
+    .map((o) => ({ value: o.id, label: o.name }))
 
   const [formData, setFormData] = useState({
     name: '', dni: '',
     phones: [''], emails: [''],
-    bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '', bankAlias: ''
+    bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '', bankAlias: '',
+    transferBeneficiaryId: ''
   })
   const [errors, setErrors] = useState({})
 
@@ -45,6 +52,7 @@ export const OwnerForm = () => {
         bankAccountNumber: owner.bankAccountNumber || '',
         bankCbu: owner.bankCbu || '',
         bankAlias: owner.bankAlias || '',
+        transferBeneficiaryId: owner.transferBeneficiaryId || '',
       })
     }
   }, [owner])
@@ -127,6 +135,7 @@ export const OwnerForm = () => {
       bankAccountNumber: formData.bankAccountNumber,
       bankCbu: formData.bankCbu,
       bankAlias: formData.bankAlias,
+      transferBeneficiaryId: formData.transferBeneficiaryId || null,
     }
 
     if (isEditing) {
@@ -233,6 +242,23 @@ export const OwnerForm = () => {
               <Input label="CBU" name="bankCbu" value={formData.bankCbu} onChange={handleChange} placeholder="0000000000000000000000" inputMode="numeric" maxLength={22} error={errors.bankCbu} />
               <Input label="Alias" name="bankAlias" value={formData.bankAlias} onChange={handleChange} placeholder="mi.alias.bancario" />
             </div>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Beneficiario de Transferencia</h2>
+            <p className="text-sm text-base-content/50">
+              Si este dueño transfiere a otro (ej: Providus), selecciónelo. Sus datos bancarios aparecerán en reportes.
+            </p>
+            <SearchableSelect
+              label="Beneficiario"
+              name="transferBeneficiaryId"
+              options={beneficiaryOptions}
+              value={formData.transferBeneficiaryId}
+              onChange={(val) => {
+                setFormData({ ...formData, transferBeneficiaryId: val || '' })
+              }}
+              placeholder="Seleccionar propietario beneficiario..."
+            />
           </div>
 
           {isEditing && owner?.properties?.length > 0 && (

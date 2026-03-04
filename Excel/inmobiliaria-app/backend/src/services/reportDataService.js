@@ -86,6 +86,23 @@ const getEmpresaData = async (groupId) => {
   };
 };
 
+// Helper: resolve bank data from owner or its transfer beneficiary
+const resolveOwnerBank = (owner) => {
+  const bankSource = owner?.transferBeneficiary?.bankName
+    ? owner.transferBeneficiary
+    : owner;
+  if (!bankSource?.bankName) return null;
+  return {
+    nombre: bankSource.bankName,
+    titular: bankSource.bankHolder || '',
+    cuit: bankSource.bankCuit || '',
+    tipoCuenta: bankSource.bankAccountType || '',
+    numeroCuenta: bankSource.bankAccountNumber || '',
+    cbu: bankSource.bankCbu || '',
+    alias: bankSource.bankAlias || '',
+  };
+};
+
 // ============================================
 // LIQUIDACION (Prioridad #1)
 // ============================================
@@ -107,7 +124,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
-            include: { owner: true },
+            include: { owner: { include: { transferBeneficiary: true } } },
           },
         },
       },
@@ -133,7 +150,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
             include: {
               tenant: true,
               contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-              property: { include: { owner: true } },
+              property: { include: { owner: { include: { transferBeneficiary: true } } } },
             },
           },
           services: { include: { conceptType: true } },
@@ -230,15 +247,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     propietario: {
       nombre: owner?.name || 'Sin propietario',
       dni: owner?.dni || '',
-      banco: owner?.bankName ? {
-        nombre: owner.bankName,
-        titular: owner.bankHolder || '',
-        cuit: owner.bankCuit || '',
-        tipoCuenta: owner.bankAccountType || '',
-        numeroCuenta: owner.bankAccountNumber || '',
-        cbu: owner.bankCbu || '',
-        alias: owner.bankAlias || '',
-      } : null,
+      banco: resolveOwnerBank(owner),
     },
     periodo: {
       mes: month,
@@ -817,7 +826,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
-            include: { owner: true },
+            include: { owner: { include: { transferBeneficiary: true } } },
           },
         },
       },
@@ -861,16 +870,8 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
         monto: s.amount,
       })),
       totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),
-      // Owner bank data (fallback to group bank)
-      banco: owner?.bankName ? {
-        nombre: owner.bankName,
-        titular: owner.bankHolder || '',
-        cuit: owner.bankCuit || '',
-        tipoCuenta: owner.bankAccountType || '',
-        numeroCuenta: owner.bankAccountNumber || '',
-        cbu: owner.bankCbu || '',
-        alias: owner.bankAlias || '',
-      } : empresa.banco,
+      banco: resolveOwnerBank(owner) || empresa.banco,
+      beneficiario: owner?.transferBeneficiary?.name || null,
     });
   }
 

@@ -972,7 +972,7 @@ const generateImpuestosPDF = (data) => {
       if (item.banco && item.banco.nombre) {
         const key = item.banco.cbu || item.banco.nombre + item.banco.titular;
         if (!ownerBanks.has(key)) {
-          ownerBanks.set(key, { propietario: item.propietario, banco: item.banco });
+          ownerBanks.set(key, { propietario: item.propietario, banco: item.banco, beneficiario: item.beneficiario || null });
         }
       }
     }
@@ -982,7 +982,8 @@ const generateImpuestosPDF = (data) => {
       y += 6;
       y = drawSection(doc, y, 'Datos Bancarios para Transferencia');
 
-      for (const { propietario, banco } of ownerBanks.values()) {
+      for (const entry of ownerBanks.values()) {
+        const { propietario, banco, beneficiario } = entry;
         checkNewPage(100);
 
         const bankFields = [
@@ -995,11 +996,14 @@ const generateImpuestosPDF = (data) => {
           banco.alias ? ['Alias', banco.alias] : null,
         ].filter(Boolean);
 
-        // Owner name badge
-        const pillW = doc.font(F.b).fontSize(7).widthOfString(propietario) + 16;
+        // Owner name badge (show beneficiary label if applicable)
+        const label = beneficiario
+          ? `Transferir a: ${beneficiario} (${propietario})`
+          : propietario;
+        const pillW = doc.font(F.b).fontSize(7).widthOfString(label) + 16;
         fillR(doc, PAGE.margin, y, pillW, 17, C.cloud, 8);
         doc.font(F.b).fontSize(7).fillColor(C.dark)
-          .text(propietario, PAGE.margin + 8, y + 4);
+          .text(label, PAGE.margin + 8, y + 4);
         y += 24;
 
         // Bank info card

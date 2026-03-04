@@ -26,6 +26,7 @@ const getOwners = async (req, res, next) => {
       where,
       include: {
         _count: { select: { properties: true } },
+        transferBeneficiary: { select: { id: true, name: true } },
       },
       orderBy: { name: 'asc' },
       take: limit ? parseInt(limit) : 500,
@@ -50,6 +51,8 @@ const getOwnerById = async (req, res, next) => {
           select: { id: true, address: true, isActive: true },
           orderBy: { address: 'asc' },
         },
+        transferBeneficiary: { select: { id: true, name: true } },
+        beneficiaryOf: { select: { id: true, name: true } },
       },
     });
 
@@ -67,7 +70,7 @@ const getOwnerById = async (req, res, next) => {
 const createOwner = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId } = req.body;
 
     if (!name || !dni || !phone) {
       return ApiResponse.badRequest(res, 'Nombre, DNI y teléfono son requeridos');
@@ -81,8 +84,16 @@ const createOwner = async (req, res, next) => {
       return ApiResponse.conflict(res, 'Ya existe un dueño con ese DNI en este grupo');
     }
 
+    // Validate transfer beneficiary exists in the same group
+    if (transferBeneficiaryId) {
+      const beneficiary = await prisma.owner.findUnique({ where: { id: transferBeneficiaryId } });
+      if (!beneficiary || beneficiary.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'El beneficiario de transferencia no existe en este grupo');
+      }
+    }
+
     const owner = await prisma.owner.create({
-      data: { groupId, name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias },
+      data: { groupId, name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId: transferBeneficiaryId || null },
       include: { _count: { select: { properties: true } } },
     });
 
@@ -96,7 +107,7 @@ const createOwner = async (req, res, next) => {
 const updateOwner = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId } = req.body;
 
     const owner = await prisma.owner.findUnique({ where: { id } });
     if (!owner || owner.groupId !== groupId) {
@@ -109,6 +120,17 @@ const updateOwner = async (req, res, next) => {
       });
       if (existing) {
         return ApiResponse.conflict(res, 'Ya existe un dueño con ese DNI en este grupo');
+      }
+    }
+
+    // Validate transfer beneficiary
+    if (transferBeneficiaryId) {
+      if (transferBeneficiaryId === id) {
+        return ApiResponse.badRequest(res, 'Un dueño no puede ser su propio beneficiario de transferencia');
+      }
+      const beneficiary = await prisma.owner.findUnique({ where: { id: transferBeneficiaryId } });
+      if (!beneficiary || beneficiary.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'El beneficiario de transferencia no existe en este grupo');
       }
     }
 
@@ -126,6 +148,7 @@ const updateOwner = async (req, res, next) => {
         ...(bankAccountNumber !== undefined && { bankAccountNumber }),
         ...(bankCbu !== undefined && { bankCbu }),
         ...(bankAlias !== undefined && { bankAlias }),
+        ...(transferBeneficiaryId !== undefined && { transferBeneficiaryId: transferBeneficiaryId || null }),
       },
       include: { _count: { select: { properties: true } } },
     });

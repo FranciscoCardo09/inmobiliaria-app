@@ -217,6 +217,11 @@ model Owner {
   bankCbu         String?  @map("bank_cbu")
   bankAlias       String?  @map("bank_alias")
 
+  // Beneficiario de transferencia - otro dueño que recibe las transferencias
+  transferBeneficiaryId String? @map("transfer_beneficiary_id")
+  transferBeneficiary   Owner?  @relation("OwnerBeneficiary", fields: [transferBeneficiaryId], references: [id], onDelete: SetNull)
+  beneficiaryOf         Owner[] @relation("OwnerBeneficiary")
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
