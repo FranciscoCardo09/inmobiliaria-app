@@ -23,12 +23,14 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
   }
 }
 
-export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent, ownerId } = {}) => {
+export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent, ownerId, contractIds } = {}) => {
   const query = useQuery({
-    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent, ownerId],
+    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent, ownerId, contractIds],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
-      if (propertyIds && propertyIds.length > 0) {
+      if (contractIds && contractIds.length > 0) {
+        params.append('contractIds', contractIds.join(','))
+      } else if (propertyIds && propertyIds.length > 0) {
         params.append('propertyIds', propertyIds.join(','))
       }
       if (honorariosPercent) {
@@ -144,12 +146,14 @@ export const useControlMensual = (groupId, { month, year } = {}) => {
   }
 }
 
-export const useImpuestos = (groupId, { month, year, propertyIds, ownerId } = {}) => {
+export const useImpuestos = (groupId, { month, year, propertyIds, ownerId, contractIds } = {}) => {
   const query = useQuery({
-    queryKey: ['report', 'impuestos', groupId, month, year, propertyIds, ownerId],
+    queryKey: ['report', 'impuestos', groupId, month, year, propertyIds, ownerId, contractIds],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
-      if (propertyIds && propertyIds.length > 0) {
+      if (contractIds && contractIds.length > 0) {
+        params.append('contractIds', contractIds.join(','))
+      } else if (propertyIds && propertyIds.length > 0) {
         params.append('propertyIds', propertyIds.join(','))
       }
       if (ownerId) {

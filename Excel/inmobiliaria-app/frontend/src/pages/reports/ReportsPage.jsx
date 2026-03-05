@@ -2,7 +2,6 @@
 import { useState, useMemo } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
-import { useProperties } from '../../hooks/useProperties'
 import { useOwners } from '../../hooks/useOwners'
 import {
   useLiquidacion,
@@ -133,39 +132,43 @@ function LiquidacionTab({ groupId }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
-  const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
+  const [selectedContractIds, setSelectedContractIds] = useState([])
   const [selectedOwnerId, setSelectedOwnerId] = useState('')
   const [honorariosPercent, setHonorariosPercent] = useState('')
 
-  const { properties } = useProperties(groupId, { isActive: true })
+  const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
   const { owners } = useOwners(groupId)
   const { data: allData, isLoading } = useLiquidacionAll(groupId, {
     month: String(month),
     year: String(year),
-    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined,
+    contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
     honorariosPercent: honorariosPercent || undefined,
     ownerId: selectedOwnerId || undefined,
   })
   const { downloadPDF, downloadExcel, downloadDOCX, downloadHTML } = useReportDownload(groupId)
 
-  // Property options for multi-select
-  const propertyOptions = useMemo(() => {
-    return properties.map((p) => ({
-      value: p.id,
-      label: `${p.address}${p.floor ? ` - Piso ${p.floor}` : ''}${p.apartment ? ` - ${p.apartment}` : ''}`,
-    }))
-  }, [properties])
+  // Contract options for multi-select (shows type + tenant/owner + address)
+  const contractOptions = useMemo(() => {
+    return (contracts || []).map((c) => {
+      const type = c.contractType === 'PROPIETARIO' ? 'PROP' : 'INQ'
+      const tenant = c.tenants?.[0]?.name || c.tenant?.name || 'Sin inquilino'
+      const name = c.contractType === 'PROPIETARIO' ? (c.property?.owner?.name || 'Propietario') : tenant
+      return {
+        value: c.id,
+        label: `[${type}] ${c.property?.address || 'Sin dirección'} - ${name}`,
+      }
+    })
+  }, [contracts])
 
-  // Filter data by selected properties
   const filteredData = useMemo(() => {
     return allData || []
   }, [allData])
 
   const buildParams = () => {
-    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+    const contractIdsParam = selectedContractIds.length > 0 ? `&contractIds=${selectedContractIds.join(',')}` : ''
     const honorariosParam = honorariosPercent ? `&honorariosPercent=${honorariosPercent}` : ''
     const ownerIdParam = selectedOwnerId ? `&ownerId=${selectedOwnerId}` : ''
-    return `month=${month}&year=${year}${propertyIdsParam}${honorariosParam}${ownerIdParam}`
+    return `month=${month}&year=${year}${contractIdsParam}${honorariosParam}${ownerIdParam}`
   }
 
   const handleDownloadPDF = () => {
@@ -244,15 +247,15 @@ function LiquidacionTab({ groupId }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           <div>
-            <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
+            <label className="label"><span className="label-text text-xs">Filtrar por contratos (opcional)</span></label>
             <MultiSearchableSelect
-              options={propertyOptions}
-              value={selectedPropertyIds}
-              onChange={setSelectedPropertyIds}
-              placeholder="Todas las propiedades..."
+              options={contractOptions}
+              value={selectedContractIds}
+              onChange={setSelectedContractIds}
+              placeholder="Todos los contratos..."
             />
-            {selectedPropertyIds.length > 0 && (
-              <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
+            {selectedContractIds.length > 0 && (
+              <p className="text-xs text-base-content/60 mt-2">{selectedContractIds.length} contrato(s) seleccionado(s)</p>
             )}
           </div>
           <div>
@@ -988,26 +991,31 @@ function ImpuestosTab({ groupId }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
-  const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
+  const [selectedContractIds, setSelectedContractIds] = useState([])
   const [selectedOwnerId, setSelectedOwnerId] = useState('')
 
-  const { properties } = useProperties(groupId, { isActive: true })
+  const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
   const { owners } = useOwners(groupId)
-  const { data, isLoading } = useImpuestos(groupId, { 
-    month: String(month), 
+  const { data, isLoading } = useImpuestos(groupId, {
+    month: String(month),
     year: String(year),
-    propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined,
+    contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
     ownerId: selectedOwnerId || undefined
   })
   const { downloadPDF } = useReportDownload(groupId)
 
-  // Property options for multi-select
-  const propertyOptions = useMemo(() => {
-    return properties.map((p) => ({
-      value: p.id,
-      label: `${p.address}${p.floor ? ` - Piso ${p.floor}` : ''}${p.apartment ? ` - ${p.apartment}` : ''}`,
-    }))
-  }, [properties])
+  // Contract options for multi-select
+  const contractOptions = useMemo(() => {
+    return (contracts || []).map((c) => {
+      const type = c.contractType === 'PROPIETARIO' ? 'PROP' : 'INQ'
+      const tenant = c.tenants?.[0]?.name || c.tenant?.name || 'Sin inquilino'
+      const name = c.contractType === 'PROPIETARIO' ? (c.property?.owner?.name || 'Propietario') : tenant
+      return {
+        value: c.id,
+        label: `[${type}] ${c.property?.address || 'Sin dirección'} - ${name}`,
+      }
+    })
+  }, [contracts])
 
   // Collect unique owner bank details
   const ownerBanks = useMemo(() => {
@@ -1025,9 +1033,9 @@ function ImpuestosTab({ groupId }) {
   }, [data])
 
   const handleDownloadPDF = () => {
-    const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
+    const contractIdsParam = selectedContractIds.length > 0 ? `&contractIds=${selectedContractIds.join(',')}` : ''
     const ownerIdParam = selectedOwnerId ? `&ownerId=${selectedOwnerId}` : ''
-    downloadPDF(`impuestos/pdf?month=${month}&year=${year}${propertyIdsParam}${ownerIdParam}`, `impuestos-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+    downloadPDF(`impuestos/pdf?month=${month}&year=${year}${contractIdsParam}${ownerIdParam}`, `impuestos-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
   }
 
   return (
@@ -1058,15 +1066,15 @@ function ImpuestosTab({ groupId }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           <div>
-            <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
+            <label className="label"><span className="label-text text-xs">Filtrar por contratos (opcional)</span></label>
             <MultiSearchableSelect
-              options={propertyOptions}
-              value={selectedPropertyIds}
-              onChange={setSelectedPropertyIds}
-              placeholder="Todas las propiedades..."
+              options={contractOptions}
+              value={selectedContractIds}
+              onChange={setSelectedContractIds}
+              placeholder="Todos los contratos..."
             />
-            {selectedPropertyIds.length > 0 && (
-              <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
+            {selectedContractIds.length > 0 && (
+              <p className="text-xs text-base-content/60 mt-2">{selectedContractIds.length} contrato(s) seleccionado(s)</p>
             )}
           </div>
           <div>

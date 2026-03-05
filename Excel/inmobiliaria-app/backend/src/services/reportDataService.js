@@ -253,7 +253,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
  * Obtiene liquidaciones de TODOS los contratos activos para un mes/año
  * Single batch query instead of N+1 queries per contract.
  */
-const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}, ownerId = null) => {
+const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}, ownerId = null, contractIds = null) => {
   // Auto-create monthly records for the period before querying
   try {
     const { getOrCreateMonthlyRecords } = require('./monthlyRecordService');
@@ -272,7 +272,10 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     contract: { active: true },
   };
 
-  if (propertyIds && propertyIds.length > 0) {
+  // contractIds takes priority over propertyIds
+  if (contractIds && contractIds.length > 0) {
+    where.contractId = { in: contractIds };
+  } else if (propertyIds && propertyIds.length > 0) {
     where.contract.propertyId = { in: propertyIds };
   }
 
@@ -774,7 +777,7 @@ const getControlMensualData = async (groupId, month, year) => {
 // IMPUESTOS
 // ============================================
 
-const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerId = null) => {
+const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerId = null, contractIds = null) => {
   const empresa = await getEmpresaData(groupId);
 
   // Build where clause
@@ -800,8 +803,10 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
     },
   });
 
-  // Apply property filter
-  if (propertyIds && propertyIds.length > 0) {
+  // Apply contract filter (takes priority over property filter)
+  if (contractIds && contractIds.length > 0) {
+    records = records.filter(r => contractIds.includes(r.contractId));
+  } else if (propertyIds && propertyIds.length > 0) {
     records = records.filter(r => propertyIds.includes(r.contract.propertyId));
   }
 

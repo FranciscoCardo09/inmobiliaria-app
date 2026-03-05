@@ -75,7 +75,7 @@ const getLiquidacion = async (req, res, next) => {
 const getLiquidacionAll = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId } = req.query;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -87,7 +87,8 @@ const getLiquidacionAll = async (req, res, next) => {
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const data = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const data = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
     return ApiResponse.success(res, data);
   } catch (error) {
     next(error);
@@ -182,14 +183,15 @@ const getControlMensual = async (req, res, next) => {
 const getImpuestos = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, propertyIds, ownerId } = req.query;
+    const { month, year, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null, contractIdArray);
     return ApiResponse.success(res, data);
   } catch (error) {
     next(error);
@@ -247,7 +249,7 @@ const downloadLiquidacionPDF = async (req, res, next) => {
 const downloadLiquidacionAllPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId } = req.query;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -259,7 +261,8 @@ const downloadLiquidacionAllPDF = async (req, res, next) => {
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
 
     if (dataArray.length === 0) {
       return ApiResponse.notFound(res, 'No se encontraron liquidaciones para ese período');
@@ -418,14 +421,15 @@ const downloadMultiPagoEfectivoPDF = async (req, res, next) => {
 const downloadImpuestosPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, propertyIds, ownerId } = req.query;
+    const { month, year, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const data = await getImpuestosData(groupId, parseInt(month), parseInt(year), propertyIdArray, ownerId || null, contractIdArray);
     const pdfBuffer = await generateImpuestosPDF(data);
 
     const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
@@ -464,7 +468,7 @@ const downloadVencimientosPDF = async (req, res, next) => {
 const downloadLiquidacionExcel = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId } = req.query;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -476,7 +480,8 @@ const downloadLiquidacionExcel = async (req, res, next) => {
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
 
     if (dataArray.length === 0) {
       return ApiResponse.notFound(res, 'No se encontraron liquidaciones para ese período');
@@ -681,7 +686,7 @@ const downloadLiquidacionDOCX = async (req, res, next) => {
 const downloadLiquidacionAllDOCX = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId } = req.query;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -693,7 +698,8 @@ const downloadLiquidacionAllDOCX = async (req, res, next) => {
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
     if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
 
     const docxBuffer = await generateLiquidacionAllDOCX(dataArray);
@@ -745,7 +751,7 @@ const downloadLiquidacionHTMLEndpoint = async (req, res, next) => {
 const downloadLiquidacionAllHTMLEndpoint = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId } = req.query;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds } = req.query;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -757,7 +763,8 @@ const downloadLiquidacionAllHTMLEndpoint = async (req, res, next) => {
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
-    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null);
+    const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
     if (dataArray.length === 0) return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
 
     const html = generateLiquidacionAllHTML(dataArray);
