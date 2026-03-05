@@ -964,12 +964,25 @@ function ControlMensualTab({ groupId }) {
                   </thead>
                   <tbody>
                     {data.registros.map((r, i) => (
-                      <tr key={i} className={r.tieneAjuste ? 'bg-warning/15 font-semibold' : ''}>
+                      <tr key={i}>
                         <td className="font-medium">{r.inquilino}</td>
                         <td>{r.propiedad}</td>
                         <td className="text-right">
-                          {formatCurrency(r.alquiler)}
-                          {r.tieneAjuste && <span className="badge badge-warning badge-xs ml-1">{r.ajustePorcentaje ? `+${r.ajustePorcentaje}%` : 'Ajuste'}</span>}
+                          {r.tieneAjuste ? (
+                            <div className="flex flex-col items-end gap-0.5">
+                              <div>
+                                {r.alquilerAnterior != null && (
+                                  <span className="text-xs text-base-content/40 line-through mr-1">{formatCurrency(r.alquilerAnterior)}</span>
+                                )}
+                                <span className="font-bold text-success">{formatCurrency(r.alquiler)}</span>
+                              </div>
+                              <span className="badge badge-success badge-xs">
+                                {r.ajustePorcentaje ? `▲ ${r.ajustePorcentaje}%` : '▲ Ajuste'}
+                              </span>
+                            </div>
+                          ) : (
+                            formatCurrency(r.alquiler)
+                          )}
                         </td>
                         <td className="text-right">{formatCurrency(r.servicios)}</td>
                         <td className="text-right font-medium">{formatCurrency(r.total)}</td>
