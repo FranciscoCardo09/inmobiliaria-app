@@ -181,7 +181,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const anioVencido = month === 1 ? year - 1 : year;
   const labelVencido = `${MONTH_NAMES[mesVencido]} ${anioVencido}`;
 
-  // Pre-calculate honorarios so we can include it in the Alquiler label
+  // Pre-calculate honorarios
   let honorarios = null;
   if (options.honorariosPercent > 0) {
     const pct = options.honorariosPercent;
@@ -197,10 +197,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    const alqLabel = honorarios
-      ? `Alquiler (mes ${monthlyRecord.monthNumber}) — Honorarios ${honorarios.porcentaje}%: $${honorarios.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
-      : `Alquiler (mes ${monthlyRecord.monthNumber})`;
-    conceptos.push({ concepto: alqLabel, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
+    conceptos.push({ concepto: `Alquiler (mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
   }
 
   for (const svc of monthlyRecord.services) {
@@ -229,6 +226,10 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       base: null,
       importe: monthlyRecord.previousBalance > 0 ? -monthlyRecord.previousBalance : Math.abs(monthlyRecord.previousBalance),
     });
+  }
+
+  if (honorarios) {
+    conceptos.push({ concepto: `Honorarios (${honorarios.porcentaje}%)`, base: honorarios.baseHonorarios, importe: honorarios.monto });
   }
 
   return {
