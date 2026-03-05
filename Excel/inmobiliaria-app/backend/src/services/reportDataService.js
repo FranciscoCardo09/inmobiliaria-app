@@ -164,24 +164,25 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
 
   if (!monthlyRecord) return null;
 
-  const { contract } = monthlyRecord;
   const empresa = await getEmpresaData(groupId);
+  return buildLiquidacionFromRecord(monthlyRecord, empresa, month, year, options);
+};
+
+/**
+ * Transforms a monthlyRecord (with includes) into a liquidacion data object.
+ * Shared logic used by both getLiquidacionData and getLiquidacionesAllContracts.
+ */
+const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options = {}) => {
+  const { contract } = monthlyRecord;
   const owner = contract.property.owner;
   const isPropietario = contract.contractType === 'PROPIETARIO';
 
-  // Build conceptos
   const conceptos = [];
 
-  // Alquiler (skip for PROPIETARIO with rent=0)
   if (monthlyRecord.rentAmount > 0) {
-    conceptos.push({
-      concepto: 'Alquiler',
-      base: monthlyRecord.rentAmount,
-      importe: monthlyRecord.rentAmount,
-    });
+    conceptos.push({ concepto: 'Alquiler', base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
   }
 
-  // Services (expensas, IVA, servicios, etc.)
   for (const svc of monthlyRecord.services) {
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     conceptos.push({
@@ -191,25 +192,14 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     });
   }
 
-  // IVA
   if (monthlyRecord.includeIva && monthlyRecord.ivaAmount > 0) {
-    conceptos.push({
-      concepto: 'IVA (21%)',
-      base: monthlyRecord.rentAmount,
-      importe: monthlyRecord.ivaAmount,
-    });
+    conceptos.push({ concepto: 'IVA (21%)', base: monthlyRecord.rentAmount, importe: monthlyRecord.ivaAmount });
   }
 
-  // Punitorios
   if (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) {
-    conceptos.push({
-      concepto: `Punitorios (${monthlyRecord.punitoryDays} días)`,
-      base: null,
-      importe: monthlyRecord.punitoryAmount,
-    });
+    conceptos.push({ concepto: `Punitorios (${monthlyRecord.punitoryDays} días)`, base: null, importe: monthlyRecord.punitoryAmount });
   }
 
-  // Saldo anterior
   if (monthlyRecord.previousBalance !== 0) {
     conceptos.push({
       concepto: monthlyRecord.previousBalance > 0 ? 'Saldo a favor' : 'Deuda anterior',
@@ -218,7 +208,6 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     });
   }
 
-  // "Mes vencido" logic
   const mesVencido = month === 1 ? 12 : month - 1;
   const anioVencido = month === 1 ? year - 1 : year;
 
@@ -226,38 +215,11 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     empresa,
     contractType: contract.contractType || 'INQUILINO',
     inquilino: isPropietario
-      ? {
-          nombre: owner?.name || 'Propietario',
-          dni: owner?.dni || '',
-          email: owner?.email || '',
-          telefono: owner?.phone || '',
-          esPropietario: true,
-        }
-      : {
-          nombre: getTenantsName(contract),
-          dni: (getPrimaryTenant(contract))?.dni || '',
-          email: (getPrimaryTenant(contract))?.email || '',
-          telefono: (getPrimaryTenant(contract))?.phone || '',
-        },
-    propiedad: {
-      direccion: contract.property.address,
-      piso: contract.property.floor,
-      depto: contract.property.apartment,
-    },
-    propietario: {
-      nombre: owner?.name || 'Sin propietario',
-      dni: owner?.dni || '',
-      banco: resolveOwnerBank(owner),
-    },
-    periodo: {
-      mes: month,
-      anio: year,
-      label: `${MONTH_NAMES[month]} ${year}`,
-      mesContrato: monthlyRecord.monthNumber,
-      mesVencido,
-      anioVencido,
-      labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}`,
-    },
+      ? { nombre: owner?.name || 'Propietario', dni: owner?.dni || '', email: owner?.email || '', telefono: owner?.phone || '', esPropietario: true }
+      : { nombre: getTenantsName(contract), dni: (getPrimaryTenant(contract))?.dni || '', email: (getPrimaryTenant(contract))?.email || '', telefono: (getPrimaryTenant(contract))?.phone || '' },
+    propiedad: { direccion: contract.property.address, piso: contract.property.floor, depto: contract.property.apartment },
+    propietario: { nombre: owner?.name || 'Sin propietario', dni: owner?.dni || '', banco: resolveOwnerBank(owner) },
+    periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}`, mesContrato: monthlyRecord.monthNumber, mesVencido, anioVencido, labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}` },
     conceptos,
     total: monthlyRecord.totalDue,
     totalEnLetras: numeroATexto(monthlyRecord.totalDue),
@@ -266,7 +228,6 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
     estado: monthlyRecord.status,
     isPaid: monthlyRecord.isPaid,
     fechaPago: monthlyRecord.fullPaymentDate,
-    // Honorarios: base = (alquiler + punitorios) - bonificaciones
     honorarios: options.honorariosPercent > 0 ? (() => {
       const pct = options.honorariosPercent;
       const bonificaciones = monthlyRecord.services
@@ -275,37 +236,22 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
       const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
       const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
       const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
-      return {
-        porcentaje: pct,
-        monto,
-        baseHonorarios,
-        netoTransferir: Math.round((monthlyRecord.totalDue - monto) * 100) / 100,
-      };
+      return { porcentaje: pct, monto, baseHonorarios, netoTransferir: Math.round((monthlyRecord.totalDue - monto) * 100) / 100 };
     })() : null,
     transacciones: monthlyRecord.transactions.map((t) => ({
-      fecha: t.paymentDate,
-      monto: t.amount,
-      metodo: t.paymentMethod,
-      inquilino: getTenantsName(contract),
-      propiedad: contract.property.address,
-      conceptos: t.concepts.map((c) => ({
-        tipo: c.type,
-        descripcion: c.description,
-        monto: c.amount,
-      })),
+      fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
+      inquilino: getTenantsName(contract), propiedad: contract.property.address,
+      conceptos: t.concepts.map((c) => ({ tipo: c.type, descripcion: c.description, monto: c.amount })),
     })),
     currency: empresa.currency,
-    contractId,
+    contractId: contract.id,
     monthlyRecordId: monthlyRecord.id,
   };
 };
 
 /**
  * Obtiene liquidaciones de TODOS los contratos activos para un mes/año
- * @param {string} groupId
- * @param {number} month
- * @param {number} year
- * @param {string[]} propertyIds - Opcional: IDs de propiedades para filtrar
+ * Single batch query instead of N+1 queries per contract.
  */
 const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}, ownerId = null) => {
   // Auto-create monthly records for the period before querying
@@ -316,30 +262,41 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     // silently fail
   }
 
-  const where = { groupId, active: true };
+  const empresa = await getEmpresaData(groupId);
 
-  // Si se proporcionan propertyIds, filtrar por ellos
+  // Build where clause for a single batch query
+  const where = {
+    groupId,
+    periodMonth: month,
+    periodYear: year,
+    contract: { active: true },
+  };
+
   if (propertyIds && propertyIds.length > 0) {
-    where.propertyId = { in: propertyIds };
+    where.contract.propertyId = { in: propertyIds };
   }
 
-  // Filtrar por dueño
   if (ownerId) {
-    where.property = { ownerId };
+    where.contract.property = { ownerId };
   }
 
-  const contracts = await prisma.contract.findMany({
+  const records = await prisma.monthlyRecord.findMany({
     where,
-    select: { id: true },
+    include: {
+      contract: {
+        include: {
+          tenant: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+          property: { include: { owner: { include: { transferBeneficiary: true } } } },
+        },
+      },
+      services: { include: { conceptType: true } },
+      transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
+    },
+    orderBy: { contract: { property: { address: 'asc' } } },
   });
 
-  const liquidaciones = [];
-  for (const contract of contracts) {
-    const data = await getLiquidacionData(groupId, contract.id, month, year, options);
-    if (data) liquidaciones.push(data);
-  }
-
-  return liquidaciones;
+  return records.map((record) => buildLiquidacionFromRecord(record, empresa, month, year, options));
 };
 
 // ============================================
