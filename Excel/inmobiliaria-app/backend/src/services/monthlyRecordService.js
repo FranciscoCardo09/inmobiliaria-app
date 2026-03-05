@@ -570,17 +570,17 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       owner: contract.property?.owner,
       periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
       nextAdjustmentLabel,
-      // Ajuste de alquiler en este mes
+      // Ajuste de alquiler en este mes: comparar alquiler actual vs mes anterior
       ...(() => {
-        const histories = rentHistoriesByContractId.get(contract.id) || [];
-        // histories sorted desc by effectiveFromMonth
-        const ajuste = histories.find(h => h.effectiveFromMonth === monthNumber && h.reason !== 'INICIAL');
-        if (!ajuste) return { tieneAjuste: false };
-        const prevEntry = histories.find(h => h.effectiveFromMonth < monthNumber);
+        if (monthNumber <= 1) return { tieneAjuste: false };
+        const currentRent = record.rentAmount;
+        const prevRent = getBatchedRentForMonth(contract.id, monthNumber - 1, contract.baseRent);
+        if (currentRent === prevRent || prevRent === 0) return { tieneAjuste: false };
+        const pct = ((currentRent - prevRent) / prevRent * 100).toFixed(1);
         return {
           tieneAjuste: true,
-          ajustePorcentaje: ajuste.adjustmentPercent || null,
-          alquilerAnterior: prevEntry ? prevEntry.rentAmount : null,
+          ajustePorcentaje: parseFloat(pct),
+          alquilerAnterior: prevRent,
         };
       })(),
       // Calculated fields for the view
