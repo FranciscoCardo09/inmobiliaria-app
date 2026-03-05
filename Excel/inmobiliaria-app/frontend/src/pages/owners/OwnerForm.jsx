@@ -254,8 +254,9 @@ export const OwnerForm = () => {
               name="transferBeneficiaryId"
               options={beneficiaryOptions}
               value={formData.transferBeneficiaryId}
-              onChange={(val) => {
-                setFormData({ ...formData, transferBeneficiaryId: val || '' })
+              onChange={(e) => {
+                const val = e?.target?.value ?? e ?? ''
+                setFormData({ ...formData, transferBeneficiaryId: val })
               }}
               placeholder="Seleccionar propietario beneficiario..."
             />
