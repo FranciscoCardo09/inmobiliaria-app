@@ -964,7 +964,7 @@ function ControlMensualTab({ groupId }) {
                   </thead>
                   <tbody>
                     {data.registros.map((r, i) => (
-                      <tr key={i}>
+                      <tr key={i} className={r.alquiler > 0 ? 'bg-success/10 font-semibold' : ''}>
                         <td className="font-medium">{r.inquilino}</td>
                         <td>{r.propiedad}</td>
                         <td className="text-right">{formatCurrency(r.alquiler)}</td>
