@@ -134,14 +134,17 @@ function LiquidacionTab({ groupId }) {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
   const [selectedPropertyIds, setSelectedPropertyIds] = useState([])
+  const [selectedOwnerId, setSelectedOwnerId] = useState('')
   const [honorariosPercent, setHonorariosPercent] = useState('')
 
   const { properties } = useProperties(groupId, { isActive: true })
+  const { owners } = useOwners(groupId)
   const { data: allData, isLoading } = useLiquidacionAll(groupId, {
     month: String(month),
     year: String(year),
     propertyIds: selectedPropertyIds.length > 0 ? selectedPropertyIds : undefined,
     honorariosPercent: honorariosPercent || undefined,
+    ownerId: selectedOwnerId || undefined,
   })
   const { downloadPDF, downloadExcel, downloadDOCX, downloadHTML } = useReportDownload(groupId)
 
@@ -161,7 +164,8 @@ function LiquidacionTab({ groupId }) {
   const buildParams = () => {
     const propertyIdsParam = selectedPropertyIds.length > 0 ? `&propertyIds=${selectedPropertyIds.join(',')}` : ''
     const honorariosParam = honorariosPercent ? `&honorariosPercent=${honorariosPercent}` : ''
-    return `month=${month}&year=${year}${propertyIdsParam}${honorariosParam}`
+    const ownerIdParam = selectedOwnerId ? `&ownerId=${selectedOwnerId}` : ''
+    return `month=${month}&year=${year}${propertyIdsParam}${honorariosParam}${ownerIdParam}`
   }
 
   const handleDownloadPDF = () => {
@@ -238,17 +242,32 @@ function LiquidacionTab({ groupId }) {
             />
           </div>
         </div>
-        <div className="mt-4">
-          <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
-          <MultiSearchableSelect
-            options={propertyOptions}
-            value={selectedPropertyIds}
-            onChange={setSelectedPropertyIds}
-            placeholder="Todas las propiedades..."
-          />
-          {selectedPropertyIds.length > 0 && (
-            <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
-          )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          <div>
+            <label className="label"><span className="label-text text-xs">Filtrar por propiedades (opcional)</span></label>
+            <MultiSearchableSelect
+              options={propertyOptions}
+              value={selectedPropertyIds}
+              onChange={setSelectedPropertyIds}
+              placeholder="Todas las propiedades..."
+            />
+            {selectedPropertyIds.length > 0 && (
+              <p className="text-xs text-base-content/60 mt-2">{selectedPropertyIds.length} propiedad(es) seleccionada(s)</p>
+            )}
+          </div>
+          <div>
+            <SearchableSelect
+              label="Filtrar por dueño (opcional)"
+              name="ownerId"
+              options={(owners || []).map((owner) => ({
+                value: owner.id,
+                label: owner.name,
+              }))}
+              value={selectedOwnerId}
+              onChange={(e) => setSelectedOwnerId(e?.target?.value ?? e ?? '')}
+              placeholder="Todos los dueños..."
+            />
+          </div>
         </div>
 
         {/* Download buttons row */}
@@ -335,6 +354,21 @@ function LiquidacionTab({ groupId }) {
               <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
             </div>
           </Card>
+
+          {/* Datos bancarios empresa */}
+          {filteredData[0]?.empresa?.banco?.cbu && (
+            <Card title="Datos para Transferencia">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                {filteredData[0].empresa.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {filteredData[0].empresa.banco.nombre}</div>}
+                {filteredData[0].empresa.banco.titular && <div><span className="text-base-content/60">Titular:</span> {filteredData[0].empresa.banco.titular}</div>}
+                {filteredData[0].empresa.banco.cuit && <div><span className="text-base-content/60">CUIT:</span> {filteredData[0].empresa.banco.cuit}</div>}
+                {filteredData[0].empresa.banco.tipoCuenta && <div><span className="text-base-content/60">Tipo:</span> {filteredData[0].empresa.banco.tipoCuenta}</div>}
+                {filteredData[0].empresa.banco.numeroCuenta && <div><span className="text-base-content/60">N° Cuenta:</span> {filteredData[0].empresa.banco.numeroCuenta}</div>}
+                {filteredData[0].empresa.banco.cbu && <div><span className="text-base-content/60">CBU:</span> {filteredData[0].empresa.banco.cbu}</div>}
+                {filteredData[0].empresa.banco.alias && <div><span className="text-base-content/60">Alias:</span> {filteredData[0].empresa.banco.alias}</div>}
+              </div>
+            </Card>
+          )}
 
           {/* Payments */}
           {allTransactions.length > 0 && (
@@ -1044,7 +1078,7 @@ function ImpuestosTab({ groupId }) {
                 label: owner.name,
               }))}
               value={selectedOwnerId}
-              onChange={(e) => setSelectedOwnerId(e.target.value)}
+              onChange={(e) => setSelectedOwnerId(e?.target?.value ?? e ?? '')}
               placeholder="Todos los dueños..."
             />
           </div>

@@ -307,7 +307,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
  * @param {number} year
  * @param {string[]} propertyIds - Opcional: IDs de propiedades para filtrar
  */
-const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}) => {
+const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}, ownerId = null) => {
   // Auto-create monthly records for the period before querying
   try {
     const { getOrCreateMonthlyRecords } = require('./monthlyRecordService');
@@ -321,6 +321,11 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
   // Si se proporcionan propertyIds, filtrar por ellos
   if (propertyIds && propertyIds.length > 0) {
     where.propertyId = { in: propertyIds };
+  }
+
+  // Filtrar por dueño
+  if (ownerId) {
+    where.property = { ownerId };
   }
 
   const contracts = await prisma.contract.findMany({

@@ -23,9 +23,9 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
   }
 }
 
-export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent } = {}) => {
+export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent, ownerId } = {}) => {
   const query = useQuery({
-    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent],
+    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent, ownerId],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
       if (propertyIds && propertyIds.length > 0) {
@@ -33,6 +33,9 @@ export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorario
       }
       if (honorariosPercent) {
         params.append('honorariosPercent', honorariosPercent)
+      }
+      if (ownerId) {
+        params.append('ownerId', ownerId)
       }
       const response = await api.get(`/groups/${groupId}/reports/liquidacion-all?${params}`)
       return response.data.data
