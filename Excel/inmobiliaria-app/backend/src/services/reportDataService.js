@@ -181,10 +181,26 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const anioVencido = month === 1 ? year - 1 : year;
   const labelVencido = `${MONTH_NAMES[mesVencido]} ${anioVencido}`;
 
+  // Pre-calculate honorarios so we can include it in the Alquiler label
+  let honorarios = null;
+  if (options.honorariosPercent > 0) {
+    const pct = options.honorariosPercent;
+    const bonificaciones = monthlyRecord.services
+      .filter(s => s.conceptType?.category === 'BONIFICACION' || s.conceptType?.category === 'DESCUENTO')
+      .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+    const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
+    const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
+    const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
+    honorarios = { porcentaje: pct, monto, baseHonorarios };
+  }
+
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    conceptos.push({ concepto: `Alquiler (mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
+    const alqLabel = honorarios
+      ? `Alquiler (mes ${monthlyRecord.monthNumber}) — Honorarios ${honorarios.porcentaje}%: $${honorarios.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+      : `Alquiler (mes ${monthlyRecord.monthNumber})`;
+    conceptos.push({ concepto: alqLabel, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
   }
 
   for (const svc of monthlyRecord.services) {
@@ -232,16 +248,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     estado: monthlyRecord.status,
     isPaid: monthlyRecord.isPaid,
     fechaPago: monthlyRecord.fullPaymentDate,
-    honorarios: options.honorariosPercent > 0 ? (() => {
-      const pct = options.honorariosPercent;
-      const bonificaciones = monthlyRecord.services
-        .filter(s => s.conceptType?.category === 'BONIFICACION' || s.conceptType?.category === 'DESCUENTO')
-        .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-      const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
-      const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
-      const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
-      return { porcentaje: pct, monto, baseHonorarios };
-    })() : null,
+    honorarios,
     transacciones: monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
       inquilino: getTenantsName(contract), propiedad: contract.property.address,
