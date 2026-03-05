@@ -570,6 +570,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       owner: contract.property?.owner,
       periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
       nextAdjustmentLabel,
+      // Ajuste de alquiler en este mes
+      ...(() => {
+        const histories = rentHistoriesByContractId.get(contract.id) || [];
+        // histories sorted desc by effectiveFromMonth
+        const ajuste = histories.find(h => h.effectiveFromMonth === monthNumber && h.reason !== 'INICIAL');
+        if (!ajuste) return { tieneAjuste: false };
+        const prevEntry = histories.find(h => h.effectiveFromMonth < monthNumber);
+        return {
+          tieneAjuste: true,
+          ajustePorcentaje: ajuste.adjustmentPercent || null,
+          alquilerAnterior: prevEntry ? prevEntry.rentAmount : null,
+        };
+      })(),
       // Calculated fields for the view
       // IMPORTANTE: Cuando hay deuda, calcular balance sobre totales históricos
       aFavorNextMonth: (() => {

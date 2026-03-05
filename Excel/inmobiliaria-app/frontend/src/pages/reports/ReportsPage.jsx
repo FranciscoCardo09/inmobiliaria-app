@@ -968,21 +968,7 @@ function ControlMensualTab({ groupId }) {
                         <td className="font-medium">{r.inquilino}</td>
                         <td>{r.propiedad}</td>
                         <td className="text-right">
-                          {r.tieneAjuste ? (
-                            <div className="flex flex-col items-end gap-0.5">
-                              <div>
-                                {r.alquilerAnterior != null && (
-                                  <span className="text-xs text-base-content/40 line-through mr-1">{formatCurrency(r.alquilerAnterior)}</span>
-                                )}
-                                <span className="font-bold text-success">{formatCurrency(r.alquiler)}</span>
-                              </div>
-                              <span className="badge badge-success badge-xs">
-                                {r.ajustePorcentaje ? `▲ ${r.ajustePorcentaje}%` : '▲ Ajuste'}
-                              </span>
-                            </div>
-                          ) : (
-                            formatCurrency(r.alquiler)
-                          )}
+                          {formatCurrency(r.alquiler)}
                         </td>
                         <td className="text-right">{formatCurrency(r.servicios)}</td>
                         <td className="text-right font-medium">{formatCurrency(r.total)}</td>

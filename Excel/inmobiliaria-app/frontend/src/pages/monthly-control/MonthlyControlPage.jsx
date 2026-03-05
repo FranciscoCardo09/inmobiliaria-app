@@ -619,7 +619,22 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           {record.nextAdjustmentLabel || '-'}
         </td>
         <td className="text-xs text-right font-mono">
-          {formatCurrency(record.rentAmount)}
+          {record.tieneAjuste ? (
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1">
+                {record.alquilerAnterior != null && (
+                  <span className="text-[10px] text-base-content/40 line-through">{formatCurrency(record.alquilerAnterior)}</span>
+                )}
+                <span className="text-[10px]">→</span>
+                <span className="font-bold text-primary">{formatCurrency(record.rentAmount)}</span>
+              </div>
+              <span className="badge badge-primary badge-xs mt-0.5">
+                {record.ajustePorcentaje ? `+${record.ajustePorcentaje}%` : 'Ajuste'}
+              </span>
+            </div>
+          ) : (
+            formatCurrency(record.rentAmount)
+          )}
         </td>
         <td
           className="text-xs text-right font-mono cursor-pointer hover:bg-base-200"
