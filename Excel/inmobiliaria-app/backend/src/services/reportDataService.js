@@ -734,6 +734,7 @@ const getControlMensualData = async (groupId, month, year) => {
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: true,
+          rentHistory: { orderBy: { effectiveFromMonth: 'asc' } },
         },
       },
       services: {
@@ -745,23 +746,30 @@ const getControlMensualData = async (groupId, month, year) => {
     ],
   });
 
-  const registros = records.map((r) => ({
-    monthlyRecordId: r.id,
-    contractType: r.contract.contractType || 'INQUILINO',
-    inquilino: getTenantsName(r.contract),
-    propiedad: r.contract.property.address,
-    mesContrato: r.monthNumber,
-    alquiler: r.rentAmount,
-    servicios: r.servicesTotal,
-    iva: r.includeIva ? r.ivaAmount : 0,
-    punitorios: r.punitoryAmount,
-    total: r.totalDue,
-    pagado: r.amountPaid,
-    saldo: r.balance,
-    estado: r.status,
-    isPaid: r.isPaid,
-    fechaPago: r.fullPaymentDate,
-  }));
+  const registros = records.map((r) => {
+    const ajuste = r.contract.rentHistory?.find(
+      (h) => h.effectiveFromMonth === r.monthNumber && h.reason !== 'INICIAL'
+    );
+    return {
+      monthlyRecordId: r.id,
+      contractType: r.contract.contractType || 'INQUILINO',
+      inquilino: getTenantsName(r.contract),
+      propiedad: r.contract.property.address,
+      mesContrato: r.monthNumber,
+      tieneAjuste: !!ajuste,
+      ajustePorcentaje: ajuste?.adjustmentPercent || null,
+      alquiler: r.rentAmount,
+      servicios: r.servicesTotal,
+      iva: r.includeIva ? r.ivaAmount : 0,
+      punitorios: r.punitoryAmount,
+      total: r.totalDue,
+      pagado: r.amountPaid,
+      saldo: r.balance,
+      estado: r.status,
+      isPaid: r.isPaid,
+      fechaPago: r.fullPaymentDate,
+    };
+  });
 
   const totales = {
     alquiler: registros.reduce((s, r) => s + r.alquiler, 0),

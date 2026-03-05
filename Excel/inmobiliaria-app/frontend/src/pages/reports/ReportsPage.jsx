@@ -964,10 +964,13 @@ function ControlMensualTab({ groupId }) {
                   </thead>
                   <tbody>
                     {data.registros.map((r, i) => (
-                      <tr key={i} className={r.alquiler > 0 ? 'bg-success/10 font-semibold' : ''}>
+                      <tr key={i} className={r.tieneAjuste ? 'bg-warning/15 font-semibold' : ''}>
                         <td className="font-medium">{r.inquilino}</td>
                         <td>{r.propiedad}</td>
-                        <td className="text-right">{formatCurrency(r.alquiler)}</td>
+                        <td className="text-right">
+                          {formatCurrency(r.alquiler)}
+                          {r.tieneAjuste && <span className="badge badge-warning badge-xs ml-1">{r.ajustePorcentaje ? `+${r.ajustePorcentaje}%` : 'Ajuste'}</span>}
+                        </td>
                         <td className="text-right">{formatCurrency(r.servicios)}</td>
                         <td className="text-right font-medium">{formatCurrency(r.total)}</td>
                         <td className="text-right">{formatCurrency(r.pagado)}</td>
