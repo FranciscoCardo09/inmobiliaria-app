@@ -408,18 +408,13 @@ const generateLiquidacionPDF = (data) => {
     // Honorarios section
     if (data.honorarios) {
       y += 4;
-      const honH = 50;
+      const honH = 30;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
-      doc.font(F.r).fontSize(9).fillColor(C.dark)
-        .text(`Honorarios (${data.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 10);
-      doc.font(F.b).fillColor(C.black)
-        .text(fmt(data.honorarios.monto, data.currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
-
       doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text('Neto a transferir:', PAGE.margin + 12, y + 30);
-      doc.text(fmt(data.honorarios.netoTransferir, data.currency), PAGE.margin + 12, y + 30, { width: W - 24, align: 'right' });
+        .text(`Honorarios (${data.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
+      doc.text(fmt(data.honorarios.monto, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
 
       y += honH + 10;
     }
@@ -461,6 +456,34 @@ const generateLiquidacionPDF = (data) => {
       }
 
       y += 50 + 10;
+    }
+
+    // Empresa bank details for transfer
+    const banco = data.empresa?.banco;
+    if (banco && (banco.cbu || banco.alias)) {
+      y += 8;
+      y = drawSection(doc, y, 'Datos para Transferencia de Honorarios');
+      const bankFields = [
+        banco.nombre ? ['Banco', banco.nombre] : null,
+        banco.titular ? ['Titular', banco.titular] : null,
+        banco.cuit ? ['CUIT', banco.cuit] : null,
+        banco.tipoCuenta ? ['Tipo Cuenta', banco.tipoCuenta] : null,
+        banco.numeroCuenta ? ['N° Cuenta', banco.numeroCuenta] : null,
+        banco.cbu ? ['CBU', banco.cbu] : null,
+        banco.alias ? ['Alias', banco.alias] : null,
+      ].filter(Boolean);
+      if (bankFields.length > 0) {
+        const bankH = bankFields.length * 16 + 12;
+        fillR(doc, PAGE.margin, y, W, bankH, C.snow);
+        strokeR(doc, PAGE.margin, y, W, bankH, C.line, 0.5);
+        let by = y + 8;
+        for (const [k, v] of bankFields) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`${k}:`, PAGE.margin + 12, by);
+          doc.font(F.b).fontSize(8).fillColor(C.black).text(v, PAGE.margin + 100, by);
+          by += 16;
+        }
+        y += bankH + 10;
+      }
     }
 
     drawFooter(doc, data.empresa, 1);
@@ -1163,22 +1186,16 @@ const generateLiquidacionAllPDF = (dataArray) => {
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
     if (firstHon) {
-      checkNewPage(70);
+      checkNewPage(50);
       const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
-      const totalNeto = dataArray.reduce((s, d) => s + (d.honorarios?.netoTransferir || d.total), 0);
 
-      const honH = 50;
+      const honH = 30;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
-      doc.font(F.r).fontSize(9).fillColor(C.dark)
-        .text(`Honorarios (${firstHon.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 10);
-      doc.font(F.b).fillColor(C.black)
-        .text(fmt(totalHon, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
-
       doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text('Neto a transferir:', PAGE.margin + 12, y + 30);
-      doc.text(fmt(totalNeto, currency), PAGE.margin + 12, y + 30, { width: W - 24, align: 'right' });
+        .text(`Honorarios (${firstHon.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
+      doc.text(fmt(totalHon, currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
 
       y += honH + 10;
     }
@@ -1233,6 +1250,35 @@ const generateLiquidacionAllPDF = (dataArray) => {
       }
 
       y += summaryH + 10;
+    }
+
+    // Empresa bank details for transfer
+    const banco = emp?.banco;
+    if (banco && (banco.cbu || banco.alias)) {
+      checkNewPage(120);
+      y += 8;
+      y = drawSection(doc, y, 'Datos para Transferencia de Honorarios');
+      const bankFields = [
+        banco.nombre ? ['Banco', banco.nombre] : null,
+        banco.titular ? ['Titular', banco.titular] : null,
+        banco.cuit ? ['CUIT', banco.cuit] : null,
+        banco.tipoCuenta ? ['Tipo Cuenta', banco.tipoCuenta] : null,
+        banco.numeroCuenta ? ['N° Cuenta', banco.numeroCuenta] : null,
+        banco.cbu ? ['CBU', banco.cbu] : null,
+        banco.alias ? ['Alias', banco.alias] : null,
+      ].filter(Boolean);
+      if (bankFields.length > 0) {
+        const bankH = bankFields.length * 16 + 12;
+        fillR(doc, PAGE.margin, y, W, bankH, C.snow);
+        strokeR(doc, PAGE.margin, y, W, bankH, C.line, 0.5);
+        let by = y + 8;
+        for (const [k, v] of bankFields) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`${k}:`, PAGE.margin + 12, by);
+          doc.font(F.b).fontSize(8).fillColor(C.black).text(v, PAGE.margin + 100, by);
+          by += 16;
+        }
+        y += bankH + 10;
+      }
     }
 
     drawFooter(doc, emp, 1);

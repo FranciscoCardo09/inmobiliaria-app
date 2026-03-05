@@ -356,11 +356,21 @@ function LiquidacionTab({ groupId }) {
               <span className="font-bold text-lg">TOTAL</span>
               <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
             </div>
+
+            {/* Honorarios */}
+            {filteredData.some(d => d.honorarios) && (
+              <div className="mt-3 p-3 bg-base-200 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold">Honorarios ({filteredData.find(d => d.honorarios)?.honorarios.porcentaje}%)</span>
+                  <span className="font-bold">{formatCurrency(filteredData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0))}</span>
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* Datos bancarios empresa */}
           {filteredData[0]?.empresa?.banco?.cbu && (
-            <Card title="Datos para Transferencia">
+            <Card title="Datos para Transferencia de Honorarios">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                 {filteredData[0].empresa.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {filteredData[0].empresa.banco.nombre}</div>}
                 {filteredData[0].empresa.banco.titular && <div><span className="text-base-content/60">Titular:</span> {filteredData[0].empresa.banco.titular}</div>}

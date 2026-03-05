@@ -177,16 +177,23 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const owner = contract.property.owner;
   const isPropietario = contract.contractType === 'PROPIETARIO';
 
+  const mesVencido = month === 1 ? 12 : month - 1;
+  const anioVencido = month === 1 ? year - 1 : year;
+  const labelVencido = `${MONTH_NAMES[mesVencido]} ${anioVencido}`;
+
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    conceptos.push({ concepto: 'Alquiler', base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
+    conceptos.push({ concepto: `Alquiler (mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
   }
 
   for (const svc of monthlyRecord.services) {
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
+    const cat = svc.conceptType?.category;
+    const label = svc.conceptType?.label || svc.description || 'Servicio';
+    const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
     conceptos.push({
-      concepto: svc.conceptType?.label || svc.description || 'Servicio',
+      concepto: showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]})` : label,
       base: null,
       importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
     });
@@ -207,9 +214,6 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       importe: monthlyRecord.previousBalance > 0 ? -monthlyRecord.previousBalance : Math.abs(monthlyRecord.previousBalance),
     });
   }
-
-  const mesVencido = month === 1 ? 12 : month - 1;
-  const anioVencido = month === 1 ? year - 1 : year;
 
   return {
     empresa,
@@ -236,7 +240,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
       const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
       const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
-      return { porcentaje: pct, monto, baseHonorarios, netoTransferir: Math.round((monthlyRecord.totalDue - monto) * 100) / 100 };
+      return { porcentaje: pct, monto, baseHonorarios };
     })() : null,
     transacciones: monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
@@ -833,7 +837,7 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       propiedad: record.contract.property.address,
       propietario: owner?.name || 'Sin propietario',
       impuestos: taxServices.map((s) => ({
-        concepto: s.conceptType?.label || s.description || 'Impuesto/Servicio',
+        concepto: `${s.conceptType?.label || s.description || 'Impuesto/Servicio'} (período ${MONTH_NAMES[mesVencido]})`,
         monto: s.amount,
       })),
       totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),

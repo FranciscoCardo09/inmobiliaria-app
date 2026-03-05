@@ -105,8 +105,18 @@ const generateLiquidacionHTML = (data) => {
 
   ${data.honorarios ? `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
-    <p style="font-family:Arial;font-size:10pt;color:#333;margin:4px 0"><strong>Honorarios (${data.honorarios.porcentaje}%):</strong> <span style="float:right">${fmt(data.honorarios.monto, data.currency)}</span></p>
-    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Neto a transferir:</strong> <span style="float:right"><strong>${fmt(data.honorarios.netoTransferir, data.currency)}</strong></span></p>
+    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${data.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(data.honorarios.monto, data.currency)}</strong></span></p>
+  </div>` : ''}
+
+  ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `
+  <div style="margin-top:16px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
+    <p style="font-family:Arial;font-size:10pt;font-weight:bold;margin:0 0 8px 0">Datos para Transferencia de Honorarios</p>
+    ${emp.banco.nombre ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Banco:</span> ${escHtml(emp.banco.nombre)}</p>` : ''}
+    ${emp.banco.titular ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Titular:</span> ${escHtml(emp.banco.titular)}</p>` : ''}
+    ${emp.banco.cuit ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">CUIT:</span> ${escHtml(emp.banco.cuit)}</p>` : ''}
+    ${emp.banco.tipoCuenta ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Tipo:</span> ${escHtml(emp.banco.tipoCuenta)}</p>` : ''}
+    ${emp.banco.cbu ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">CBU:</span> ${escHtml(emp.banco.cbu)}</p>` : ''}
+    ${emp.banco.alias ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Alias:</span> ${escHtml(emp.banco.alias)}</p>` : ''}
   </div>` : ''}
 
   ${paymentsSection}
@@ -175,13 +185,21 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const firstHon = dataArray.find(d => d.honorarios);
     if (!firstHon) return '';
     const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
-    const totalNeto = dataArray.reduce((s, d) => s + (d.honorarios?.netoTransferir || d.total), 0);
     return `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
-    <p style="font-family:Arial;font-size:10pt;color:#333;margin:4px 0"><strong>Honorarios (${firstHon.honorarios.porcentaje}%):</strong> <span style="float:right">${fmt(totalHon, currency)}</span></p>
-    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Neto a transferir:</strong> <span style="float:right"><strong>${fmt(totalNeto, currency)}</strong></span></p>
+    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${firstHon.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(totalHon, currency)}</strong></span></p>
   </div>`;
   })()}
+  ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `
+  <div style="margin-top:16px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
+    <p style="font-family:Arial;font-size:10pt;font-weight:bold;margin:0 0 8px 0">Datos para Transferencia de Honorarios</p>
+    ${emp.banco.nombre ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Banco:</span> ${escHtml(emp.banco.nombre)}</p>` : ''}
+    ${emp.banco.titular ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Titular:</span> ${escHtml(emp.banco.titular)}</p>` : ''}
+    ${emp.banco.cuit ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">CUIT:</span> ${escHtml(emp.banco.cuit)}</p>` : ''}
+    ${emp.banco.tipoCuenta ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Tipo:</span> ${escHtml(emp.banco.tipoCuenta)}</p>` : ''}
+    ${emp.banco.cbu ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">CBU:</span> ${escHtml(emp.banco.cbu)}</p>` : ''}
+    ${emp.banco.alias ? `<p style="font-family:Arial;font-size:9pt;margin:2px 0"><span style="color:#666">Alias:</span> ${escHtml(emp.banco.alias)}</p>` : ''}
+  </div>` : ''}
   <div style="margin-top:30px;border-top:1px solid #E0E0E0;padding-top:8px">
     <p style="font-family:Arial;font-size:7pt;color:#999">Generado por ${escHtml(emp.nombre || 'Inmobiliaria')}${emp.cuit ? ` | CUIT ${escHtml(emp.cuit)}` : ''}</p>
   </div>
