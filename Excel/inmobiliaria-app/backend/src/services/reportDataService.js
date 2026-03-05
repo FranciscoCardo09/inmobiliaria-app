@@ -228,8 +228,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     });
   }
 
+  // Add "en letras" to honorarios
   if (honorarios) {
-    conceptos.push({ concepto: `Honorarios (${honorarios.porcentaje}%)`, base: honorarios.baseHonorarios, importe: honorarios.monto });
+    honorarios.montoEnLetras = numeroATexto(honorarios.monto);
   }
 
   return {

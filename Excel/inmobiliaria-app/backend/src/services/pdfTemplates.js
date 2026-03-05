@@ -408,13 +408,18 @@ const generateLiquidacionPDF = (data) => {
     // Honorarios section
     if (data.honorarios) {
       y += 4;
-      const honH = 30;
+      const honH = 46;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
       doc.font(F.b).fontSize(10).fillColor(C.black)
         .text(`Honorarios (${data.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
       doc.text(fmt(data.honorarios.monto, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+
+      if (data.honorarios.montoEnLetras) {
+        doc.font(F.r).fontSize(7.5).fillColor(C.dark)
+          .text(`Son: ${data.honorarios.montoEnLetras}`, PAGE.margin + 12, y + 28, { width: W - 24 });
+      }
 
       y += honH + 10;
     }
@@ -1186,16 +1191,22 @@ const generateLiquidacionAllPDF = (dataArray) => {
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
     if (firstHon) {
-      checkNewPage(50);
+      checkNewPage(60);
       const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+      const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
 
-      const honH = 30;
+      const honH = 46;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
       doc.font(F.b).fontSize(10).fillColor(C.black)
         .text(`Honorarios (${firstHon.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
       doc.text(fmt(totalHon, currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+
+      if (totalHonLetras) {
+        doc.font(F.r).fontSize(7.5).fillColor(C.dark)
+          .text(`Son: ${totalHonLetras}`, PAGE.margin + 12, y + 28, { width: W - 24 });
+      }
 
       y += honH + 10;
     }

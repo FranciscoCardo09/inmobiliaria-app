@@ -1,5 +1,6 @@
 // HTML Templates - Editable HTML for copy/paste into Word
 const { MONTH_NAMES } = require('./reportDataService');
+const { numeroATexto } = require('../utils/helpers');
 
 const fmt = (amount, currency = 'ARS') => {
   if (amount == null) return '-';
@@ -106,6 +107,7 @@ const generateLiquidacionHTML = (data) => {
   ${data.honorarios ? `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
     <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${data.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(data.honorarios.monto, data.currency)}</strong></span></p>
+    ${data.honorarios.montoEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0">Son: ${escHtml(data.honorarios.montoEnLetras)}</p>` : ''}
   </div>` : ''}
 
   ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `
@@ -185,9 +187,11 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const firstHon = dataArray.find(d => d.honorarios);
     if (!firstHon) return '';
     const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+    const totalHonLetras = numeroATexto(totalHon);
     return `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
     <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${firstHon.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(totalHon, currency)}</strong></span></p>
+    ${totalHonLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0">Son: ${escHtml(totalHonLetras)}</p>` : ''}
   </div>`;
   })()}
   ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `
