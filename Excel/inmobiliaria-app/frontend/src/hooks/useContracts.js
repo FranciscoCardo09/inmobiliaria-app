@@ -54,6 +54,7 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries(['contracts', groupId])
       queryClient.invalidateQueries(['contracts', 'expiring', groupId])
       queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['monthlyRecords', groupId])
       toast.success('Contrato creado')
     },
     onError: (error) => {
@@ -70,6 +71,7 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries(['contracts', groupId])
       queryClient.invalidateQueries(['contracts', 'expiring', groupId])
       queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['monthlyRecords', groupId])
       toast.success('Contrato actualizado')
     },
     onError: (error) => {
