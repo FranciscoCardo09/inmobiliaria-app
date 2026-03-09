@@ -563,7 +563,7 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
   const rowClass = record.status === 'COMPLETE'
-    ? 'bg-success/10'
+    ? 'bg-success/25'
     : record.status === 'PARTIAL'
     ? 'bg-warning/10'
     : isPropietario
