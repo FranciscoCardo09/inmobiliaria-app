@@ -369,7 +369,7 @@ const generateLiquidacionPDF = (data) => {
     let y = drawHeader(doc, data.empresa);
     
     // Title
-    y = drawTitle(doc, y, 'Liquidación', `${data.periodo.label}${data.periodo.labelVencido ? ' · Mes vencido: ' + data.periodo.labelVencido : ''}`);
+    y = drawTitle(doc, y, 'Liquidación', `${data.periodo.label}`);
 
     // Property and tenant info
     const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
@@ -632,9 +632,10 @@ const generatePagoEfectivoPDF = (data) => {
     const rW = 420; // receipt width
     const rMargin = 20;
     const rContent = rW - rMargin * 2;
-    // Estimate height: base ~280 + ~15 per concept row
-    const estimatedH = 280 + (data.conceptos.length * 15);
-    const rH = Math.max(320, Math.min(estimatedH, 520));
+    // Estimate height: base ~280 + ~15 per concept row + ~12 per payment entry
+    const pagosCount = data.pagos?.length || 0;
+    const estimatedH = 280 + (data.conceptos.length * 15) + (pagosCount > 0 ? 20 + pagosCount * 12 : 0);
+    const rH = Math.max(320, Math.min(estimatedH, 620));
     const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
     const buf = [];
     doc.on('data', (c) => buf.push(c));
@@ -776,6 +777,21 @@ const generatePagoEfectivoPDF = (data) => {
       .text(`Son: ${data.totalEnLetras}`, rMargin + 4, y, { width: rContent });
     y += 14;
 
+    // ── Payment history ──
+    if (data.pagos && data.pagos.length > 0) {
+      doc.moveTo(rMargin + 4, y).lineTo(rMargin + rContent - 4, y).strokeColor('#CCCCCC').lineWidth(0.3).stroke();
+      y += 6;
+      doc.font(F.b).fontSize(7).fillColor(C.dark).text('Pagos realizados:', rMargin + 4, y);
+      y += 11;
+      for (const p of data.pagos) {
+        const fechaStr = p.fecha ? new Date(p.fecha).toLocaleDateString('es-AR', { timeZone: 'UTC' }) : '-';
+        doc.font(F.r).fontSize(7).fillColor(C.dark)
+          .text(`${fechaStr} — ${fmt(p.monto, data.currency)} — ${p.metodo}`, rMargin + 10, y, { width: rContent - 16 });
+        y += 10;
+      }
+      y += 4;
+    }
+
     // ── Outer border (drawn last, wraps content tightly) ──
     const borderBottom = y + 4;
     doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, borderBottom - rMargin + 8, 6)
@@ -793,7 +809,8 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
     const rContent = rW - rMargin * 2;
     // Use max estimated height across all receipts
     const maxConcepts = Math.max(...dataArray.map(d => d.conceptos.length), 2);
-    const rH = Math.max(320, Math.min(280 + maxConcepts * 15, 520));
+    const maxPagos = Math.max(...dataArray.map(d => d.pagos?.length || 0), 0);
+    const rH = Math.max(320, Math.min(280 + maxConcepts * 15 + (maxPagos > 0 ? 20 + maxPagos * 12 : 0), 620));
     const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
     const buf = [];
     doc.on('data', (c) => buf.push(c));
@@ -904,6 +921,21 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
       doc.font(F.r).fontSize(7.5).fillColor(C.dark).text(`Son: ${data.totalEnLetras}`, rMargin + 4, y, { width: rContent });
       y += 14;
 
+      // Payment history
+      if (data.pagos && data.pagos.length > 0) {
+        doc.moveTo(rMargin + 4, y).lineTo(rMargin + rContent - 4, y).strokeColor('#CCCCCC').lineWidth(0.3).stroke();
+        y += 6;
+        doc.font(F.b).fontSize(7).fillColor(C.dark).text('Pagos realizados:', rMargin + 4, y);
+        y += 11;
+        for (const p of data.pagos) {
+          const fechaStr = p.fecha ? new Date(p.fecha).toLocaleDateString('es-AR', { timeZone: 'UTC' }) : '-';
+          doc.font(F.r).fontSize(7).fillColor(C.dark)
+            .text(`${fechaStr} — ${fmt(p.monto, data.currency)} — ${p.metodo}`, rMargin + 10, y, { width: rContent - 16 });
+          y += 10;
+        }
+        y += 4;
+      }
+
       // Outer border (wraps content tightly)
       const borderBottom = y + 4;
       doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, borderBottom - rMargin + 8, 6)
@@ -924,7 +956,7 @@ const generateImpuestosPDF = (data) => {
 
     let y = drawHeader(doc, data.empresa);
     y = drawTitle(doc, y, 'Detalle de Impuestos y Servicios',
-      `${data.periodo.label}${data.periodo.labelVencido ? ' · Mes vencido: ' + data.periodo.labelVencido : ''}`);
+      `${data.periodo.label}`);
 
     // Metric card with grand total
     y = drawMetrics(doc, y, [
@@ -1026,7 +1058,7 @@ const generateImpuestosPDF = (data) => {
 
         // Owner name badge (show beneficiary label if applicable)
         const label = beneficiario
-          ? `Transferir a: ${beneficiario} (${propietario})`
+          ? `Transferir a: ${beneficiario}`
           : propietario;
         const pillW = doc.font(F.b).fontSize(7).widthOfString(label) + 16;
         fillR(doc, PAGE.margin, y, pillW, 17, C.cloud, 8);
@@ -1109,7 +1141,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
     let y = drawHeader(doc, emp);
     y = drawTitle(doc, y, 'Liquidación General',
-      `${periodo.label}${periodo.labelVencido ? ' · Mes vencido: ' + periodo.labelVencido : ''}`);
+      `${periodo.label}`);
 
     // Grand total pre-calc
     let grandTotal = 0;

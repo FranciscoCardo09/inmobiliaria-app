@@ -81,7 +81,7 @@ const generateLiquidacionHTML = (data) => {
 
   <!-- TITLE -->
   <h2 style="font-family:Arial;font-size:13pt;color:#000;letter-spacing:1.5px;margin:0 0 4px 0">LIQUIDACIÓN</h2>
-  <p style="font-family:Arial;font-size:9pt;color:#666;margin:0 0 15px 0">${escHtml(data.periodo.label)}${data.periodo.labelVencido ? ' &middot; Mes vencido: ' + escHtml(data.periodo.labelVencido) : ''}</p>
+  <p style="font-family:Arial;font-size:9pt;color:#666;margin:0 0 15px 0">${escHtml(data.periodo.label)}</p>
   <hr style="border:none;border-top:1px solid #000;margin-bottom:15px">
 
   <!-- INFO -->
@@ -276,6 +276,15 @@ const generatePagoEfectivoHTML = (data) => {
   </table>
 
   ${data.totalEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.totalEnLetras)}</p>` : ''}
+
+  ${data.pagos && data.pagos.length > 0 ? `
+  <div style="margin-top:12px;border-top:1px solid #E0E0E0;padding-top:8px">
+    <p style="font-family:Arial;font-size:8pt;font-weight:bold;margin:0 0 4px 0">Pagos realizados:</p>
+    ${data.pagos.map(p => {
+      const fechaStr = p.fecha ? new Date(p.fecha).toLocaleDateString('es-AR', { timeZone: 'UTC' }) : '-';
+      return `<p style="font-family:Arial;font-size:8pt;margin:2px 0 2px 10px">- ${fechaStr} — ${fmt(p.monto, data.currency)} — ${escHtml(p.metodo)}</p>`;
+    }).join('')}
+  </div>` : ''}
 
   <!-- FOOTER -->
   <div style="margin-top:20px;border-top:1px solid #E0E0E0;padding-top:8px">

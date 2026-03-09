@@ -92,14 +92,6 @@ const generateLiquidacionDOCX = async (data) => {
     })
   );
 
-  if (data.periodo.labelVencido) {
-    children.push(
-      new Paragraph({
-        children: [new TextRun({ text: `Mes vencido: ${data.periodo.labelVencido}`, size: 18, font: 'Arial', color: MEDIUM })],
-        spacing: { after: 80 },
-      })
-    );
-  }
 
   // Separator
   children.push(new Paragraph({

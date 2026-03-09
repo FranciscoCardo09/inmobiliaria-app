@@ -197,7 +197,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    conceptos.push({ concepto: `Alquiler (mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
+    conceptos.push({ concepto: `Alquiler ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
   }
 
   for (const svc of monthlyRecord.services) {
@@ -588,8 +588,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
         include: { conceptType: true },
       },
       transactions: {
-        orderBy: { paymentDate: 'desc' },
-        take: 1,
+        orderBy: { paymentDate: 'asc' },
       },
     },
   });
@@ -601,17 +600,24 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
 
   // Build conceptos
   const conceptos = [];
+  const mesLabel = MONTH_NAMES[record.periodMonth];
   if (record.rentAmount > 0) {
     conceptos.push({
-      concepto: 'Alquiler',
+      concepto: `Alquiler ${mesLabel} (Mes ${record.monthNumber})`,
       importe: record.rentAmount,
     });
   }
 
+  // Período a mes vencido para impuestos/servicios
+  const mesVencido = record.periodMonth === 1 ? 12 : record.periodMonth - 1;
+  const anioVencido = record.periodMonth === 1 ? record.periodYear - 1 : record.periodYear;
   for (const svc of record.services) {
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
+    const cat = svc.conceptType?.category;
+    const label = svc.conceptType?.label || svc.description || 'Servicio';
+    const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
     conceptos.push({
-      concepto: svc.conceptType?.label || svc.description || 'Servicio',
+      concepto: showPeriodo ? `${label} | Período: ${MONTH_NAMES[mesVencido]} ${anioVencido}` : label,
       importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
     });
   }
@@ -624,7 +630,8 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
   }
 
   const total = record.totalDue;
-  const lastTransaction = record.transactions[0];
+  const txs = record.transactions || [];
+  const lastTransaction = txs[txs.length - 1];
 
   // Generate receipt number from record
   const receiptNumber = `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}`;
@@ -653,6 +660,11 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     total,
     totalEnLetras: numeroATexto(total),
     paymentMethod: lastTransaction?.paymentMethod || 'EFECTIVO',
+    pagos: txs.map(t => ({
+      fecha: t.paymentDate,
+      monto: t.amount,
+      metodo: t.paymentMethod === 'TRANSFERENCIA' ? 'Transferencia' : t.paymentMethod === 'EFECTIVO' ? 'Efectivo' : t.paymentMethod,
+    })),
     currency: empresa.currency,
     monthlyRecordId: record.id,
   };
