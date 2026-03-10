@@ -339,10 +339,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       continue; // Skip this contract instead of crashing
     }
 
-    // Refresh rentAmount and previousBalance for non-complete existing records
+    // Refresh rentAmount, previousBalance and IVA for non-complete existing records
     if (record && record.status !== 'COMPLETE') {
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
+
+      // Sync includeIva from contract
+      const contractIva = !!contract.pagaIva;
+      const ivaChanged = contractIva !== record.includeIva;
 
       // Refresh previousBalance from batch
       let latestPrevBalance = record.previousBalance;
@@ -352,9 +356,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
       const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
 
-      if (rentChanged || prevBalanceChanged) {
+      if (rentChanged || prevBalanceChanged || ivaChanged) {
         const effectiveRent = rentChanged ? currentRent : record.rentAmount;
-        const recordIva = record.includeIva ? effectiveRent * 0.21 : 0;
+        const effectiveIva = ivaChanged ? contractIva : record.includeIva;
+        const recordIva = effectiveIva ? effectiveRent * 0.21 : 0;
         const newTotalDue = effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
         const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
 
@@ -365,6 +370,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         };
         if (rentChanged) {
           updateData.rentAmount = currentRent;
+        }
+        if (rentChanged || ivaChanged) {
+          updateData.includeIva = effectiveIva;
           updateData.ivaAmount = recordIva;
         }
 
