@@ -206,7 +206,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     const label = svc.conceptType?.label || svc.description || 'Servicio';
     const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
     conceptos.push({
-      concepto: showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]})` : label,
+      concepto: showPeriodo ? `${label} (período ${MONTH_NAMES[month]} ${year})` : label,
       base: null,
       importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
     });
