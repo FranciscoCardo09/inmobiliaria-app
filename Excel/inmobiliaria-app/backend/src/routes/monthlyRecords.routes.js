@@ -46,6 +46,13 @@ router.patch(
   controller.toggleIva
 );
 
+// Forgive balance
+router.patch(
+  '/:recordId/forgive-balance',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.forgiveBalance
+);
+
 // Monthly Services (nested under records)
 router.get(
   '/:recordId/services',

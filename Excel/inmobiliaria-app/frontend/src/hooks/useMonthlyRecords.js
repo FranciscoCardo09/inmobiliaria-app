@@ -75,6 +75,23 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     },
   })
 
+  const forgiveBalanceMutation = useMutation({
+    mutationFn: async ({ recordId, forgive }) => {
+      const response = await api.patch(
+        `/groups/${groupId}/monthly-records/${recordId}/forgive-balance`,
+        { forgive }
+      )
+      return response.data.data
+    },
+    onSuccess: (_, { forgive }) => {
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      toast.success(forgive ? 'Saldo condonado' : 'Condonación revertida')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al condonar saldo')
+    },
+  })
+
   return {
     records: recordsQuery.data?.records || [],
     summary: recordsQuery.data?.summary || {},
@@ -84,6 +101,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     generateRecords: generateMutation.mutate,
     isUpdating: updateMutation.isPending,
     toggleIva: toggleIvaMutation.mutate,
+    forgiveBalance: forgiveBalanceMutation.mutate,
   }
 }
 

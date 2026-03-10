@@ -505,6 +505,8 @@ model MonthlyRecord {
   punitoryAmount      Float     @default(0) @map("punitory_amount")  // Punitorios calculados
   punitoryDays        Int       @default(0) @map("punitory_days")
   punitoryForgiven    Boolean   @default(false) @map("punitory_forgiven")
+  balanceForgiven     Float     @default(0) @map("balance_forgiven")
+  balanceForgivenAt   DateTime? @map("balance_forgiven_at")
   includeIva          Boolean   @default(false) @map("include_iva")
   ivaAmount           Float     @default(0) @map("iva_amount")
   totalDue            Float     @map("total_due")             // Alquiler + servicios + punitorios + IVA - a_favor

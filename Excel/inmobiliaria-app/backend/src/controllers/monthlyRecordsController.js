@@ -272,12 +272,48 @@ const batchAddServices = async (req, res, next) => {
   }
 };
 
+// PATCH /api/groups/:groupId/monthly-records/:recordId/forgive-balance
+const forgiveBalance = async (req, res, next) => {
+  try {
+    const { groupId, recordId } = req.params;
+    const { forgive } = req.body;
+
+    const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+    if (!record || record.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    if (forgive) {
+      // Calcular saldo pendiente (balance es negativo cuando falta pagar)
+      const pending = Math.abs(record.balance);
+      if (pending <= 0) {
+        return ApiResponse.badRequest(res, 'No hay saldo pendiente para condonar');
+      }
+      await prisma.monthlyRecord.update({
+        where: { id: recordId },
+        data: { balanceForgiven: pending, balanceForgivenAt: new Date() },
+      });
+    } else {
+      await prisma.monthlyRecord.update({
+        where: { id: recordId },
+        data: { balanceForgiven: 0, balanceForgivenAt: null },
+      });
+    }
+
+    const updated = await recalculateMonthlyRecord(recordId);
+    return ApiResponse.success(res, updated, forgive ? 'Saldo condonado' : 'Condonación revertida');
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMonthlyRecords,
   getMonthlyRecordDetail,
   updateMonthlyRecord,
   forceGenerate,
   toggleIva,
+  forgiveBalance,
   getRecordServices,
   addRecordService,
   updateRecordService,

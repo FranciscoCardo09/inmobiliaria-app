@@ -100,7 +100,7 @@ export default function MonthlyControlPage() {
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
-  const { records: allRecords, summary, isLoading, toggleIva } = useMonthlyRecords(
+  const { records: allRecords, summary, isLoading, toggleIva, forgiveBalance } = useMonthlyRecords(
     currentGroupId,
     periodMonth,
     periodYear,
@@ -470,6 +470,7 @@ export default function MonthlyControlPage() {
                     onPayment={handlePayment}
                     onDebtPayment={handleDebtPayment}
                     onTxHistory={handleTxHistory}
+                    onForgiveBalance={forgiveBalance}
                   />
                 ))}
               </tbody>
@@ -558,7 +559,7 @@ export default function MonthlyControlPage() {
 // Memoized table row to prevent re-renders when unrelated state changes
 const MonthlyRecordRow = memo(function MonthlyRecordRow({
   record, idx, isExpanded, showIvaColumn, groupId,
-  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory,
+  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance,
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
@@ -736,6 +737,9 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
               </div>
             )
           })()}
+          {record.balanceForgiven > 0 && (
+            <div className="text-[10px] text-warning">Cond. {formatCurrency(record.balanceForgiven)}</div>
+          )}
         </td>
         <td className="text-xs text-right font-mono text-success">
           {record.aFavorNextMonth > 0
@@ -803,6 +807,29 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
               <EyeIcon className="w-3 h-3" />
             </button>
           )}
+          {record.balanceForgiven > 0 ? (
+            <button
+              className="btn btn-xs btn-warning btn-outline"
+              onClick={() => {
+                if (window.confirm(`¿Revertir condonación de ${formatCurrency(record.balanceForgiven)}?`))
+                  onForgiveBalance({ recordId: record.id, forgive: false })
+              }}
+              title="Revertir condonación"
+            >
+              <NoSymbolIcon className="w-3 h-3" />
+            </button>
+          ) : record.status === 'PARTIAL' && !record.debtInfo && record.balance < 0 ? (
+            <button
+              className="btn btn-xs btn-warning btn-outline"
+              onClick={() => {
+                if (window.confirm(`¿Condonar saldo restante de ${formatCurrency(Math.abs(record.balance))}?`))
+                  onForgiveBalance({ recordId: record.id, forgive: true })
+              }}
+              title="Condonar saldo restante"
+            >
+              <CheckCircleIcon className="w-3 h-3" />
+            </button>
+          ) : null}
           </div>
         </td>
       </tr>
