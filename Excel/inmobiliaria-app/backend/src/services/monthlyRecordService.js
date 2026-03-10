@@ -339,8 +339,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       continue; // Skip this contract instead of crashing
     }
 
-    // Refresh rentAmount, previousBalance and IVA for non-complete existing records
-    if (record && record.status !== 'COMPLETE') {
+    // Refresh rentAmount, IVA for ALL existing records (including COMPLETE)
+    // Refresh previousBalance only for non-COMPLETE records
+    if (record) {
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 
@@ -348,13 +349,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       const contractIva = !!contract.pagaIva;
       const ivaChanged = contractIva !== record.includeIva;
 
-      // Refresh previousBalance from batch
+      // Refresh previousBalance from batch (only for non-COMPLETE records)
       let latestPrevBalance = record.previousBalance;
-      if (monthNumber - 1 >= 1) {
+      let prevBalanceChanged = false;
+      if (record.status !== 'COMPLETE' && monthNumber - 1 >= 1) {
         const prevRecord = prevRecordsByContractId.get(contract.id);
         latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
+        prevBalanceChanged = latestPrevBalance !== record.previousBalance;
       }
-      const prevBalanceChanged = latestPrevBalance !== record.previousBalance;
 
       if (rentChanged || prevBalanceChanged || ivaChanged) {
         const effectiveRent = rentChanged ? currentRent : record.rentAmount;
@@ -374,6 +376,23 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         if (rentChanged || ivaChanged) {
           updateData.includeIva = effectiveIva;
           updateData.ivaAmount = recordIva;
+        }
+
+        // Recalculate status based on new amounts
+        if (newBalance >= -0.01) {
+          updateData.isPaid = true;
+          updateData.status = 'COMPLETE';
+          if (!record.fullPaymentDate) {
+            updateData.fullPaymentDate = record.transactions?.[record.transactions.length - 1]?.paymentDate || new Date();
+          }
+        } else if (record.amountPaid > 0) {
+          updateData.isPaid = false;
+          updateData.status = 'PARTIAL';
+          updateData.fullPaymentDate = null;
+        } else {
+          updateData.isPaid = false;
+          updateData.status = 'PENDING';
+          updateData.fullPaymentDate = null;
         }
 
         record = await prisma.monthlyRecord.update({

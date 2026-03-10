@@ -522,6 +522,39 @@ const updateContract = async (req, res, next) => {
       data.nextAdjustmentMonth = null;
     }
 
+    // If baseRent changed, create/update a RentHistory entry for the current contract month
+    // so that getBatchedRentForMonth() picks up the new value instead of stale history
+    if (baseRent && parseFloat(baseRent) !== contract.baseRent) {
+      const effectiveStartDate = new Date(data.startDate || contract.startDate);
+      const now = new Date();
+      const monthsDiff = (now.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
+        (now.getMonth() - effectiveStartDate.getMonth());
+      const sm = data.startMonth || contract.startMonth || 1;
+      const dur = data.durationMonths || contract.durationMonths;
+      const endMonth = sm + dur - 1;
+      const currentMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+
+      const existingHistory = await prisma.rentHistory.findFirst({
+        where: { contractId: id, effectiveFromMonth: currentMonthNumber },
+      });
+
+      if (existingHistory) {
+        await prisma.rentHistory.update({
+          where: { id: existingHistory.id },
+          data: { rentAmount: parseFloat(baseRent), reason: 'AJUSTE_MANUAL' },
+        });
+      } else {
+        await prisma.rentHistory.create({
+          data: {
+            contractId: id,
+            effectiveFromMonth: currentMonthNumber,
+            rentAmount: parseFloat(baseRent),
+            reason: 'AJUSTE_MANUAL',
+          },
+        });
+      }
+    }
+
     const updated = await prisma.contract.update({
       where: { id },
       data,
