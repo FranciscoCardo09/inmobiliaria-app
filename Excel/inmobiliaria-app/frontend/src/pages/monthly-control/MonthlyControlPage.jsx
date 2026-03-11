@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { useMonthlyRecords } from '../../hooks/useMonthlyRecords'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
+import { useCategories } from '../../hooks/useCategories'
 import api from '../../services/api'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
@@ -71,6 +72,29 @@ const BoolBadge = ({ value, yesText = 'SI', noText = 'NO' }) => (
   </span>
 )
 
+// Sortable column header component
+const SortableHeader = ({ label, column, sortColumn, sortDirection, onSort, align, bold }) => {
+  const isActive = sortColumn === column
+  return (
+    <th
+      className={`text-xs cursor-pointer select-none hover:bg-base-300 transition-colors ${align === 'right' ? 'text-right' : ''} ${bold ? 'font-bold' : ''}`}
+      onClick={() => onSort(column)}
+      title={`Ordenar por ${label}`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {isActive ? (
+          sortDirection === 'asc'
+            ? <ChevronUpIcon className="w-3 h-3 text-primary" />
+            : <ChevronDownIcon className="w-3 h-3 text-primary" />
+        ) : (
+          <span className="w-3 h-3 inline-block opacity-0 group-hover:opacity-30">↕</span>
+        )}
+      </span>
+    </th>
+  )
+}
+
 export default function MonthlyControlPage() {
   const currentGroupId = useAuthStore((s) => s.currentGroupId)
   const now = new Date()
@@ -81,6 +105,10 @@ export default function MonthlyControlPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [contractTypeFilter, setContractTypeFilter] = useState('')
+
+  // Sort state
+  const [sortColumn, setSortColumn] = useState(null) // null | 'propiedad' | 'dueno' | 'inquilino' | 'mes' | 'alquiler' | 'total' | 'pagado'
+  const [sortDirection, setSortDirection] = useState('asc') // 'asc' | 'desc'
 
   // Table zoom/scale
   const [tableZoom, setTableZoom] = useState(100)
@@ -97,6 +125,9 @@ export default function MonthlyControlPage() {
 
   // Debt payment hook
   const { payDebt, isPaying } = useDebts(currentGroupId)
+
+  // Categories for filter
+  const { categories } = useCategories(currentGroupId)
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
@@ -132,8 +163,50 @@ export default function MonthlyControlPage() {
       })
     }
 
+    // Apply sorting
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        let valA, valB
+        switch (sortColumn) {
+          case 'propiedad':
+            valA = (a.property?.address || '').toLowerCase()
+            valB = (b.property?.address || '').toLowerCase()
+            return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+          case 'dueno':
+            valA = (a.owner?.name || '').toLowerCase()
+            valB = (b.owner?.name || '').toLowerCase()
+            return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+          case 'inquilino': {
+            const tenantA = a.tenants?.length > 0 ? a.tenants.map(t => t.name).join(' / ') : a.tenant?.name || ''
+            const tenantB = b.tenants?.length > 0 ? b.tenants.map(t => t.name).join(' / ') : b.tenant?.name || ''
+            valA = tenantA.toLowerCase()
+            valB = tenantB.toLowerCase()
+            return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+          }
+          case 'mes':
+            valA = a.monthNumber || 0
+            valB = b.monthNumber || 0
+            return sortDirection === 'asc' ? valA - valB : valB - valA
+          case 'alquiler':
+            valA = a.rentAmount || 0
+            valB = b.rentAmount || 0
+            return sortDirection === 'asc' ? valA - valB : valB - valA
+          case 'total':
+            valA = a.totalHistorico || a.liveTotalDue || a.totalDue || 0
+            valB = b.totalHistorico || b.liveTotalDue || b.totalDue || 0
+            return sortDirection === 'asc' ? valA - valB : valB - valA
+          case 'pagado':
+            valA = a.amountPaid || 0
+            valB = b.amountPaid || 0
+            return sortDirection === 'asc' ? valA - valB : valB - valA
+          default:
+            return 0
+        }
+      })
+    }
+
     return filtered
-  }, [allRecords, statusFilter, searchFilter, contractTypeFilter])
+  }, [allRecords, statusFilter, searchFilter, contractTypeFilter, sortColumn, sortDirection])
 
   // Detect if IVA column should be shown
   const showIvaColumn = useMemo(() => {
@@ -193,6 +266,24 @@ export default function MonthlyControlPage() {
 
   const handleTxHistory = useCallback((record) => {
     setTxHistoryModal({ open: true, record })
+  }, [])
+
+  // Sort handler
+  const handleSort = useCallback((column) => {
+    setSortColumn((prev) => {
+      if (prev === column) {
+        // Toggle direction, then clear on third click
+        setSortDirection((d) => {
+          if (d === 'asc') return 'desc'
+          // Reset sort
+          setSortColumn(null)
+          return 'asc'
+        })
+        return column
+      }
+      setSortDirection('asc')
+      return column
+    })
   }, [])
 
   // Zoom controls
@@ -391,6 +482,9 @@ export default function MonthlyControlPage() {
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
             <option value="">Todas las categorías</option>
+            {(categories || []).map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
           </select>
 
           <input
@@ -435,19 +529,19 @@ export default function MonthlyControlPage() {
               <thead>
                 <tr className="bg-base-200">
                   <th className="text-xs w-8"></th>
-                  <th className="text-xs">Propiedad</th>
-                  <th className="text-xs">Dueño</th>
-                  <th className="text-xs">Inquilino</th>
-                  <th className="text-xs">Mes</th>
+                  <SortableHeader label="Propiedad" column="propiedad" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+                  <SortableHeader label="Dueño" column="dueno" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+                  <SortableHeader label="Inquilino" column="inquilino" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+                  <SortableHeader label="Mes" column="mes" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
                   <th className="text-xs">Próx. Ajuste</th>
-                  <th className="text-xs text-right">Alquiler</th>
+                  <SortableHeader label="Alquiler" column="alquiler" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
                   <th className="text-xs text-right">Servicios</th>
                   {showIvaColumn && <th className="text-xs text-right">IVA (21%)</th>}
                   <th className="text-xs text-right">A Favor Ant.</th>
                   <th className="text-xs text-right">Punitorios</th>
-                  <th className="text-xs text-right font-bold">TOTAL</th>
+                  <SortableHeader label="TOTAL" column="total" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" bold />
                   <th className="text-xs">Fecha Pago</th>
-                  <th className="text-xs text-right">Abonado</th>
+                  <SortableHeader label="Abonado" column="pagado" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
                   <th className="text-xs text-right">A Favor Sig.</th>
                   <th className="text-xs text-right">Debe Sig.</th>
                   <th className="text-xs text-center">Canceló</th>
