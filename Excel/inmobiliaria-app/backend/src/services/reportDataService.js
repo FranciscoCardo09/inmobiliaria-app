@@ -294,6 +294,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   if (ownerId) {
     where.contract.property = { ownerId };
+    where.contract.contractType = 'INQUILINO';
   }
 
   const records = await prisma.monthlyRecord.findMany({
