@@ -634,16 +634,20 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         }
         return realBalance < 0 ? Math.abs(realBalance) : 0;
       })(),
-      // Recalcular isCancelled en vivo: si no hay deuda abierta y el balance cubre todo
-      isCancelled: (() => {
-        if (debtInfo && debtInfo.status !== 'PAID') return false; // deuda abierta
+      // Recalcular isCancelled y status en vivo para corregir redondeo de IVA
+      ...(() => {
+        if (debtInfo && debtInfo.status !== 'PAID') return {};
         let realBalance;
         if (debtInfo && record.debt) {
           realBalance = totalAbonado - totalHistorico;
         } else {
           realBalance = liveBalance;
         }
-        return record.amountPaid > 0 && realBalance >= -1; // tolerancia de $1 por redondeo
+        const liveComplete = record.amountPaid > 0 && realBalance >= -1;
+        if (liveComplete) {
+          return { isCancelled: true, isPaid: true, status: 'COMPLETE' };
+        }
+        return {};
       })(),
     });
   }
