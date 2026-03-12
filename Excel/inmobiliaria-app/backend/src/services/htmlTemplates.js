@@ -109,10 +109,9 @@ const generateLiquidacionHTML = (data) => {
     const gastos = hon.gastosAMiCargo || [];
     const alquilerRow = hon.porcentaje > 0
       ? `<tr><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333">Honorarios alquiler (${hon.porcentaje}%)</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(hon.montoAlquiler, data.currency)}</td></tr>` : '';
-    const gastosRows = gastos.map(g => {
-      const label = g.comisionPercent > 0 ? `${escHtml(g.concepto)} &nbsp;<span style="color:#999;font-size:8pt">base ${fmt(g.costo, data.currency)} + ${g.comisionPercent}%</span>` : escHtml(g.concepto);
-      return `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${label}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.total, data.currency)}</td></tr>`;
-    }).join('');
+    const gastosRows = gastos.map(g =>
+      `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${escHtml(g.concepto)}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.importe, data.currency)}</td></tr>`
+    ).join('');
     const sep = gastos.length > 0 ? `<tr><td colspan="2" style="border-top:1px solid #E0E0E0;padding:0"></td></tr>` : '';
     return `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
@@ -209,17 +208,16 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const allGastos = dataArray.flatMap(d => d.honorarios?.gastosAMiCargo || []);
     const gastosGrouped = [];
     for (const g of allGastos) {
-      const ex = gastosGrouped.find(x => x.concepto === g.concepto && x.comisionPercent === g.comisionPercent);
-      if (ex) { ex.costo += g.costo; ex.comision += g.comision; ex.total += g.total; }
+      const ex = gastosGrouped.find(x => x.concepto === g.concepto);
+      if (ex) { ex.importe += g.importe; }
       else gastosGrouped.push({ ...g });
     }
 
     const alquilerRow = honPct > 0
       ? `<tr><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333">Honorarios alquiler (${honPct}%)</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(totalAlquiler, currency)}</td></tr>` : '';
-    const gastosRows = gastosGrouped.map(g => {
-      const label = g.comisionPercent > 0 ? `${escHtml(g.concepto)} &nbsp;<span style="color:#999;font-size:8pt">base ${fmt(g.costo, currency)} + ${g.comisionPercent}%</span>` : escHtml(g.concepto);
-      return `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${label}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.total, currency)}</td></tr>`;
-    }).join('');
+    const gastosRows = gastosGrouped.map(g =>
+      `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${escHtml(g.concepto)}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.importe, currency)}</td></tr>`
+    ).join('');
     const sep = gastosGrouped.length > 0 ? `<tr><td colspan="2" style="border-top:1px solid #E0E0E0;padding:0"></td></tr>` : '';
 
     return `

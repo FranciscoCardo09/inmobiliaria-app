@@ -440,12 +440,9 @@ const generateLiquidacionPDF = (data) => {
 
       // Gastos a mi cargo lines
       for (const g of gastos) {
-        const subLabel = g.comisionPercent > 0
-          ? `  ${g.concepto}  base ${fmt(g.costo, data.currency)} + ${g.comisionPercent}%`
-          : `  ${g.concepto}`;
-        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(subLabel, PAGE.margin + 12, hy, { width: W * 0.65 });
+        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(`  ${g.concepto}`, PAGE.margin + 12, hy, { width: W * 0.65 });
         doc.font(F.b).fontSize(8.5).fillColor(C.black)
-          .text(fmt(g.total, data.currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+          .text(fmt(g.importe, data.currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
         hy += rowH;
       }
 
@@ -1273,11 +1270,9 @@ const generateLiquidacionAllPDF = (dataArray) => {
       // Group gastos by concepto label, summing amounts
       const gastosGrouped = [];
       for (const g of allGastos) {
-        const existing = gastosGrouped.find(x => x.concepto === g.concepto && x.comisionPercent === g.comisionPercent);
+        const existing = gastosGrouped.find(x => x.concepto === g.concepto);
         if (existing) {
-          existing.costo += g.costo;
-          existing.comision += g.comision;
-          existing.total += g.total;
+          existing.importe += g.importe;
         } else {
           gastosGrouped.push({ ...g });
         }
@@ -1308,12 +1303,9 @@ const generateLiquidacionAllPDF = (dataArray) => {
       }
 
       for (const g of gastosGrouped) {
-        const subLabel = g.comisionPercent > 0
-          ? `  ${g.concepto}  base ${fmt(g.costo, currency)} + ${g.comisionPercent}%`
-          : `  ${g.concepto}`;
-        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(subLabel, PAGE.margin + 12, hy, { width: W * 0.65 });
+        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(`  ${g.concepto}`, PAGE.margin + 12, hy, { width: W * 0.65 });
         doc.font(F.b).fontSize(8.5).fillColor(C.black)
-          .text(fmt(g.total, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+          .text(fmt(g.importe, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
         hy += rowH;
       }
 

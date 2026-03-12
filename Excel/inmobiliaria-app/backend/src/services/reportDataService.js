@@ -200,7 +200,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
     const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0;
 
-    // Build gastos items from selected services
+    // Build gastos items from selected services (base cost only, no extra commission)
     const gastosItems = [];
     for (const svc of monthlyRecord.services) {
       if (!gastosServiceIds.has(svc.id)) continue;
@@ -208,30 +208,25 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       const label = svc.conceptType?.label || svc.description || 'Servicio';
       const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
       const concepto = showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]} ${anioVencido})` : label;
-      const costo = Math.abs(svc.amount);
-      const comision = gastosComisionPercent > 0 ? Math.round(costo * gastosComisionPercent / 100 * 100) / 100 : 0;
-      gastosItems.push({ concepto, costo, comisionPercent: gastosComisionPercent, comision, total: costo + comision });
+      const importe = Math.abs(svc.amount);
+      gastosItems.push({ concepto, importe });
     }
 
-    // Build gastos items from manual extras
+    // Build gastos items from manual extras (base cost only)
     for (const extra of gastosExtras) {
-      const costo = Number(extra.importe) || 0;
-      const comision = gastosComisionPercent > 0 ? Math.round(costo * gastosComisionPercent / 100 * 100) / 100 : 0;
-      gastosItems.push({ concepto: extra.concepto || 'Extra', costo, comisionPercent: gastosComisionPercent, comision, total: costo + comision, isExtra: true });
+      const importe = Number(extra.importe) || 0;
+      gastosItems.push({ concepto: extra.concepto || 'Extra', importe, isExtra: true });
     }
 
-    const totalCostos = gastosItems.reduce((s, g) => s + g.costo, 0);
-    const totalComision = gastosItems.reduce((s, g) => s + g.comision, 0);
-    const monto = montoAlquiler + totalCostos + totalComision;
+    const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0);
+    const monto = montoAlquiler + totalGastos;
 
     honorarios = {
       porcentaje: pct,
       baseHonorarios,
       montoAlquiler,
       gastosAMiCargo: gastosItems,
-      totalCostos,
-      totalComision,
-      comisionPercent: gastosComisionPercent,
+      totalGastos,
       monto,
       montoEnLetras: numeroATexto(monto),
     };
@@ -244,7 +239,6 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   }
 
   for (const svc of monthlyRecord.services) {
-    if (gastosServiceIds.has(svc.id)) continue; // moved to honorarios section
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     const cat = svc.conceptType?.category;
     const label = svc.conceptType?.label || svc.description || 'Servicio';
@@ -274,12 +268,6 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     });
   }
 
-  // Recalculate display total: subtract services moved to honorarios
-  const removedServicesTotal = monthlyRecord.services
-    .filter(s => gastosServiceIds.has(s.id))
-    .reduce((sum, s) => sum + s.amount, 0);
-  const displayTotal = monthlyRecord.totalDue - removedServicesTotal;
-
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
   const serviciosDisponibles = monthlyRecord.services
     .filter(s => s.conceptType?.category !== 'BONIFICACION' && s.conceptType?.category !== 'DESCUENTO')
@@ -301,8 +289,8 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}`, mesContrato: monthlyRecord.monthNumber, mesVencido, anioVencido, labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}` },
     conceptos,
     serviciosDisponibles,
-    total: displayTotal,
-    totalEnLetras: numeroATexto(displayTotal),
+    total: monthlyRecord.totalDue,
+    totalEnLetras: numeroATexto(monthlyRecord.totalDue),
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,

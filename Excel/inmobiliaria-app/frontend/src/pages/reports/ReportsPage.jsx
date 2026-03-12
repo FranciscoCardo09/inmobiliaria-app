@@ -133,37 +133,28 @@ function computeHonorariosLocal(data, gastosState, honPct) {
   const sel = gastosState[data.contractId] || {}
   const selectedIds = sel.serviceIds || []
   const extras = sel.extras || []
-  const comisionPct = parseFloat(honPct) || 0
+  const pct = parseFloat(honPct) || 0
 
-  const hasAny = selectedIds.length > 0 || extras.length > 0 || comisionPct > 0
+  const hasAny = selectedIds.length > 0 || extras.length > 0 || pct > 0
   if (!hasAny) return null
 
-  // Services selected as "paid by me"
+  // Services selected as "paid by me" — base cost only, no extra commission
   const gastosItems = []
   for (const svc of (data.serviciosDisponibles || [])) {
     if (!selectedIds.includes(svc.id)) continue
-    const costo = Math.abs(svc.importe)
-    const comision = comisionPct > 0 ? Math.round(costo * comisionPct / 100 * 100) / 100 : 0
-    gastosItems.push({ concepto: svc.concepto, costo, comisionPercent: comisionPct, comision, total: costo + comision })
+    gastosItems.push({ concepto: svc.concepto, importe: Math.abs(svc.importe) })
   }
   for (const ex of extras) {
-    const costo = parseFloat(ex.importe) || 0
-    const comision = comisionPct > 0 ? Math.round(costo * comisionPct / 100 * 100) / 100 : 0
-    gastosItems.push({ concepto: ex.concepto || 'Extra', costo, comisionPercent: comisionPct, comision, total: costo + comision, isExtra: true })
+    gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
   // Rent honorarios
-  const bonificaciones = (data.serviciosDisponibles || [])
-    .filter(s => s.category === 'BONIFICACION' || s.category === 'DESCUENTO')
-    .reduce((s, sv) => s + Math.abs(sv.importe), 0)
-  const baseHonorarios = Math.max(0, (data.total || 0) - bonificaciones)
-  const montoAlquiler = comisionPct > 0 ? Math.round(baseHonorarios * comisionPct / 100 * 100) / 100 : 0
+  const baseHonorarios = Math.max(0, data.total || 0)
+  const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0
+  const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
+  const monto = montoAlquiler + totalGastos
 
-  const totalCostos = gastosItems.reduce((s, g) => s + g.costo, 0)
-  const totalComision = gastosItems.reduce((s, g) => s + g.comision, 0)
-  const monto = montoAlquiler + totalCostos + totalComision
-
-  return { porcentaje: comisionPct, baseHonorarios, montoAlquiler, gastosAMiCargo: gastosItems, totalCostos, totalComision, comisionPercent: comisionPct, monto }
+  return { porcentaje: pct, baseHonorarios, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
 }
 
 function LiquidacionTab({ groupId }) {
@@ -198,23 +189,15 @@ function LiquidacionTab({ groupId }) {
   const filteredData = useMemo(() => allData || [], [allData])
 
   // Build effective data applying local gastos selections for preview
+  // Services stay in conceptos and total unchanged — gastos only affect honorarios section
   const effectiveData = useMemo(() => {
     return filteredData.map(data => {
       const sel = gastosAMiCargo[data.contractId] || {}
       const selectedIds = sel.serviceIds || []
       const extras = sel.extras || []
       if (selectedIds.length === 0 && extras.length === 0 && !honorariosPercent) return data
-
-      // Remove selected services from conceptos
-      const conceptos = data.conceptos.filter(c => !c.serviceId || !selectedIds.includes(c.serviceId))
-      // Recalculate display total
-      const removedTotal = (data.serviciosDisponibles || [])
-        .filter(s => selectedIds.includes(s.id))
-        .reduce((sum, s) => sum + s.importe, 0)
-      const total = data.total - removedTotal
-
       const honorarios = computeHonorariosLocal(data, gastosAMiCargo, honorariosPercent)
-      return { ...data, conceptos, total, honorarios }
+      return { ...data, honorarios }
     })
   }, [filteredData, gastosAMiCargo, honorariosPercent])
 
@@ -501,21 +484,11 @@ function LiquidacionTab({ groupId }) {
                           )}
                           {gastos.map((g, gi) => (
                             <div key={gi} className="flex justify-between text-xs">
-                              <span className="text-base-content/70">
-                                {g.concepto}
-                                {g.comisionPercent > 0 && (
-                                  <span className="text-base-content/40 ml-1">base {formatCurrency(g.costo)} + {g.comisionPercent}%</span>
-                                )}
-                              </span>
-                              <span className="font-medium">{formatCurrency(g.total)}</span>
+                              <span className="text-base-content/70">{g.concepto}</span>
+                              <span className="font-medium">{formatCurrency(g.importe)}</span>
                             </div>
                           ))}
                         </div>
-                        {gastos.length > 0 && (
-                          <div className="border-t border-primary/20 mt-2 pt-2 flex justify-between text-xs text-base-content/50">
-                            <span>Costos: {formatCurrency(hon.totalCostos)} | Comisión: {formatCurrency(hon.totalComision)}</span>
-                          </div>
-                        )}
                         <div className="flex justify-between font-bold text-sm mt-1">
                           <span>Total honorarios</span>
                           <span>{formatCurrency(hon.monto)}</span>
@@ -540,7 +513,7 @@ function LiquidacionTab({ groupId }) {
               const gastosGrouped = []
               for (const g of allGastos) {
                 const ex = gastosGrouped.find(x => x.concepto === g.concepto)
-                if (ex) { ex.costo += g.costo; ex.comision += g.comision; ex.total += g.total }
+                if (ex) { ex.importe += g.importe }
                 else gastosGrouped.push({ ...g })
               }
               const honPct = effectiveData.find(d => d.honorarios)?.honorarios.porcentaje
@@ -557,11 +530,8 @@ function LiquidacionTab({ groupId }) {
                     )}
                     {gastosGrouped.map((g, i) => (
                       <div key={i} className="flex justify-between text-base-content/70">
-                        <span>
-                          {g.concepto}
-                          {g.comisionPercent > 0 && <span className="text-xs text-base-content/40 ml-1">+{g.comisionPercent}%</span>}
-                        </span>
-                        <span>{formatCurrency(g.total)}</span>
+                        <span>{g.concepto}</span>
+                        <span>{formatCurrency(g.importe)}</span>
                       </div>
                     ))}
                   </div>
