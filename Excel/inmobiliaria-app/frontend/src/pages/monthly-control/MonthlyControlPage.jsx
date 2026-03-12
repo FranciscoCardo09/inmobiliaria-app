@@ -836,12 +836,12 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           )}
         </td>
         <td className="text-xs text-right font-mono text-success">
-          {record.aFavorNextMonth > 0
+          {record.aFavorNextMonth > 1
             ? formatCurrency(record.aFavorNextMonth)
             : '-'}
         </td>
         <td className="text-xs text-right font-mono text-error">
-          {record.debeNextMonth > 0
+          {record.debeNextMonth > 1
             ? formatCurrency(record.debeNextMonth)
             : '-'}
         </td>
