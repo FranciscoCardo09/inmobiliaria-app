@@ -375,8 +375,8 @@ const generateLiquidacionPDF = (data) => {
     const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
     y = drawInfo(doc, y, [
       ['Propiedad', addr],
-      ['Inquilino', `${data.inquilino.nombre}${data.inquilino.dni ? ` - DNI: ${data.inquilino.dni}` : ''}`],
-      ['Propietario', `${data.propietario.nombre}${data.propietario.dni ? ` - DNI: ${data.propietario.dni}` : ''}`],
+      ['Inquilino', `${data.inquilino.nombre}${data.inquilino.dni ? ` - CUIL: ${data.inquilino.dni}` : ''}`],
+      ['Propietario', `${data.propietario.nombre}${data.propietario.dni ? ` - CUIL: ${data.propietario.dni}` : ''}`],
     ]);
 
     // Detail table
@@ -719,7 +719,7 @@ const generatePagoEfectivoPDF = (data) => {
     // ── Client data ──
     doc.font(F.r).fontSize(8).fillColor(C.dark);
     doc.text('Señor/es:', rMargin + 4, y, { continued: true });
-    doc.font(F.b).text(` ${data.inquilino.nombre}${data.inquilino.dni ? ` - DNI: ${data.inquilino.dni}` : ''}`);
+    doc.font(F.b).text(` ${data.inquilino.nombre}${data.inquilino.dni ? ` - CUIL: ${data.inquilino.dni}` : ''}`);
     y += 13;
     doc.font(F.r).fontSize(8).fillColor(C.dark);
     doc.text('Domicilio:', rMargin + 4, y, { continued: true });
@@ -732,7 +732,7 @@ const generatePagoEfectivoPDF = (data) => {
     if (data.propietario?.nombre) {
       doc.font(F.r).fontSize(8).fillColor(C.dark);
       doc.text('Por cuenta y orden de:', rMargin + 4, y, { continued: true });
-      doc.font(F.b).text(` ${data.propietario.nombre}${data.propietario.dni ? ` - DNI: ${data.propietario.dni}` : ''}`);
+      doc.font(F.b).text(` ${data.propietario.nombre}${data.propietario.dni ? ` - CUIL: ${data.propietario.dni}` : ''}`);
       y += 13;
     }
     y += 3;
@@ -877,14 +877,14 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
       }
 
       doc.font(F.r).fontSize(8).fillColor(C.dark);
-      doc.text('Señor/es:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.inquilino.nombre}${data.inquilino.dni ? ` - DNI: ${data.inquilino.dni}` : ''}`); y += 13;
+      doc.text('Señor/es:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.inquilino.nombre}${data.inquilino.dni ? ` - CUIL: ${data.inquilino.dni}` : ''}`); y += 13;
       doc.font(F.r).fontSize(8).fillColor(C.dark);
       doc.text('Domicilio:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.propiedad.direccion}`); y += 13;
       doc.font(F.r).fontSize(8).fillColor(C.dark);
       doc.text('Período:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.periodo.label}`); y += 13;
       if (data.propietario?.nombre) {
         doc.font(F.r).fontSize(8).fillColor(C.dark);
-        doc.text('Por cuenta y orden de:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.propietario.nombre}${data.propietario.dni ? ` - DNI: ${data.propietario.dni}` : ''}`); y += 13;
+        doc.text('Por cuenta y orden de:', rMargin + 4, y, { continued: true }); doc.font(F.b).text(` ${data.propietario.nombre}${data.propietario.dni ? ` - CUIL: ${data.propietario.dni}` : ''}`); y += 13;
       }
       y += 3;
 
@@ -1182,7 +1182,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       doc.font(F.b).fontSize(9).fillColor(C.black)
         .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.6 });
       doc.font(F.r).fontSize(8).fillColor(C.medium)
-        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - DNI: ${data.inquilino.dni}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.6 });
+        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - CUIL: ${data.inquilino.dni}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.6 });
 
       // Subtotal on right
       doc.font(F.b).fontSize(10).fillColor(C.black)

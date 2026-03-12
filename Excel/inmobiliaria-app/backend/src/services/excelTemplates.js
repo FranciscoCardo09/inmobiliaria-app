@@ -232,7 +232,7 @@ const generateEstadoCuentasExcel = async (data) => {
   sheet.getCell('A3').value = 'Inquilino:';
   sheet.getCell('A3').font = { bold: true };
   sheet.getCell('B3').value = data.inquilino.nombre;
-  sheet.getCell('D3').value = 'DNI:';
+  sheet.getCell('D3').value = 'CUIL:';
   sheet.getCell('D3').font = { bold: true };
   sheet.getCell('E3').value = data.inquilino.dni;
 
