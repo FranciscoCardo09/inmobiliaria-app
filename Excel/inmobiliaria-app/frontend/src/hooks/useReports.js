@@ -231,6 +231,26 @@ export const useReportDownload = (groupId) => {
     }
   }
 
+  const downloadFilePost = async (path, body, filename) => {
+    try {
+      const response = await api.post(`/groups/${groupId}/reports/${path}`, body, { responseType: 'blob' })
+      const blob = new Blob([response.data], {
+        type: response.headers['content-type'],
+      })
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+      toast.success(`Descargado: ${filename}`)
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Error al descargar')
+    }
+  }
+
   const downloadPDF = (path, filename) => {
     return downloadFile(`/groups/${groupId}/reports/${path}`, filename)
   }
@@ -247,7 +267,12 @@ export const useReportDownload = (groupId) => {
     return downloadFile(`/groups/${groupId}/reports/${path}`, filename)
   }
 
-  return { downloadPDF, downloadExcel, downloadDOCX, downloadHTML }
+  const downloadPDFPost = (path, body, filename) => downloadFilePost(path, body, filename)
+  const downloadDOCXPost = (path, body, filename) => downloadFilePost(path, body, filename)
+  const downloadHTMLPost = (path, body, filename) => downloadFilePost(path, body, filename)
+  const downloadExcelPost = (path, body, filename) => downloadFilePost(path, body, filename)
+
+  return { downloadPDF, downloadExcel, downloadDOCX, downloadHTML, downloadPDFPost, downloadDOCXPost, downloadHTMLPost, downloadExcelPost }
 }
 
 export const useSendReportEmail = (groupId) => {

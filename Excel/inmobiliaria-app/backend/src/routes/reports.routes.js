@@ -1,7 +1,8 @@
 // Reports Routes - Phase 6
 const express = require('express');
 const router = express.Router({ mergeParams: true });
-const reportsController = require('../controllers/reportsController');
+const reportsController = require('../controllers/reportsController')
+// Note: POST download routes support gastosAMiCargo per-contract selections;
 const { authenticate } = require('../middleware/auth');
 const { requireGroupAccess } = require('../middleware/groupAuth');
 
@@ -176,6 +177,33 @@ router.get(
   '/control-mensual/excel',
   requireGroupAccess(['ADMIN', 'OPERATOR']),
   reportsController.downloadControlMensualExcel
+);
+
+// ============================================
+// POST Downloads (support gastosAMiCargo per-contract)
+// ============================================
+router.post(
+  '/liquidacion-all/pdf',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllPDFPost
+);
+
+router.post(
+  '/liquidacion-all/docx',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllDOCXPost
+);
+
+router.post(
+  '/liquidacion-all/html',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllHTMLPost
+);
+
+router.post(
+  '/liquidacion/excel',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  reportsController.downloadLiquidacionAllExcelPost
 );
 
 // ============================================

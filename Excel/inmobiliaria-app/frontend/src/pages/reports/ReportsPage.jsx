@@ -128,6 +128,44 @@ export default function ReportsPage() {
 // LIQUIDACION TAB - Modern Design with Property Multi-Select
 // ============================================
 
+// Helper: compute effective honorarios for a single contract given local gastos selections
+function computeHonorariosLocal(data, gastosState, honPct) {
+  const sel = gastosState[data.contractId] || {}
+  const selectedIds = sel.serviceIds || []
+  const extras = sel.extras || []
+  const comisionPct = parseFloat(honPct) || 0
+
+  const hasAny = selectedIds.length > 0 || extras.length > 0 || comisionPct > 0
+  if (!hasAny) return null
+
+  // Services selected as "paid by me"
+  const gastosItems = []
+  for (const svc of (data.serviciosDisponibles || [])) {
+    if (!selectedIds.includes(svc.id)) continue
+    const costo = Math.abs(svc.importe)
+    const comision = comisionPct > 0 ? Math.round(costo * comisionPct / 100 * 100) / 100 : 0
+    gastosItems.push({ concepto: svc.concepto, costo, comisionPercent: comisionPct, comision, total: costo + comision })
+  }
+  for (const ex of extras) {
+    const costo = parseFloat(ex.importe) || 0
+    const comision = comisionPct > 0 ? Math.round(costo * comisionPct / 100 * 100) / 100 : 0
+    gastosItems.push({ concepto: ex.concepto || 'Extra', costo, comisionPercent: comisionPct, comision, total: costo + comision, isExtra: true })
+  }
+
+  // Rent honorarios
+  const bonificaciones = (data.serviciosDisponibles || [])
+    .filter(s => s.category === 'BONIFICACION' || s.category === 'DESCUENTO')
+    .reduce((s, sv) => s + Math.abs(sv.importe), 0)
+  const baseHonorarios = Math.max(0, (data.total || 0) - bonificaciones)
+  const montoAlquiler = comisionPct > 0 ? Math.round(baseHonorarios * comisionPct / 100 * 100) / 100 : 0
+
+  const totalCostos = gastosItems.reduce((s, g) => s + g.costo, 0)
+  const totalComision = gastosItems.reduce((s, g) => s + g.comision, 0)
+  const monto = montoAlquiler + totalCostos + totalComision
+
+  return { porcentaje: comisionPct, baseHonorarios, montoAlquiler, gastosAMiCargo: gastosItems, totalCostos, totalComision, comisionPercent: comisionPct, monto }
+}
+
 function LiquidacionTab({ groupId }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
@@ -135,6 +173,8 @@ function LiquidacionTab({ groupId }) {
   const [selectedContractIds, setSelectedContractIds] = useState([])
   const [selectedOwnerId, setSelectedOwnerId] = useState('')
   const [honorariosPercent, setHonorariosPercent] = useState('')
+  // { [contractId]: { serviceIds: string[], extras: { id, concepto, importe }[] } }
+  const [gastosAMiCargo, setGastosAMiCargo] = useState({})
 
   const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
   const { owners } = useOwners(groupId)
@@ -142,73 +182,113 @@ function LiquidacionTab({ groupId }) {
     month: String(month),
     year: String(year),
     contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
-    honorariosPercent: honorariosPercent || undefined,
     ownerId: selectedOwnerId || undefined,
   })
-  const { downloadPDF, downloadExcel, downloadDOCX, downloadHTML } = useReportDownload(groupId)
+  const { downloadPDFPost, downloadDOCXPost, downloadHTMLPost, downloadExcelPost } = useReportDownload(groupId)
 
-  // Contract options for multi-select (shows type + tenant/owner + address)
   const contractOptions = useMemo(() => {
     return (contracts || []).map((c) => {
       const type = c.contractType === 'PROPIETARIO' ? 'PROP' : 'INQ'
       const tenant = c.tenants?.[0]?.name || c.tenant?.name || 'Sin inquilino'
       const name = c.contractType === 'PROPIETARIO' ? (c.property?.owner?.name || 'Propietario') : tenant
-      return {
-        value: c.id,
-        label: `[${type}] ${c.property?.address || 'Sin dirección'} - ${name}`,
-      }
+      return { value: c.id, label: `[${type}] ${c.property?.address || 'Sin dirección'} - ${name}` }
     })
   }, [contracts])
 
-  const filteredData = useMemo(() => {
-    return allData || []
-  }, [allData])
+  const filteredData = useMemo(() => allData || [], [allData])
 
-  const buildParams = () => {
-    const contractIdsParam = selectedContractIds.length > 0 ? `&contractIds=${selectedContractIds.join(',')}` : ''
-    const honorariosParam = honorariosPercent ? `&honorariosPercent=${honorariosPercent}` : ''
-    const ownerIdParam = selectedOwnerId ? `&ownerId=${selectedOwnerId}` : ''
-    return `month=${month}&year=${year}${contractIdsParam}${honorariosParam}${ownerIdParam}`
+  // Build effective data applying local gastos selections for preview
+  const effectiveData = useMemo(() => {
+    return filteredData.map(data => {
+      const sel = gastosAMiCargo[data.contractId] || {}
+      const selectedIds = sel.serviceIds || []
+      const extras = sel.extras || []
+      if (selectedIds.length === 0 && extras.length === 0 && !honorariosPercent) return data
+
+      // Remove selected services from conceptos
+      const conceptos = data.conceptos.filter(c => !c.serviceId || !selectedIds.includes(c.serviceId))
+      // Recalculate display total
+      const removedTotal = (data.serviciosDisponibles || [])
+        .filter(s => selectedIds.includes(s.id))
+        .reduce((sum, s) => sum + s.importe, 0)
+      const total = data.total - removedTotal
+
+      const honorarios = computeHonorariosLocal(data, gastosAMiCargo, honorariosPercent)
+      return { ...data, conceptos, total, honorarios }
+    })
+  }, [filteredData, gastosAMiCargo, honorariosPercent])
+
+  const buildPostBody = () => {
+    // Build gastosAMiCargo map for POST body
+    const gastosBody = {}
+    for (const [contractId, sel] of Object.entries(gastosAMiCargo)) {
+      if ((sel.serviceIds?.length || 0) > 0 || (sel.extras?.length || 0) > 0) {
+        gastosBody[contractId] = {
+          serviceIds: sel.serviceIds || [],
+          extras: (sel.extras || []).map(e => ({ concepto: e.concepto, importe: parseFloat(e.importe) || 0 })),
+          comisionPercent: parseFloat(honorariosPercent) || 0,
+        }
+      }
+    }
+    return {
+      month, year,
+      honorariosPercent: honorariosPercent ? parseFloat(honorariosPercent) : undefined,
+      contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
+      ownerId: selectedOwnerId || undefined,
+      gastosAMiCargo: Object.keys(gastosBody).length > 0 ? gastosBody : undefined,
+    }
   }
 
-  const handleDownloadPDF = () => {
-    downloadPDF(`liquidacion-all/pdf?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+  const handleDownloadPDF = () => downloadPDFPost('liquidacion-all/pdf', buildPostBody(), `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.pdf`)
+  const handleDownloadDOCX = () => downloadDOCXPost('liquidacion-all/docx', buildPostBody(), `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.docx`)
+  const handleDownloadHTML = () => downloadHTMLPost('liquidacion-all/html', buildPostBody(), `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.html`)
+  const handleDownloadExcel = () => downloadExcelPost('liquidacion/excel', buildPostBody(), `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
+
+  // Gastos state helpers
+  const toggleService = (contractId, serviceId) => {
+    setGastosAMiCargo(prev => {
+      const cur = prev[contractId] || { serviceIds: [], extras: [] }
+      const ids = cur.serviceIds.includes(serviceId)
+        ? cur.serviceIds.filter(id => id !== serviceId)
+        : [...cur.serviceIds, serviceId]
+      return { ...prev, [contractId]: { ...cur, serviceIds: ids } }
+    })
   }
 
-  const handleDownloadDOCX = () => {
-    downloadDOCX(`liquidacion-all/docx?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.docx`)
+  const addExtra = (contractId) => {
+    setGastosAMiCargo(prev => {
+      const cur = prev[contractId] || { serviceIds: [], extras: [] }
+      return { ...prev, [contractId]: { ...cur, extras: [...cur.extras, { id: Date.now(), concepto: '', importe: '' }] } }
+    })
   }
 
-  const handleDownloadHTML = () => {
-    downloadHTML(`liquidacion-all/html?${buildParams()}`, `liquidacion-${monthNames[month]?.toLowerCase()}-${year}.html`)
+  const updateExtra = (contractId, extraId, field, value) => {
+    setGastosAMiCargo(prev => {
+      const cur = prev[contractId] || { serviceIds: [], extras: [] }
+      return { ...prev, [contractId]: { ...cur, extras: cur.extras.map(e => e.id === extraId ? { ...e, [field]: value } : e) } }
+    })
   }
 
-  const handleDownloadExcel = () => {
-    downloadExcel(`liquidacion/excel?${buildParams()}`, `liquidaciones-${monthNames[month]?.toLowerCase()}-${year}.xlsx`)
+  const removeExtra = (contractId, extraId) => {
+    setGastosAMiCargo(prev => {
+      const cur = prev[contractId] || { serviceIds: [], extras: [] }
+      return { ...prev, [contractId]: { ...cur, extras: cur.extras.filter(e => e.id !== extraId) } }
+    })
   }
 
-  // Collect all transactions
   const allTransactions = useMemo(() => {
-    if (!filteredData) return []
     const txns = []
-    for (const d of filteredData) {
+    for (const d of effectiveData) {
       for (const t of (d.transacciones || [])) {
         txns.push({ ...t, inquilino: t.inquilino || d.inquilino.nombre })
       }
     }
     txns.sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
     return txns
-  }, [filteredData])
+  }, [effectiveData])
 
-  const grandTotal = useMemo(() => {
-    if (!filteredData) return 0
-    return filteredData.reduce((s, d) => s + d.total, 0)
-  }, [filteredData])
-
-  const totalPagado = useMemo(() => {
-    return allTransactions.reduce((s, t) => s + t.monto, 0)
-  }, [allTransactions])
-
+  const grandTotal = useMemo(() => effectiveData.reduce((s, d) => s + d.total, 0), [effectiveData])
+  const totalPagado = useMemo(() => allTransactions.reduce((s, t) => s + t.monto, 0), [allTransactions])
   const saldo = grandTotal - totalPagado
 
   return (
@@ -239,15 +319,13 @@ function LiquidacionTab({ groupId }) {
               placeholder="Ej: 5"
               value={honorariosPercent}
               onChange={(e) => setHonorariosPercent(e.target.value)}
-              min="0"
-              max="100"
-              step="0.5"
+              min="0" max="100" step="0.5"
             />
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           <div>
-            <label className="label"><span className="label-text text-xs">Filtrar por contratos (opcional)</span></label>
+            <label className="label"><span className="label-text text-xs font-semibold">Filtrar por contratos (opcional)</span></label>
             <MultiSearchableSelect
               options={contractOptions}
               value={selectedContractIds}
@@ -262,10 +340,7 @@ function LiquidacionTab({ groupId }) {
             <SearchableSelect
               label="Filtrar por dueño (opcional)"
               name="ownerId"
-              options={(owners || []).map((owner) => ({
-                value: owner.id,
-                label: owner.name,
-              }))}
+              options={(owners || []).map((owner) => ({ value: owner.id, label: owner.name }))}
               value={selectedOwnerId}
               onChange={(e) => setSelectedOwnerId(e?.target?.value ?? e ?? '')}
               placeholder="Todos los dueños..."
@@ -277,19 +352,19 @@ function LiquidacionTab({ groupId }) {
         <div className="mt-4 pt-3 border-t border-base-300">
           <p className="text-xs text-base-content/60 mb-2">Descargar liquidación</p>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={handleDownloadPDF} className="btn-sm btn-neutral gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+            <Button onClick={handleDownloadPDF} className="btn-sm btn-neutral gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <ArrowDownTrayIcon className="w-4 h-4" /> PDF
             </Button>
-            <Button onClick={handleDownloadDOCX} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+            <Button onClick={handleDownloadDOCX} className="btn-sm btn-outline gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <DocumentTextIcon className="w-4 h-4" /> DOCX
             </Button>
-            <Button onClick={handleDownloadHTML} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+            <Button onClick={handleDownloadHTML} className="btn-sm btn-outline gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <CodeBracketIcon className="w-4 h-4" /> HTML
             </Button>
-            <Button onClick={handleDownloadExcel} className="btn-sm btn-outline gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+            <Button onClick={handleDownloadExcel} className="btn-sm btn-outline gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <TableCellsIcon className="w-4 h-4" /> Excel
             </Button>
-            <Button onClick={() => handleDownloadPDF() && window.print()} className="btn-sm btn-ghost gap-1.5" disabled={!filteredData || filteredData.length === 0}>
+            <Button onClick={handleDownloadPDF} className="btn-sm btn-ghost gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <PrinterIcon className="w-4 h-4" /> Imprimir
             </Button>
           </div>
@@ -302,7 +377,7 @@ function LiquidacionTab({ groupId }) {
         <Card><p className="text-base-content/60 text-center py-4">No hay liquidaciones para este período</p></Card>
       )}
 
-      {filteredData.length > 0 && (
+      {effectiveData.length > 0 && (
         <>
           <Card title="Resumen">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -322,11 +397,16 @@ function LiquidacionTab({ groupId }) {
           </Card>
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
-            {filteredData.map((data, idx) => {
+            {effectiveData.map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
+              const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
+              const disponibles = data.serviciosDisponibles || []
+
               return (
                 <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
                   <h3 className="font-semibold text-sm mb-2">{addr} - {data.inquilino.nombre}</h3>
+
+                  {/* Conceptos table */}
                   <div className="overflow-x-auto">
                     <table className="table table-xs">
                       <tbody>
@@ -347,6 +427,102 @@ function LiquidacionTab({ groupId }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Gastos a mi cargo — shown when there are available services OR extras already added */}
+                  {(disponibles.length > 0 || selState.extras.length > 0) && (
+                    <div className="mt-3 p-3 bg-base-200/60 rounded-lg border border-base-300">
+                      <p className="text-xs font-semibold text-base-content/70 mb-2 uppercase tracking-wide">Gastos a mi cargo</p>
+
+                      {/* Service checkboxes */}
+                      {disponibles.length > 0 && (
+                        <div className="space-y-1 mb-2">
+                          {disponibles.map(svc => (
+                            <label key={svc.id} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-xs checkbox-primary"
+                                checked={selState.serviceIds.includes(svc.id)}
+                                onChange={() => toggleService(data.contractId, svc.id)}
+                              />
+                              <span className="text-xs">{svc.concepto}</span>
+                              <span className="text-xs text-base-content/50 ml-auto">{formatCurrency(svc.importe)}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Extra rows */}
+                      {selState.extras.map(ex => (
+                        <div key={ex.id} className="flex items-center gap-2 mt-1">
+                          <input
+                            type="text"
+                            className="input input-bordered input-xs flex-1"
+                            placeholder="Descripción"
+                            value={ex.concepto}
+                            onChange={e => updateExtra(data.contractId, ex.id, 'concepto', e.target.value)}
+                          />
+                          <input
+                            type="number"
+                            className="input input-bordered input-xs w-28"
+                            placeholder="Importe"
+                            value={ex.importe}
+                            onChange={e => updateExtra(data.contractId, ex.id, 'importe', e.target.value)}
+                            min="0" step="0.01"
+                          />
+                          <button
+                            className="btn btn-xs btn-ghost text-error"
+                            onClick={() => removeExtra(data.contractId, ex.id)}
+                          >✕</button>
+                        </div>
+                      ))}
+
+                      <button
+                        className="btn btn-xs btn-ghost mt-2 text-primary"
+                        onClick={() => addExtra(data.contractId)}
+                      >
+                        + Agregar extra
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Honorarios per contract (preview) */}
+                  {data.honorarios && (() => {
+                    const hon = data.honorarios
+                    const gastos = hon.gastosAMiCargo || []
+                    return (
+                      <div className="mt-2 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                        <p className="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Honorarios</p>
+                        <div className="space-y-1">
+                          {hon.porcentaje > 0 && (
+                            <div className="flex justify-between text-xs">
+                              <span>Honorarios alquiler ({hon.porcentaje}%)</span>
+                              <span className="font-medium">{formatCurrency(hon.montoAlquiler)}</span>
+                            </div>
+                          )}
+                          {gastos.map((g, gi) => (
+                            <div key={gi} className="flex justify-between text-xs">
+                              <span className="text-base-content/70">
+                                {g.concepto}
+                                {g.comisionPercent > 0 && (
+                                  <span className="text-base-content/40 ml-1">base {formatCurrency(g.costo)} + {g.comisionPercent}%</span>
+                                )}
+                              </span>
+                              <span className="font-medium">{formatCurrency(g.total)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {gastos.length > 0 && (
+                          <div className="border-t border-primary/20 mt-2 pt-2 flex justify-between text-xs text-base-content/50">
+                            <span>Costos: {formatCurrency(hon.totalCostos)} | Comisión: {formatCurrency(hon.totalComision)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-bold text-sm mt-1">
+                          <span>Total honorarios</span>
+                          <span>{formatCurrency(hon.monto)}</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}
@@ -357,34 +533,58 @@ function LiquidacionTab({ groupId }) {
               <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
             </div>
 
-            {/* Honorarios */}
-            {filteredData.some(d => d.honorarios) && (() => {
-              const totalHon = filteredData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0)
-              const honPct = filteredData.find(d => d.honorarios)?.honorarios.porcentaje
-              const honLetras = filteredData.find(d => d.honorarios)?.honorarios.montoEnLetras
+            {/* Honorarios summary (all contracts) */}
+            {effectiveData.some(d => d.honorarios) && (() => {
+              const totalHon = effectiveData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0)
+              const allGastos = effectiveData.flatMap(d => d.honorarios?.gastosAMiCargo || [])
+              const gastosGrouped = []
+              for (const g of allGastos) {
+                const ex = gastosGrouped.find(x => x.concepto === g.concepto)
+                if (ex) { ex.costo += g.costo; ex.comision += g.comision; ex.total += g.total }
+                else gastosGrouped.push({ ...g })
+              }
+              const honPct = effectiveData.find(d => d.honorarios)?.honorarios.porcentaje
+              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0)
               return (
                 <div className="mt-3 p-3 bg-base-200 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold">Honorarios ({honPct}%)</span>
-                    <span className="font-bold">{formatCurrency(totalHon)}</span>
+                  <p className="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Honorarios totales</p>
+                  <div className="space-y-1 text-sm">
+                    {honPct > 0 && (
+                      <div className="flex justify-between">
+                        <span>Honorarios alquiler ({honPct}%)</span>
+                        <span>{formatCurrency(totalAlquiler)}</span>
+                      </div>
+                    )}
+                    {gastosGrouped.map((g, i) => (
+                      <div key={i} className="flex justify-between text-base-content/70">
+                        <span>
+                          {g.concepto}
+                          {g.comisionPercent > 0 && <span className="text-xs text-base-content/40 ml-1">+{g.comisionPercent}%</span>}
+                        </span>
+                        <span>{formatCurrency(g.total)}</span>
+                      </div>
+                    ))}
                   </div>
-                  {honLetras && <p className="text-xs text-gray-500 italic mt-1">Son: {honLetras}</p>}
+                  <div className="flex justify-between font-bold mt-2 pt-2 border-t border-base-300">
+                    <span>TOTAL HONORARIOS</span>
+                    <span>{formatCurrency(totalHon)}</span>
+                  </div>
                 </div>
               )
             })()}
           </Card>
 
           {/* Datos bancarios empresa */}
-          {filteredData[0]?.empresa?.banco?.cbu && (
+          {effectiveData[0]?.empresa?.banco?.cbu && (
             <Card title="Datos para Transferencia de Honorarios">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                {filteredData[0].empresa.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {filteredData[0].empresa.banco.nombre}</div>}
-                {filteredData[0].empresa.banco.titular && <div><span className="text-base-content/60">Titular:</span> {filteredData[0].empresa.banco.titular}</div>}
-                {filteredData[0].empresa.banco.cuit && <div><span className="text-base-content/60">CUIT:</span> {filteredData[0].empresa.banco.cuit}</div>}
-                {filteredData[0].empresa.banco.tipoCuenta && <div><span className="text-base-content/60">Tipo:</span> {filteredData[0].empresa.banco.tipoCuenta}</div>}
-                {filteredData[0].empresa.banco.numeroCuenta && <div><span className="text-base-content/60">N° Cuenta:</span> {filteredData[0].empresa.banco.numeroCuenta}</div>}
-                {filteredData[0].empresa.banco.cbu && <div><span className="text-base-content/60">CBU:</span> {filteredData[0].empresa.banco.cbu}</div>}
-                {filteredData[0].empresa.banco.alias && <div><span className="text-base-content/60">Alias:</span> {filteredData[0].empresa.banco.alias}</div>}
+                {effectiveData[0].empresa.banco.nombre && <div><span className="text-base-content/60">Banco:</span> {effectiveData[0].empresa.banco.nombre}</div>}
+                {effectiveData[0].empresa.banco.titular && <div><span className="text-base-content/60">Titular:</span> {effectiveData[0].empresa.banco.titular}</div>}
+                {effectiveData[0].empresa.banco.cuit && <div><span className="text-base-content/60">CUIT:</span> {effectiveData[0].empresa.banco.cuit}</div>}
+                {effectiveData[0].empresa.banco.tipoCuenta && <div><span className="text-base-content/60">Tipo:</span> {effectiveData[0].empresa.banco.tipoCuenta}</div>}
+                {effectiveData[0].empresa.banco.numeroCuenta && <div><span className="text-base-content/60">N° Cuenta:</span> {effectiveData[0].empresa.banco.numeroCuenta}</div>}
+                {effectiveData[0].empresa.banco.cbu && <div><span className="text-base-content/60">CBU:</span> {effectiveData[0].empresa.banco.cbu}</div>}
+                {effectiveData[0].empresa.banco.alias && <div><span className="text-base-content/60">Alias:</span> {effectiveData[0].empresa.banco.alias}</div>}
               </div>
             </Card>
           )}

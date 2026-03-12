@@ -104,11 +104,25 @@ const generateLiquidacionHTML = (data) => {
 
   ${data.totalEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.totalEnLetras)}</p>` : ''}
 
-  ${data.honorarios ? `
+  ${data.honorarios ? (() => {
+    const hon = data.honorarios;
+    const gastos = hon.gastosAMiCargo || [];
+    const alquilerRow = hon.porcentaje > 0
+      ? `<tr><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333">Honorarios alquiler (${hon.porcentaje}%)</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(hon.montoAlquiler, data.currency)}</td></tr>` : '';
+    const gastosRows = gastos.map(g => {
+      const label = g.comisionPercent > 0 ? `${escHtml(g.concepto)} &nbsp;<span style="color:#999;font-size:8pt">base ${fmt(g.costo, data.currency)} + ${g.comisionPercent}%</span>` : escHtml(g.concepto);
+      return `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${label}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.total, data.currency)}</td></tr>`;
+    }).join('');
+    const sep = gastos.length > 0 ? `<tr><td colspan="2" style="border-top:1px solid #E0E0E0;padding:0"></td></tr>` : '';
+    return `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
-    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${data.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(data.honorarios.monto, data.currency)}</strong></span></p>
-    ${data.honorarios.montoEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0">Son: ${escHtml(data.honorarios.montoEnLetras)}</p>` : ''}
-  </div>` : ''}
+    <p style="font-family:Arial;font-size:9pt;color:#666;font-weight:bold;margin:0 0 6px 0;letter-spacing:0.5px">HONORARIOS</p>
+    <table style="width:100%;border-collapse:collapse">${alquilerRow}${gastosRows}${sep}
+      <tr><td style="padding:6px 10px;font-family:Arial;font-size:11pt;font-weight:bold;color:#000">TOTAL HONORARIOS</td><td style="padding:6px 10px;font-family:Arial;font-size:11pt;font-weight:bold;color:#000;text-align:right">${fmt(hon.monto, data.currency)}</td></tr>
+    </table>
+    ${hon.montoEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0 0 0">Son: ${escHtml(hon.montoEnLetras)}</p>` : ''}
+  </div>`;
+  })() : ''}
 
   ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `
   <div style="margin-top:16px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
@@ -188,10 +202,33 @@ const generateLiquidacionAllHTML = (dataArray) => {
     if (!firstHon) return '';
     const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
     const totalHonLetras = numeroATexto(totalHon);
+    const honPct = firstHon.honorarios.porcentaje;
+    const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
+
+    // Aggregate gastos across contracts
+    const allGastos = dataArray.flatMap(d => d.honorarios?.gastosAMiCargo || []);
+    const gastosGrouped = [];
+    for (const g of allGastos) {
+      const ex = gastosGrouped.find(x => x.concepto === g.concepto && x.comisionPercent === g.comisionPercent);
+      if (ex) { ex.costo += g.costo; ex.comision += g.comision; ex.total += g.total; }
+      else gastosGrouped.push({ ...g });
+    }
+
+    const alquilerRow = honPct > 0
+      ? `<tr><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333">Honorarios alquiler (${honPct}%)</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(totalAlquiler, currency)}</td></tr>` : '';
+    const gastosRows = gastosGrouped.map(g => {
+      const label = g.comisionPercent > 0 ? `${escHtml(g.concepto)} &nbsp;<span style="color:#999;font-size:8pt">base ${fmt(g.costo, currency)} + ${g.comisionPercent}%</span>` : escHtml(g.concepto);
+      return `<tr><td style="padding:4px 10px 4px 20px;font-family:Arial;font-size:10pt;color:#555">${label}</td><td style="padding:4px 10px;font-family:Arial;font-size:10pt;color:#333;text-align:right">${fmt(g.total, currency)}</td></tr>`;
+    }).join('');
+    const sep = gastosGrouped.length > 0 ? `<tr><td colspan="2" style="border-top:1px solid #E0E0E0;padding:0"></td></tr>` : '';
+
     return `
   <div style="margin-top:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
-    <p style="font-family:Arial;font-size:11pt;color:#000;margin:4px 0"><strong>Honorarios (${firstHon.honorarios.porcentaje}%):</strong> <span style="float:right"><strong>${fmt(totalHon, currency)}</strong></span></p>
-    ${totalHonLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0">Son: ${escHtml(totalHonLetras)}</p>` : ''}
+    <p style="font-family:Arial;font-size:9pt;color:#666;font-weight:bold;margin:0 0 6px 0;letter-spacing:0.5px">HONORARIOS</p>
+    <table style="width:100%;border-collapse:collapse">${alquilerRow}${gastosRows}${sep}
+      <tr><td style="padding:6px 10px;font-family:Arial;font-size:11pt;font-weight:bold;color:#000">TOTAL HONORARIOS</td><td style="padding:6px 10px;font-family:Arial;font-size:11pt;font-weight:bold;color:#000;text-align:right">${fmt(totalHon, currency)}</td></tr>
+    </table>
+    ${totalHonLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:4px 0 0 0">Son: ${escHtml(totalHonLetras)}</p>` : ''}
   </div>`;
   })()}
   ${emp.banco && (emp.banco.cbu || emp.banco.alias) ? `

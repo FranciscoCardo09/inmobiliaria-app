@@ -417,17 +417,53 @@ const generateLiquidacionPDF = (data) => {
     // Honorarios section
     if (data.honorarios) {
       y += 4;
-      const honH = 46;
+      const hon = data.honorarios;
+      const gastos = hon.gastosAMiCargo || [];
+      const rowH = 16;
+      const honH = 14 + rowH * (1 + gastos.length) + (gastos.length > 0 ? 10 : 0) + 20;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
-      doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text(`Honorarios (${data.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
-      doc.text(fmt(data.honorarios.monto, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+      let hy = y + 8;
+      doc.font(F.b).fontSize(9).fillColor(C.medium)
+        .text('HONORARIOS', PAGE.margin + 12, hy);
+      hy += 12;
 
-      if (data.honorarios.montoEnLetras) {
+      // Alquiler line (only if porcentaje > 0)
+      if (hon.porcentaje > 0) {
+        doc.font(F.r).fontSize(9).fillColor(C.dark)
+          .text(`Honorarios alquiler (${hon.porcentaje}%)`, PAGE.margin + 12, hy);
+        doc.font(F.b).fontSize(9).fillColor(C.black)
+          .text(fmt(hon.montoAlquiler, data.currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        hy += rowH;
+      }
+
+      // Gastos a mi cargo lines
+      for (const g of gastos) {
+        const subLabel = g.comisionPercent > 0
+          ? `  ${g.concepto}  base ${fmt(g.costo, data.currency)} + ${g.comisionPercent}%`
+          : `  ${g.concepto}`;
+        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(subLabel, PAGE.margin + 12, hy, { width: W * 0.65 });
+        doc.font(F.b).fontSize(8.5).fillColor(C.black)
+          .text(fmt(g.total, data.currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        hy += rowH;
+      }
+
+      // Separator + total
+      if (gastos.length > 0) {
+        doc.strokeColor(C.line).lineWidth(0.4)
+          .moveTo(PAGE.margin + 12, hy).lineTo(PAGE.width - PAGE.margin - 12, hy).stroke();
+        hy += 6;
+      }
+
+      doc.font(F.b).fontSize(10).fillColor(C.black)
+        .text('TOTAL HONORARIOS', PAGE.margin + 12, hy);
+      doc.text(fmt(hon.monto, data.currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+      hy += 14;
+
+      if (hon.montoEnLetras) {
         doc.font(F.r).fontSize(7.5).fillColor(C.dark)
-          .text(`Son: ${data.honorarios.montoEnLetras}`, PAGE.margin + 12, y + 28, { width: W - 24 });
+          .text(`Son: ${hon.montoEnLetras}`, PAGE.margin + 12, hy, { width: W - 24 });
       }
 
       y += honH + 10;
@@ -1232,21 +1268,69 @@ const generateLiquidacionAllPDF = (dataArray) => {
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
     if (firstHon) {
-      checkNewPage(60);
+      // Aggregate gastos across all contracts
+      const allGastos = dataArray.flatMap(d => d.honorarios?.gastosAMiCargo || []);
+      // Group gastos by concepto label, summing amounts
+      const gastosGrouped = [];
+      for (const g of allGastos) {
+        const existing = gastosGrouped.find(x => x.concepto === g.concepto && x.comisionPercent === g.comisionPercent);
+        if (existing) {
+          existing.costo += g.costo;
+          existing.comision += g.comision;
+          existing.total += g.total;
+        } else {
+          gastosGrouped.push({ ...g });
+        }
+      }
+
       const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
       const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
+      const rowH = 16;
+      const honH = 14 + rowH * (1 + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 20;
+      checkNewPage(honH + 20);
 
-      const honH = 46;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
+      let hy = y + 8;
+      doc.font(F.b).fontSize(9).fillColor(C.medium)
+        .text('HONORARIOS', PAGE.margin + 12, hy);
+      hy += 12;
+
+      const honPct = firstHon.honorarios.porcentaje;
+      if (honPct > 0) {
+        const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
+        doc.font(F.r).fontSize(9).fillColor(C.dark)
+          .text(`Honorarios alquiler (${honPct}%)`, PAGE.margin + 12, hy);
+        doc.font(F.b).fontSize(9).fillColor(C.black)
+          .text(fmt(totalAlquiler, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        hy += rowH;
+      }
+
+      for (const g of gastosGrouped) {
+        const subLabel = g.comisionPercent > 0
+          ? `  ${g.concepto}  base ${fmt(g.costo, currency)} + ${g.comisionPercent}%`
+          : `  ${g.concepto}`;
+        doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(subLabel, PAGE.margin + 12, hy, { width: W * 0.65 });
+        doc.font(F.b).fontSize(8.5).fillColor(C.black)
+          .text(fmt(g.total, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        hy += rowH;
+      }
+
+      if (gastosGrouped.length > 0) {
+        doc.strokeColor(C.line).lineWidth(0.4)
+          .moveTo(PAGE.margin + 12, hy).lineTo(PAGE.width - PAGE.margin - 12, hy).stroke();
+        hy += 6;
+      }
+
       doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text(`Honorarios (${firstHon.honorarios.porcentaje}%):`, PAGE.margin + 12, y + 8);
-      doc.text(fmt(totalHon, currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+        .text('TOTAL HONORARIOS', PAGE.margin + 12, hy);
+      doc.text(fmt(totalHon, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+      hy += 14;
 
       if (totalHonLetras) {
         doc.font(F.r).fontSize(7.5).fillColor(C.dark)
-          .text(`Son: ${totalHonLetras}`, PAGE.margin + 12, y + 28, { width: W - 24 });
+          .text(`Son: ${totalHonLetras}`, PAGE.margin + 12, hy, { width: W - 24 });
       }
 
       y += honH + 10;

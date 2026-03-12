@@ -179,19 +179,62 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
 
   const mesVencido = month === 1 ? 12 : month - 1;
   const anioVencido = month === 1 ? year - 1 : year;
-  const labelVencido = `${MONTH_NAMES[mesVencido]} ${anioVencido}`;
+
+  // Gastos a mi cargo options (per-contract)
+  const gastosOpts = options.gastosAMiCargo || null;
+  const gastosServiceIds = new Set(gastosOpts?.serviceIds || []);
+  const gastosExtras = gastosOpts?.extras || [];
+  const gastosComisionPercent = gastosOpts?.comisionPercent != null
+    ? gastosOpts.comisionPercent
+    : (options.honorariosPercent || 0);
+  const hasGastos = gastosServiceIds.size > 0 || gastosExtras.length > 0;
 
   // Pre-calculate honorarios
   let honorarios = null;
-  if (options.honorariosPercent > 0) {
-    const pct = options.honorariosPercent;
+  if (options.honorariosPercent > 0 || hasGastos) {
+    const pct = options.honorariosPercent || 0;
     const bonificaciones = monthlyRecord.services
       .filter(s => s.conceptType?.category === 'BONIFICACION' || s.conceptType?.category === 'DESCUENTO')
       .reduce((sum, s) => sum + Math.abs(s.amount), 0);
     const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
     const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
-    const monto = Math.round(baseHonorarios * pct / 100 * 100) / 100;
-    honorarios = { porcentaje: pct, monto, baseHonorarios };
+    const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0;
+
+    // Build gastos items from selected services
+    const gastosItems = [];
+    for (const svc of monthlyRecord.services) {
+      if (!gastosServiceIds.has(svc.id)) continue;
+      const cat = svc.conceptType?.category;
+      const label = svc.conceptType?.label || svc.description || 'Servicio';
+      const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
+      const concepto = showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]} ${anioVencido})` : label;
+      const costo = Math.abs(svc.amount);
+      const comision = gastosComisionPercent > 0 ? Math.round(costo * gastosComisionPercent / 100 * 100) / 100 : 0;
+      gastosItems.push({ concepto, costo, comisionPercent: gastosComisionPercent, comision, total: costo + comision });
+    }
+
+    // Build gastos items from manual extras
+    for (const extra of gastosExtras) {
+      const costo = Number(extra.importe) || 0;
+      const comision = gastosComisionPercent > 0 ? Math.round(costo * gastosComisionPercent / 100 * 100) / 100 : 0;
+      gastosItems.push({ concepto: extra.concepto || 'Extra', costo, comisionPercent: gastosComisionPercent, comision, total: costo + comision, isExtra: true });
+    }
+
+    const totalCostos = gastosItems.reduce((s, g) => s + g.costo, 0);
+    const totalComision = gastosItems.reduce((s, g) => s + g.comision, 0);
+    const monto = montoAlquiler + totalCostos + totalComision;
+
+    honorarios = {
+      porcentaje: pct,
+      baseHonorarios,
+      montoAlquiler,
+      gastosAMiCargo: gastosItems,
+      totalCostos,
+      totalComision,
+      comisionPercent: gastosComisionPercent,
+      monto,
+      montoEnLetras: numeroATexto(monto),
+    };
   }
 
   const conceptos = [];
@@ -201,6 +244,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   }
 
   for (const svc of monthlyRecord.services) {
+    if (gastosServiceIds.has(svc.id)) continue; // moved to honorarios section
     const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     const cat = svc.conceptType?.category;
     const label = svc.conceptType?.label || svc.description || 'Servicio';
@@ -209,6 +253,8 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       concepto: showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]} ${anioVencido})` : label,
       base: null,
       importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
+      serviceId: svc.id,
+      isService: true,
     });
   }
 
@@ -228,10 +274,21 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     });
   }
 
-  // Add "en letras" to honorarios
-  if (honorarios) {
-    honorarios.montoEnLetras = numeroATexto(honorarios.monto);
-  }
+  // Recalculate display total: subtract services moved to honorarios
+  const removedServicesTotal = monthlyRecord.services
+    .filter(s => gastosServiceIds.has(s.id))
+    .reduce((sum, s) => sum + s.amount, 0);
+  const displayTotal = monthlyRecord.totalDue - removedServicesTotal;
+
+  // Available services for frontend checkbox rendering (excludes discounts/bonifications)
+  const serviciosDisponibles = monthlyRecord.services
+    .filter(s => s.conceptType?.category !== 'BONIFICACION' && s.conceptType?.category !== 'DESCUENTO')
+    .map(s => ({
+      id: s.id,
+      concepto: s.conceptType?.label || s.description || 'Servicio',
+      importe: s.amount,
+      category: s.conceptType?.category || '',
+    }));
 
   return {
     empresa,
@@ -243,8 +300,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     propietario: { nombre: owner?.name || 'Sin propietario', dni: owner?.dni || '', banco: resolveOwnerBank(owner) },
     periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}`, mesContrato: monthlyRecord.monthNumber, mesVencido, anioVencido, labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}` },
     conceptos,
-    total: monthlyRecord.totalDue,
-    totalEnLetras: numeroATexto(monthlyRecord.totalDue),
+    serviciosDisponibles,
+    total: displayTotal,
+    totalEnLetras: numeroATexto(displayTotal),
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
@@ -313,7 +371,14 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     orderBy: { contract: { property: { address: 'asc' } } },
   });
 
-  return records.map((record) => buildLiquidacionFromRecord(record, empresa, month, year, options));
+  return records.map((record) => {
+    // Route per-contract gastosAMiCargo if provided as a map { [contractId]: {...} }
+    const contractOptions = { ...options };
+    if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
+      contractOptions.gastosAMiCargo = options.gastosAMiCargo[record.contractId] || null;
+    }
+    return buildLiquidacionFromRecord(record, empresa, month, year, contractOptions);
+  });
 };
 
 // ============================================

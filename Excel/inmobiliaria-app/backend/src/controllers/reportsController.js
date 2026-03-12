@@ -716,6 +716,161 @@ const downloadLiquidacionAllDOCX = async (req, res, next) => {
 };
 
 // ============================================
+// POST DOWNLOAD ENDPOINTS (with gastosAMiCargo support)
+// ============================================
+
+const downloadLiquidacionAllPDFPost = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (gastosAMiCargo) {
+      options.gastosAMiCargo = gastosAMiCargo;
+    }
+
+    const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
+    const contractIdArray = contractIds ? (Array.isArray(contractIds) ? contractIds : contractIds.split(',').filter(Boolean)) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
+
+    if (dataArray.length === 0) {
+      return ApiResponse.notFound(res, 'No se encontraron liquidaciones para ese período');
+    }
+
+    const pdfBuffer = await generateLiquidacionAllPDF(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (gastosAMiCargo) {
+      options.gastosAMiCargo = gastosAMiCargo;
+    }
+
+    const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
+    const contractIdArray = contractIds ? (Array.isArray(contractIds) ? contractIds : contractIds.split(',').filter(Boolean)) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
+
+    if (dataArray.length === 0) {
+      return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
+    }
+
+    const docxBuffer = await generateLiquidacionAllDOCX(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', docxBuffer.length);
+    res.send(docxBuffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (gastosAMiCargo) {
+      options.gastosAMiCargo = gastosAMiCargo;
+    }
+
+    const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
+    const contractIdArray = contractIds ? (Array.isArray(contractIds) ? contractIds : contractIds.split(',').filter(Boolean)) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
+
+    if (dataArray.length === 0) {
+      return ApiResponse.notFound(res, 'No se encontraron liquidaciones');
+    }
+
+    const html = generateLiquidacionAllHTML(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidacion-${monthName}-${year}.html`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadLiquidacionAllExcelPost = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+
+    if (!month || !year) {
+      return ApiResponse.badRequest(res, 'Se requiere month y year');
+    }
+
+    const options = {};
+    if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+      options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (gastosAMiCargo) {
+      options.gastosAMiCargo = gastosAMiCargo;
+    }
+
+    const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
+    const contractIdArray = contractIds ? (Array.isArray(contractIds) ? contractIds : contractIds.split(',').filter(Boolean)) : null;
+    const dataArray = await getLiquidacionesAllContracts(groupId, parseInt(month), parseInt(year), propertyIdArray, options, ownerId || null, contractIdArray);
+
+    if (dataArray.length === 0) {
+      return ApiResponse.notFound(res, 'No se encontraron liquidaciones para ese período');
+    }
+
+    const excelBuffer = await generateLiquidacionExcel(dataArray);
+    const monthName = MONTH_NAMES[parseInt(month)]?.toLowerCase() || month;
+    const filename = `liquidaciones-${monthName}-${year}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', excelBuffer.length);
+    res.send(excelBuffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
 // HTML DOWNLOAD ENDPOINTS
 // ============================================
 
@@ -806,5 +961,9 @@ module.exports = {
   downloadLiquidacionAllDOCX,
   downloadLiquidacionHTMLEndpoint,
   downloadLiquidacionAllHTMLEndpoint,
+  downloadLiquidacionAllPDFPost,
+  downloadLiquidacionAllDOCXPost,
+  downloadLiquidacionAllHTMLPost,
+  downloadLiquidacionAllExcelPost,
   sendReportEmail,
 };
