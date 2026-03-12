@@ -2,10 +2,13 @@
 const ExcelJS = require('exceljs');
 const { MONTH_NAMES } = require('./reportDataService');
 
-const dniLabel = (value) => {
-  if (!value) return 'DNI';
+const formatDocumento = (value) => {
+  if (!value) return { label: 'DNI', formatted: '' };
   const digits = value.toString().replace(/\D/g, '');
-  return digits.length >= 11 ? 'CUIL' : 'DNI';
+  if (digits.length >= 11) {
+    return { label: 'CUIL', formatted: `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}` };
+  }
+  return { label: 'DNI', formatted: Number(digits).toLocaleString('es-AR') };
 };
 
 // Professional minimalist palette (black/gray)
@@ -238,9 +241,9 @@ const generateEstadoCuentasExcel = async (data) => {
   sheet.getCell('A3').value = 'Inquilino:';
   sheet.getCell('A3').font = { bold: true };
   sheet.getCell('B3').value = data.inquilino.nombre;
-  sheet.getCell('D3').value = `${dniLabel(data.inquilino.dni)}:`;
+  sheet.getCell('D3').value = `${formatDocumento(data.inquilino.dni).label}:`;
   sheet.getCell('D3').font = { bold: true };
-  sheet.getCell('E3').value = data.inquilino.dni;
+  sheet.getCell('E3').value = formatDocumento(data.inquilino.dni).formatted;
 
   sheet.getCell('A4').value = 'Propiedad:';
   sheet.getCell('A4').font = { bold: true };
