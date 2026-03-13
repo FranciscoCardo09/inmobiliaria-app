@@ -443,123 +443,260 @@ const generateAjustesMesExcel = async (data) => {
 // CONTROL MENSUAL EXCEL
 // ============================================
 
-// Status-based row fills for control mensual
-const STATUS_FILLS = {
-  paid:     { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD4EDDA' } }, // light green
-  partial:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } }, // light amber
-  cancelled:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E3E5' } }, // light gray
-  pending:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }, // white
-  altPending:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } }, // very light gray
+// ─── Control Mensual colour palette ──────────────────────────────────────────
+const CM = {
+  navyFill:     { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1C3557' } },
+  subHeaderFill:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E4E6E' } },
+  paidFill:     { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6EFCE' } },
+  partialFill:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB9C' } },
+  cancelledFill:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBFBFBF' } },
+  pendingFill:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } },
+  altFill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } },
+  totalFill:    { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1C3557' } },
 };
 
-const getStatusFill = (r, rowIndex) => {
-  if (r.cancelo)             return STATUS_FILLS.cancelled;
-  if (r.isPaid)              return STATUS_FILLS.paid;
-  if (r.estado === 'PARTIAL') return STATUS_FILLS.partial;
-  return rowIndex % 2 === 0 ? STATUS_FILLS.altPending : STATUS_FILLS.pending;
+const CM_ROW_FILL = (r, i) => {
+  if (r.cancelo)              return CM.cancelledFill;
+  if (r.isPaid)               return CM.paidFill;
+  if (r.estado === 'PARTIAL') return CM.partialFill;
+  return i % 2 === 0 ? CM.pendingFill : CM.altFill;
 };
+
+// Number formats
+const FMT_CURR   = '#,##0.00;[Red]-#,##0.00;"-"';   // positive / red-negative / dash-zero
+const FMT_CURR_B = '#,##0.00;"-";"-"';               // only positive meaningful (A Favor)
+const FMT_INT    = '0;"-";"-"';                      // integer, dash for zero
+
+// Format a number as ARS string (for rich-text cells where numFmt can't apply)
+const toARS = (v) =>
+  v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const generateControlMensualExcel = async (data) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
+  workbook.created = new Date();
 
   const sheet = workbook.addWorksheet('Control Mensual');
-
   const hasIva = data.registros.some((r) => r.iva > 0);
 
-  // Column definitions
+  // ── Column definitions ────────────────────────────────────────────────────
+  // numFmt: applied to data + totals  |  special: handled cell-by-cell
   const columns = [
-    { header: 'Propiedad',          key: 'propiedad',        width: 28 },
-    { header: 'Dueño',              key: 'dueno',            width: 20 },
-    { header: 'Inquilino',          key: 'inquilino',        width: 22 },
-    { header: 'Mes#',               key: 'mesContrato',      width: 7  },
-    { header: 'Alquiler',           key: 'alquiler',         width: 14, currency: true },
-    { header: 'Servicios',          key: 'servicios',        width: 14, currency: true },
-    { header: 'Detalle Servicios',  key: 'serviciosDetalle', width: 40 },
+    { header: 'Propiedad',         key: 'propiedad',        width: 30 },
+    { header: 'Dueño',             key: 'dueno',            width: 22 },
+    { header: 'Inquilino',         key: 'inquilino',        width: 24 },
+    { header: 'Mes\n#',            key: 'mesContrato',      width: 6,  numFmt: FMT_INT,    align: 'center' },
+    { header: 'Alquiler',          key: 'alquiler',         width: 14, numFmt: FMT_CURR,   align: 'right'  },
+    { header: 'Servicios\n(total)',key: 'servicios',        width: 14, numFmt: FMT_CURR,   align: 'right'  },
+    { header: 'Detalle\nServicios',key: 'serviciosDetalle', width: 34, wrap: true },
   ];
-  if (hasIva) columns.push({ header: 'IVA (21%)', key: 'iva', width: 13, currency: true });
+  if (hasIva) columns.push({ header: 'IVA\n(21%)', key: 'iva', width: 12, numFmt: FMT_CURR, align: 'right' });
   columns.push(
-    { header: 'A Favor Ant.', key: 'aFavorAnt',   width: 14, currency: true },
-    { header: 'Punitorios',   key: 'punitorios',  width: 14, currency: true },
-    { header: 'Total',        key: 'total',       width: 14, currency: true },
-    { header: 'Fecha(s) Pago',key: 'fechasPago',  width: 26 },
-    { header: 'Abonado',      key: 'pagado',      width: 14, currency: true },
-    { header: 'A Favor Sig.', key: 'aFavorSig',   width: 14, currency: true },
-    { header: 'Debe Sig.',    key: 'debeSig',     width: 14, currency: true },
-    { header: 'Saldo',        key: 'saldo',       width: 14, currency: true },
-    { header: 'Estado',       key: 'estadoLabel', width: 12 },
-    { header: 'Canceló',      key: 'canceloLabel',width: 9  },
-    { header: 'Observaciones',key: 'observaciones',width: 45 },
+    { header: 'A Favor\nAnt.',    key: 'aFavorAnt',   width: 13, numFmt: FMT_CURR_B, align: 'right' },
+    { header: 'Punitorios',       key: 'punitorios',  width: 18, special: 'punitorios' },
+    { header: 'TOTAL',            key: 'total',       width: 15, numFmt: FMT_CURR,   align: 'right', bold: true },
+    { header: 'Fecha(s)\nPago',   key: 'fechasPago',  width: 22, align: 'center' },
+    { header: 'Abonado',          key: 'pagado',      width: 14, numFmt: FMT_CURR,   align: 'right' },
+    { header: 'A Favor\nSig.',    key: 'aFavorSig',   width: 13, numFmt: FMT_CURR_B, align: 'right' },
+    { header: 'Debe\nSig.',       key: 'debeSig',     width: 13, numFmt: FMT_CURR_B, align: 'right' },
+    { header: 'Saldo',            key: 'saldo',       width: 14, numFmt: FMT_CURR,   align: 'right', special: 'saldo' },
+    { header: 'Estado',           key: 'estadoLabel', width: 11, align: 'center',    special: 'estado' },
+    { header: 'Canceló',          key: 'canceloLabel',width: 9,  align: 'center' },
+    { header: 'Observaciones',    key: 'observaciones',width: 40, wrap: true },
   );
 
   const totalCols = columns.length;
-  const lastColLetter = String.fromCharCode(64 + totalCols);
+  // Column letter helper (supports up to Z = 26 columns)
+  const colLtr = (n) => String.fromCharCode(64 + n);
+  const lastCol = colLtr(totalCols);
 
-  // Title
-  sheet.mergeCells(`A1:${lastColLetter}1`);
-  sheet.getCell('A1').value = `CONTROL MENSUAL - ${data.periodo.label}`;
-  sheet.getCell('A1').font = TITLE_FONT;
-  sheet.getCell('A1').alignment = { horizontal: 'center' };
+  // ── Title block (rows 1–3) ────────────────────────────────────────────────
+  const titleStyle = (cell, text, size) => {
+    cell.value = text;
+    cell.font = { bold: true, size, name: 'Arial', color: { argb: 'FFFFFFFF' } };
+    cell.fill = CM.navyFill;
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  };
 
-  sheet.addRow([]);
+  sheet.mergeCells(`A1:${lastCol}1`);
+  titleStyle(sheet.getCell('A1'), (data.empresa?.nombre || 'INMOBILIARIA').toUpperCase(), 11);
+  sheet.getRow(1).height = 20;
 
-  // Headers
+  sheet.mergeCells(`A2:${lastCol}2`);
+  titleStyle(sheet.getCell('A2'), `CONTROL MENSUAL — ${data.periodo.label.toUpperCase()}`, 14);
+  sheet.getRow(2).height = 30;
+
+  // thin accent line between title and headers
+  sheet.mergeCells(`A3:${lastCol}3`);
+  sheet.getCell('A3').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2980B9' } };
+  sheet.getRow(3).height = 4;
+
+  // ── Header row (row 4) ────────────────────────────────────────────────────
   const headerRow = sheet.addRow(columns.map((c) => c.header));
-  applyHeaderStyle(headerRow);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, size: 9, name: 'Arial', color: { argb: 'FFFFFFFF' } };
+    cell.fill = CM.subHeaderFill;
+    cell.border = BORDER_STYLE;
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  });
+  headerRow.height = 34;
 
   sheet.columns = columns.map((c) => ({ width: c.width }));
 
-  // Data rows
+  // Freeze first 4 rows, enable auto-filter on header row
+  sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 4, activeCell: 'A5' }];
+  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: totalCols } };
+
+  // ── Data rows ─────────────────────────────────────────────────────────────
   data.registros.forEach((r, i) => {
+    const fill = CM_ROW_FILL(r, i);
     const estadoLabel = r.isPaid ? 'Pagado' : r.estado === 'PARTIAL' ? 'Parcial' : 'Pendiente';
-    const canceloLabel = r.cancelo ? 'Sí' : 'No';
+    const canceloLabel = r.cancelo ? 'Sí' : '—';
     const enriched = { ...r, estadoLabel, canceloLabel };
 
+    // Build initial row values (special columns get a placeholder)
     const rowValues = columns.map((c) => {
+      if (c.special) return null;
       const v = enriched[c.key];
       return v !== null && v !== undefined ? v : '';
     });
 
     const row = sheet.addRow(rowValues);
-    const fill = getStatusFill(r, i);
+    row.height = 22;
 
-    row.eachCell((cell) => {
-      cell.border = BORDER_STYLE;
-      cell.font = DATA_FONT;
+    // Base style: fill + border + font
+    row.eachCell({ includeEmpty: true }, (cell) => {
       cell.fill = fill;
+      cell.border = BORDER_STYLE;
+      cell.font = { ...DATA_FONT };
       cell.alignment = { vertical: 'middle' };
     });
 
+    // Apply column-level numFmt and alignment
     columns.forEach((c, ci) => {
-      if (c.currency) {
-        row.getCell(ci + 1).numFmt = CURRENCY_FORMAT;
-        row.getCell(ci + 1).alignment = { vertical: 'middle', horizontal: 'right' };
-      }
+      const cell = row.getCell(ci + 1);
+      if (c.numFmt && !c.special) cell.numFmt = c.numFmt;
+      if (c.align)                cell.alignment = { vertical: 'middle', horizontal: c.align };
+      if (c.bold)                 cell.font = { ...DATA_FONT, bold: true };
+      if (c.wrap && enriched[c.key]) cell.alignment = { vertical: 'middle', wrapText: true };
     });
 
-    // Wrap text columns
-    ['serviciosDetalle', 'observaciones'].forEach((key) => {
-      const idx = columns.findIndex((c) => c.key === key);
-      if (idx !== -1 && enriched[key]) {
-        row.getCell(idx + 1).alignment = { vertical: 'middle', wrapText: true };
+    // ── Punitorios (special: rich text with days) ──────────────────────────
+    const puntIdx = columns.findIndex((c) => c.key === 'punitorios');
+    if (puntIdx >= 0) {
+      const cell = row.getCell(puntIdx + 1);
+      if (r.punitoryForgiven) {
+        cell.value = 'Condonado';
+        cell.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF1D6A3A' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (r.punitorios > 0) {
+        const d = r.punitoryDays || 0;
+        cell.value = {
+          richText: [
+            { text: `$ ${toARS(r.punitorios)}`,
+              font: { name: 'Arial', size: 10, bold: false } },
+            { text: `\n${d} día${d !== 1 ? 's' : ''}`,
+              font: { name: 'Arial', size: 9, color: { argb: 'FF666666' } } },
+          ],
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'right', wrapText: true };
+        if (row.height < 32) row.height = 32;
+      } else {
+        cell.value = '—';
+        cell.font = { ...DATA_FONT, color: { argb: 'FFAAAAAA' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
       }
-    });
+    }
+
+    // ── Saldo (special: colour-coded font) ────────────────────────────────
+    const saldoIdx = columns.findIndex((c) => c.key === 'saldo');
+    if (saldoIdx >= 0) {
+      const cell = row.getCell(saldoIdx + 1);
+      cell.numFmt = FMT_CURR;
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      if (r.saldo > 0)      cell.font = { ...DATA_FONT, color: { argb: 'FF1D6A3A' } };
+      else if (r.saldo < 0) cell.font = { ...DATA_FONT, color: { argb: 'FFC0392B' } };
+      else                   cell.font = { ...DATA_FONT, color: { argb: 'FFAAAAAA' } };
+    }
+
+    // ── A Favor Sig: green when > 0 ───────────────────────────────────────
+    const afIdx = columns.findIndex((c) => c.key === 'aFavorSig');
+    if (afIdx >= 0 && r.aFavorSig > 0)
+      row.getCell(afIdx + 1).font = { ...DATA_FONT, color: { argb: 'FF1D6A3A' } };
+
+    // ── Debe Sig: red when > 0 ────────────────────────────────────────────
+    const dbIdx = columns.findIndex((c) => c.key === 'debeSig');
+    if (dbIdx >= 0 && r.debeSig > 0)
+      row.getCell(dbIdx + 1).font = { ...DATA_FONT, color: { argb: 'FFC0392B' } };
+
+    // ── Estado (special: bold colour text) ────────────────────────────────
+    const estIdx = columns.findIndex((c) => c.key === 'estadoLabel');
+    if (estIdx >= 0) {
+      const cell = row.getCell(estIdx + 1);
+      cell.value = estadoLabel;
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      if (r.isPaid)
+        cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1D6A3A' } };
+      else if (r.estado === 'PARTIAL')
+        cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF7D4807' } };
+      else
+        cell.font = { name: 'Arial', size: 10, color: { argb: 'FF666666' } };
+    }
+
+    // ── Adjust row height for multi-line service detail ───────────────────
+    const detIdx = columns.findIndex((c) => c.key === 'serviciosDetalle');
+    if (detIdx >= 0 && r.serviciosDetalle) {
+      const lines = (r.serviciosDetalle.match(/\n/g) || []).length + 1;
+      const needed = Math.max(22, lines * 16);
+      if (needed > row.height) row.height = needed;
+    }
   });
 
-  // Totals row
-  const totalesRow = columns.map((c) => {
-    if (c.key === 'propiedad') return 'TOTALES';
+  // ── Totals row ────────────────────────────────────────────────────────────
+  const totalsValues = columns.map((c) => {
+    if (c.key === 'propiedad')  return 'TOTALES';
+    if (c.key === 'punitorios') return data.totales.punitorios; // numeric sum
+    if (c.special === 'saldo')  return data.totales.saldo;
+    if (c.special === 'estado') return '';
     if (data.totales[c.key] !== undefined) return data.totales[c.key];
     return '';
   });
-  const totalRow = sheet.addRow(totalesRow);
-  applyTotalRowStyle(totalRow);
-  columns.forEach((c, ci) => {
-    if (c.currency) {
-      totalRow.getCell(ci + 1).numFmt = CURRENCY_FORMAT;
-      totalRow.getCell(ci + 1).alignment = { vertical: 'middle', horizontal: 'right' };
-    }
+  const totalRow = sheet.addRow(totalsValues);
+  totalRow.eachCell({ includeEmpty: true }, (cell) => {
+    cell.fill = CM.totalFill;
+    cell.font = { bold: true, size: 10, name: 'Arial', color: { argb: 'FFFFFFFF' } };
+    cell.border = BORDER_STYLE;
+    cell.alignment = { vertical: 'middle', horizontal: 'right' };
   });
+  totalRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
+  totalRow.height = 26;
+
+  columns.forEach((c, ci) => {
+    if (c.numFmt) totalRow.getCell(ci + 1).numFmt = c.numFmt;
+    else if (c.key === 'punitorios') totalRow.getCell(ci + 1).numFmt = FMT_CURR;
+    else if (c.key === 'saldo')      totalRow.getCell(ci + 1).numFmt = FMT_CURR;
+  });
+
+  // ── Legend ────────────────────────────────────────────────────────────────
+  sheet.addRow([]); // spacer
+
+  const legendRow = sheet.addRow([
+    'Leyenda:', ' Pagado ', ' Parcial ', ' Pendiente ', ' Canceló ',
+  ]);
+  legendRow.getCell(1).font = { bold: true, size: 9, name: 'Arial' };
+  [
+    { col: 2, argb: 'FFC6EFCE' },
+    { col: 3, argb: 'FFFFEB9C' },
+    { col: 4, argb: 'FFF2F2F2' },
+    { col: 5, argb: 'FFBFBFBF' },
+  ].forEach(({ col, argb }) => {
+    const cell = legendRow.getCell(col);
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
+    cell.border = BORDER_STYLE;
+    cell.font = { size: 9, name: 'Arial' };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+  legendRow.height = 18;
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);

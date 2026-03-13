@@ -835,7 +835,13 @@ const getControlMensualData = async (groupId, month, year) => {
     ].filter(Boolean);
     const observaciones = obsPartes.join(' | ') || null;
 
-    const balance = r2(r.balance);
+    // For balance-related fields: anything within $0.50 is noise → treat as 0
+    const cleanBal = (v) => {
+      const rounded = Math.round((v || 0) * 100) / 100;
+      return Math.abs(rounded) < 0.5 ? 0 : rounded;
+    };
+
+    const balance = cleanBal(r.balance);
     const aFavorSig = balance > 0 ? balance : 0;
     const debeSig = balance < 0 ? -balance : 0;
 
@@ -843,7 +849,7 @@ const getControlMensualData = async (groupId, month, year) => {
       ? r.services.map((s) => {
           const nombre = s.conceptType?.label || s.conceptType?.name || 'Servicio';
           return `${nombre}: $${r2(s.amount).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }).join(' | ')
+        }).join('\n')
       : null;
 
     return {
@@ -859,6 +865,8 @@ const getControlMensualData = async (groupId, month, year) => {
       iva: r2(r.includeIva ? r.ivaAmount : 0),
       aFavorAnt: r2(r.previousBalance > 0 ? r.previousBalance : 0),
       punitorios: r2(r.punitoryAmount),
+      punitoryDays: r.punitoryDays || 0,
+      punitoryForgiven: r.punitoryForgiven || false,
       total: r2(r.totalDue),
       fechasPago,
       pagado: r2(r.amountPaid),
