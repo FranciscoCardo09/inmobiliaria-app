@@ -799,11 +799,14 @@ const getControlMensualData = async (groupId, month, year) => {
         include: {
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-          property: true,
+          property: { include: { owner: true } },
         },
       },
       services: {
         include: { conceptType: true },
+      },
+      transactions: {
+        orderBy: { paymentDate: 'asc' },
       },
     },
     orderBy: [
@@ -811,31 +814,75 @@ const getControlMensualData = async (groupId, month, year) => {
     ],
   });
 
-  const registros = records.map((r) => ({
+  // Round currency to 2 decimals; zero out floating-point noise below half a cent
+  const r2 = (v) => {
+    const rounded = Math.round((v || 0) * 100) / 100;
+    return Math.abs(rounded) < 0.005 ? 0 : rounded;
+  };
+
+  const registros = records.map((r) => {
+    const txs = r.transactions || [];
+
+    const fechasPago = txs.length > 0
+      ? txs.map((t) => new Date(t.paymentDate).toLocaleDateString('es-AR')).join(', ')
+      : r.fullPaymentDate
+        ? new Date(r.fullPaymentDate).toLocaleDateString('es-AR')
+        : null;
+
+    const obsPartes = [
+      r.observations,
+      ...txs.filter((t) => t.observations).map((t, i) => `Pago ${i + 1}: ${t.observations}`),
+    ].filter(Boolean);
+    const observaciones = obsPartes.join(' | ') || null;
+
+    const balance = r2(r.balance);
+    const aFavorSig = balance > 0 ? balance : 0;
+    const debeSig = balance < 0 ? -balance : 0;
+
+    const serviciosDetalle = r.services.length > 0
+      ? r.services.map((s) => {
+          const nombre = s.conceptType?.label || s.conceptType?.name || 'Servicio';
+          return `${nombre}: $${r2(s.amount).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }).join(' | ')
+      : null;
+
+    return {
       monthlyRecordId: r.id,
       contractType: r.contract.contractType || 'INQUILINO',
+      dueno: r.contract.property.owner?.name || '',
       inquilino: getTenantsName(r.contract),
       propiedad: r.contract.property.address,
       mesContrato: r.monthNumber,
-      alquiler: r.rentAmount,
-      servicios: r.servicesTotal,
-      iva: r.includeIva ? r.ivaAmount : 0,
-      punitorios: r.punitoryAmount,
-      total: r.totalDue,
-      pagado: r.amountPaid,
-      saldo: r.balance,
+      alquiler: r2(r.rentAmount),
+      servicios: r2(r.servicesTotal),
+      serviciosDetalle,
+      iva: r2(r.includeIva ? r.ivaAmount : 0),
+      aFavorAnt: r2(r.previousBalance > 0 ? r.previousBalance : 0),
+      punitorios: r2(r.punitoryAmount),
+      total: r2(r.totalDue),
+      fechasPago,
+      pagado: r2(r.amountPaid),
+      aFavorSig,
+      debeSig,
+      saldo: balance,
       estado: r.status,
       isPaid: r.isPaid,
       fechaPago: r.fullPaymentDate,
-  }));
+      cancelo: r.isCancelled,
+      observaciones,
+    };
+  });
 
   const totales = {
     alquiler: registros.reduce((s, r) => s + r.alquiler, 0),
     servicios: registros.reduce((s, r) => s + r.servicios, 0),
     iva: registros.reduce((s, r) => s + r.iva, 0),
+    aFavorAnt: registros.reduce((s, r) => s + r.aFavorAnt, 0),
     punitorios: registros.reduce((s, r) => s + r.punitorios, 0),
     total: registros.reduce((s, r) => s + r.total, 0),
     pagado: registros.reduce((s, r) => s + r.pagado, 0),
+    aFavorSig: registros.reduce((s, r) => s + r.aFavorSig, 0),
+    debeSig: registros.reduce((s, r) => s + r.debeSig, 0),
     saldo: registros.reduce((s, r) => s + r.saldo, 0),
   };
 

@@ -775,7 +775,38 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
             : '-'}
         </td>
         <td className="text-xs text-right font-mono font-bold">
-          {formatCurrency(record.totalHistorico || record.liveTotalDue || record.totalDue)}
+          {(() => {
+            const totalValue = record.totalHistorico || record.liveTotalDue || record.totalDue
+            const txs = record.transactions || []
+            const recordObs = record.observations
+            const txObs = txs
+              .map((t, i) => t.observations ? { label: `Pago ${i + 1}`, text: t.observations } : null)
+              .filter(Boolean)
+            const hasObs = recordObs || txObs.length > 0
+            if (!hasObs) return formatCurrency(totalValue)
+            return (
+              <div className="dropdown dropdown-hover dropdown-bottom dropdown-end">
+                <span tabIndex={0} className="cursor-help inline-flex items-center justify-end gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0"></span>
+                  <span className="underline decoration-dotted decoration-base-content/40">{formatCurrency(totalValue)}</span>
+                </span>
+                <div tabIndex={0} className="dropdown-content z-[100] bg-base-200 border border-base-300 shadow-lg rounded-lg p-2 w-64 mt-1 fixed">
+                  <div className="text-[11px] font-semibold mb-1 text-base-content/60">Observaciones</div>
+                  {recordObs && (
+                    <div className="text-[11px] py-0.5 border-b border-base-300 last:border-0 text-base-content/80">
+                      {recordObs}
+                    </div>
+                  )}
+                  {txObs.map((obs, i) => (
+                    <div key={i} className="text-[11px] py-0.5 border-b border-base-300 last:border-0">
+                      <span className="text-base-content/50">{obs.label}: </span>
+                      <span className="text-base-content/80">{obs.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
         </td>
         <td className="text-xs">
           {(() => {

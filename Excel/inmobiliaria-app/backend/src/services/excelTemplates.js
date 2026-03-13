@@ -443,6 +443,22 @@ const generateAjustesMesExcel = async (data) => {
 // CONTROL MENSUAL EXCEL
 // ============================================
 
+// Status-based row fills for control mensual
+const STATUS_FILLS = {
+  paid:     { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD4EDDA' } }, // light green
+  partial:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } }, // light amber
+  cancelled:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E3E5' } }, // light gray
+  pending:  { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }, // white
+  altPending:{ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } }, // very light gray
+};
+
+const getStatusFill = (r, rowIndex) => {
+  if (r.cancelo)             return STATUS_FILLS.cancelled;
+  if (r.isPaid)              return STATUS_FILLS.paid;
+  if (r.estado === 'PARTIAL') return STATUS_FILLS.partial;
+  return rowIndex % 2 === 0 ? STATUS_FILLS.altPending : STATUS_FILLS.pending;
+};
+
 const generateControlMensualExcel = async (data) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = data.empresa?.nombre || 'Inmobiliaria';
@@ -450,10 +466,37 @@ const generateControlMensualExcel = async (data) => {
   const sheet = workbook.addWorksheet('Control Mensual');
 
   const hasIva = data.registros.some((r) => r.iva > 0);
-  const mergeCols = hasIva ? 'A1:L1' : 'A1:K1';
+
+  // Column definitions
+  const columns = [
+    { header: 'Propiedad',          key: 'propiedad',        width: 28 },
+    { header: 'Dueño',              key: 'dueno',            width: 20 },
+    { header: 'Inquilino',          key: 'inquilino',        width: 22 },
+    { header: 'Mes#',               key: 'mesContrato',      width: 7  },
+    { header: 'Alquiler',           key: 'alquiler',         width: 14, currency: true },
+    { header: 'Servicios',          key: 'servicios',        width: 14, currency: true },
+    { header: 'Detalle Servicios',  key: 'serviciosDetalle', width: 40 },
+  ];
+  if (hasIva) columns.push({ header: 'IVA (21%)', key: 'iva', width: 13, currency: true });
+  columns.push(
+    { header: 'A Favor Ant.', key: 'aFavorAnt',   width: 14, currency: true },
+    { header: 'Punitorios',   key: 'punitorios',  width: 14, currency: true },
+    { header: 'Total',        key: 'total',       width: 14, currency: true },
+    { header: 'Fecha(s) Pago',key: 'fechasPago',  width: 26 },
+    { header: 'Abonado',      key: 'pagado',      width: 14, currency: true },
+    { header: 'A Favor Sig.', key: 'aFavorSig',   width: 14, currency: true },
+    { header: 'Debe Sig.',    key: 'debeSig',     width: 14, currency: true },
+    { header: 'Saldo',        key: 'saldo',       width: 14, currency: true },
+    { header: 'Estado',       key: 'estadoLabel', width: 12 },
+    { header: 'Canceló',      key: 'canceloLabel',width: 9  },
+    { header: 'Observaciones',key: 'observaciones',width: 45 },
+  );
+
+  const totalCols = columns.length;
+  const lastColLetter = String.fromCharCode(64 + totalCols);
 
   // Title
-  sheet.mergeCells(mergeCols);
+  sheet.mergeCells(`A1:${lastColLetter}1`);
   sheet.getCell('A1').value = `CONTROL MENSUAL - ${data.periodo.label}`;
   sheet.getCell('A1').font = TITLE_FONT;
   sheet.getCell('A1').alignment = { horizontal: 'center' };
@@ -461,47 +504,62 @@ const generateControlMensualExcel = async (data) => {
   sheet.addRow([]);
 
   // Headers
-  const headers = ['Inquilino', 'Propiedad', 'Mes#', 'Alquiler', 'Servicios'];
-  if (hasIva) headers.push('IVA (21%)');
-  headers.push('Punitorios', 'Total', 'Pagado', 'Saldo', 'Estado', 'Fecha Pago');
-  const headerRow = sheet.addRow(headers);
+  const headerRow = sheet.addRow(columns.map((c) => c.header));
   applyHeaderStyle(headerRow);
 
-  const cols = [
-    { width: 22 }, { width: 28 }, { width: 8 }, { width: 14 }, { width: 14 },
-  ];
-  if (hasIva) cols.push({ width: 14 });
-  cols.push({ width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 });
-  sheet.columns = cols;
+  sheet.columns = columns.map((c) => ({ width: c.width }));
 
-  const currencyStartCol = 4;
-  const currencyEndCol = hasIva ? 10 : 9;
-
+  // Data rows
   data.registros.forEach((r, i) => {
     const estadoLabel = r.isPaid ? 'Pagado' : r.estado === 'PARTIAL' ? 'Parcial' : 'Pendiente';
-    const fechaPago = r.fechaPago ? new Date(r.fechaPago).toLocaleDateString('es-AR') : '-';
+    const canceloLabel = r.cancelo ? 'Sí' : 'No';
+    const enriched = { ...r, estadoLabel, canceloLabel };
 
-    const rowData = [r.inquilino, r.propiedad, r.mesContrato, r.alquiler, r.servicios];
-    if (hasIva) rowData.push(r.iva);
-    rowData.push(r.punitorios, r.total, r.pagado, r.saldo, estadoLabel, fechaPago);
+    const rowValues = columns.map((c) => {
+      const v = enriched[c.key];
+      return v !== null && v !== undefined ? v : '';
+    });
 
-    const row = sheet.addRow(rowData);
-    applyDataRowStyle(row, i);
-    for (let c = currencyStartCol; c <= currencyEndCol; c++) {
-      row.getCell(c).numFmt = CURRENCY_FORMAT;
-    }
+    const row = sheet.addRow(rowValues);
+    const fill = getStatusFill(r, i);
+
+    row.eachCell((cell) => {
+      cell.border = BORDER_STYLE;
+      cell.font = DATA_FONT;
+      cell.fill = fill;
+      cell.alignment = { vertical: 'middle' };
+    });
+
+    columns.forEach((c, ci) => {
+      if (c.currency) {
+        row.getCell(ci + 1).numFmt = CURRENCY_FORMAT;
+        row.getCell(ci + 1).alignment = { vertical: 'middle', horizontal: 'right' };
+      }
+    });
+
+    // Wrap text columns
+    ['serviciosDetalle', 'observaciones'].forEach((key) => {
+      const idx = columns.findIndex((c) => c.key === key);
+      if (idx !== -1 && enriched[key]) {
+        row.getCell(idx + 1).alignment = { vertical: 'middle', wrapText: true };
+      }
+    });
   });
 
-  // Grand totals
-  const totalData = ['', 'TOTALES', '', data.totales.alquiler, data.totales.servicios];
-  if (hasIva) totalData.push(data.totales.iva);
-  totalData.push(data.totales.punitorios, data.totales.total, data.totales.pagado, data.totales.saldo, '', '');
-
-  const totalRow = sheet.addRow(totalData);
+  // Totals row
+  const totalesRow = columns.map((c) => {
+    if (c.key === 'propiedad') return 'TOTALES';
+    if (data.totales[c.key] !== undefined) return data.totales[c.key];
+    return '';
+  });
+  const totalRow = sheet.addRow(totalesRow);
   applyTotalRowStyle(totalRow);
-  for (let c = currencyStartCol; c <= currencyEndCol; c++) {
-    totalRow.getCell(c).numFmt = CURRENCY_FORMAT;
-  }
+  columns.forEach((c, ci) => {
+    if (c.currency) {
+      totalRow.getCell(ci + 1).numFmt = CURRENCY_FORMAT;
+      totalRow.getCell(ci + 1).alignment = { vertical: 'middle', horizontal: 'right' };
+    }
+  });
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
