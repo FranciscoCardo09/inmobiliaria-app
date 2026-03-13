@@ -687,15 +687,19 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
   // Sum payments
   const amountPaid = record.transactions.reduce((sum, t) => sum + t.amount, 0);
 
-  // Get latest punitory info from most recent transaction
+  // Get latest punitory info from most recent transaction.
+  // punitoryForgiven defaults to false: it is only true while an active transaction carries forgiveness.
   let punitoryAmount = record.punitoryAmount;
   let punitoryDays = record.punitoryDays;
-  let punitoryForgiven = record.punitoryForgiven;
+  let punitoryForgiven = false;
   if (record.transactions.length > 0) {
     const lastTx = record.transactions[record.transactions.length - 1];
     punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
     punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
     punitoryForgiven = lastTx.punitoryForgiven;
+  } else {
+    // No transactions remain: reset so the live punitory calculation takes over
+    punitoryDays = 0;
   }
 
   const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
