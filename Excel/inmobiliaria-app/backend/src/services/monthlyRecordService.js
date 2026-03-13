@@ -699,6 +699,7 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
     punitoryForgiven = lastTx.punitoryForgiven;
   } else {
     // No transactions remain: reset so the live punitory calculation takes over
+    punitoryAmount = 0;
     punitoryDays = 0;
   }
 
