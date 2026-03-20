@@ -411,8 +411,8 @@ function LiquidacionTab({ groupId }) {
                     </table>
                   </div>
 
-                  {/* Gastos a mi cargo — shown when there are available services OR extras already added */}
-                  {(disponibles.length > 0 || selState.extras.length > 0) && (
+                  {/* Gastos a mi cargo — always shown so extras can be added even without services */}
+                  {(
                     <div className="mt-3 p-3 bg-base-200/60 rounded-lg border border-base-300">
                       <p className="text-xs font-semibold text-base-content/70 mb-2 uppercase tracking-wide">Gastos a mi cargo</p>
 
