@@ -5,6 +5,7 @@ const {
   getContractsWithAdjustmentNextMonth,
 } = require('../services/adjustmentService');
 const { getDebtsSummary } = require('../services/debtService');
+const { getOrCreateMonthlyRecords } = require('../services/monthlyRecordService');
 
 const prisma = require('../lib/prisma');
 
@@ -33,10 +34,7 @@ const getSummary = async (req, res, next) => {
       }),
       getContractsWithAdjustmentThisMonth(groupId),
       getContractsWithAdjustmentNextMonth(groupId),
-      prisma.monthlyRecord.findMany({
-        where: { groupId, periodMonth: currentMonth, periodYear: currentYear },
-        select: { status: true, contractId: true },
-      }),
+      getOrCreateMonthlyRecords(groupId, currentMonth, currentYear),
     ]);
 
     // Contratos por vencer (2 meses o menos restantes)
@@ -44,15 +42,13 @@ const getSummary = async (req, res, next) => {
       (c) => (c.durationMonths - c.currentMonth) <= 2
     ).length;
 
-    // Payment stats for this month — filter to only active contracts
-    const activeContractIds = new Set(activeContracts.map(c => c.id));
-    const activeMonthlyRecords = monthlyRecordsThisMonth.filter(r => activeContractIds.has(r.contractId));
+    // Payment stats — getOrCreateMonthlyRecords already returns only active contracts
     const paymentsThisMonth = {
-      paid: activeMonthlyRecords.filter((r) => r.status === 'COMPLETE').length,
-      total: activeContracts.length,
+      paid: monthlyRecordsThisMonth.filter((r) => r.status === 'COMPLETE').length,
+      total: monthlyRecordsThisMonth.length,
     };
 
-    const pendingDebts = activeMonthlyRecords.filter(
+    const pendingDebts = monthlyRecordsThisMonth.filter(
       (r) => r.status === 'PENDING' || r.status === 'PARTIAL'
     ).length;
 
