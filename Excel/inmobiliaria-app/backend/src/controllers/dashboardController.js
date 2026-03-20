@@ -29,13 +29,13 @@ const getSummary = async (req, res, next) => {
       prisma.tenant.count({ where: { groupId, isActive: true } }),
       prisma.contract.findMany({
         where: { groupId, active: true },
-        select: { currentMonth: true, durationMonths: true },
+        select: { id: true, currentMonth: true, durationMonths: true },
       }),
       getContractsWithAdjustmentThisMonth(groupId),
       getContractsWithAdjustmentNextMonth(groupId),
       prisma.monthlyRecord.findMany({
         where: { groupId, periodMonth: currentMonth, periodYear: currentYear },
-        select: { status: true },
+        select: { status: true, contractId: true },
       }),
     ]);
 
@@ -44,13 +44,15 @@ const getSummary = async (req, res, next) => {
       (c) => (c.durationMonths - c.currentMonth) <= 2
     ).length;
 
-    // Payment stats for this month
+    // Payment stats for this month — filter to only active contracts
+    const activeContractIds = new Set(activeContracts.map(c => c.id));
+    const activeMonthlyRecords = monthlyRecordsThisMonth.filter(r => activeContractIds.has(r.contractId));
     const paymentsThisMonth = {
-      paid: monthlyRecordsThisMonth.filter((r) => r.status === 'COMPLETE').length,
-      total: activeContracts.length, // All active contracts should have a payment
+      paid: activeMonthlyRecords.filter((r) => r.status === 'COMPLETE').length,
+      total: activeContracts.length,
     };
 
-    const pendingDebts = monthlyRecordsThisMonth.filter(
+    const pendingDebts = activeMonthlyRecords.filter(
       (r) => r.status === 'PENDING' || r.status === 'PARTIAL'
     ).length;
 
