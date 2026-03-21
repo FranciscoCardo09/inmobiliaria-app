@@ -81,8 +81,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const contracts = await prisma.contract.findMany({
     where: { groupId, active: true },
     include: {
-      tenant: { select: { id: true, name: true, dni: true } },
-      contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
+      tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } },
+      contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
       property: {
         select: {
           id: true,
@@ -772,8 +772,8 @@ const getMonthlyRecordById = async (groupId, id) => {
     include: {
       contract: {
         include: {
-          tenant: { select: { id: true, name: true, dni: true } },
-          contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
+          tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } },
+          contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
           property: {
             select: {
               id: true,
