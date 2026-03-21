@@ -20,7 +20,7 @@ const createTransporter = () => {
 };
 
 // Base HTML template
-const baseTemplate = (content, title) => `
+const baseTemplate = (content, title, companyName) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -138,8 +138,7 @@ const baseTemplate = (content, title) => `
       </div>
       ${content}
       <div class="footer">
-        <p>Este email fue enviado por <strong>Gestion Alquileres</strong></p>
-        <p>Si no solicitaste este email, puedes ignorarlo.</p>
+        <p>Este email fue enviado por <strong>${companyName || 'Gestion Alquileres'}</strong></p>
       </div>
     </div>
   </div>
@@ -344,7 +343,7 @@ const emailService = {
   },
   // Send notification email (generic, for notification system)
   sendNotificationEmail: async ({ to, subject, html, attachments, fromName }) => {
-    const fullHtml = baseTemplate(html, subject);
+    const fullHtml = baseTemplate(html, subject, fromName);
     return sendEmail({ to, subject, html: fullHtml, attachments, fromName });
   },
 };
