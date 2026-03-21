@@ -338,6 +338,11 @@ const emailService = {
       }],
     });
   },
+  // Send notification email (generic, for notification system)
+  sendNotificationEmail: async ({ to, subject, html, attachments }) => {
+    const fullHtml = baseTemplate(html, subject);
+    return sendEmail({ to, subject, html: fullHtml, attachments });
+  },
 };
 
 module.exports = emailService;

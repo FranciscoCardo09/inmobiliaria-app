@@ -16,6 +16,9 @@ import DebtPaymentModal from '../../components/DebtPaymentModal'
 import CloseMonthWizard from './CloseMonthWizard'
 import BatchServiceModal from './BatchServiceModal'
 import { useDebts } from '../../hooks/useDebts'
+import { useNotifications } from '../../hooks/useNotifications'
+import TenantCheckboxList from '../../components/notifications/TenantCheckboxList'
+import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import {
   TableCellsIcon,
   FunnelIcon,
@@ -35,6 +38,7 @@ import {
   NoSymbolIcon,
   BanknotesIcon,
   EyeIcon,
+  BellIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -128,6 +132,12 @@ export default function MonthlyControlPage() {
 
   // Categories for filter
   const { categories } = useCategories(currentGroupId)
+
+  // Notification state
+  const [showNotifyPanel, setShowNotifyPanel] = useState(false)
+  const [selectedTenantIds, setSelectedTenantIds] = useState([])
+  const [showSendModal, setShowSendModal] = useState(false)
+  const { sendNextMonth } = useNotifications(currentGroupId)
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
@@ -509,6 +519,40 @@ export default function MonthlyControlPage() {
         </div>
       </Card>
 
+      {/* Notification Panel */}
+      <Card compact>
+        <button
+          className="flex items-center gap-2 w-full text-left"
+          onClick={() => setShowNotifyPanel(!showNotifyPanel)}
+        >
+          <BellIcon className="w-5 h-5 text-primary" />
+          <span className="font-semibold text-sm">Avisar Inquilinos</span>
+          {showNotifyPanel ? (
+            <ChevronUpIcon className="w-4 h-4 ml-auto" />
+          ) : (
+            <ChevronDownIcon className="w-4 h-4 ml-auto" />
+          )}
+        </button>
+        {showNotifyPanel && (
+          <div className="mt-3 space-y-3">
+            <TenantCheckboxList
+              records={records}
+              selectedIds={selectedTenantIds}
+              onSelectionChange={setSelectedTenantIds}
+            />
+            {selectedTenantIds.length > 0 && (
+              <button
+                className="btn btn-sm btn-primary gap-1"
+                onClick={() => setShowSendModal(true)}
+              >
+                <BellIcon className="w-4 h-4" />
+                Avisar {selectedTenantIds.length} seleccionados
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
       {/* Main Table */}
       {records.length === 0 ? (
         <EmptyState
@@ -644,6 +688,31 @@ export default function MonthlyControlPage() {
           year={periodYear}
           onClose={() => setCloseMonthWizard(false)}
           onSuccess={() => {}}
+        />
+      )}
+
+      {/* Send Notification Modal */}
+      {showSendModal && (
+        <SendNotificationModal
+          isOpen={showSendModal}
+          onClose={() => setShowSendModal(false)}
+          type="NEXT_MONTH"
+          recipients={records
+            .map(r => r.tenants?.[0] || r.tenant)
+            .filter(t => t && selectedTenantIds.includes(t.id))
+          }
+          recipientType="TENANT"
+          onSend={async ({ channels }) => {
+            await sendNextMonth.mutateAsync({
+              tenantIds: selectedTenantIds,
+              channels,
+              periodMonth,
+              periodYear,
+            })
+            setShowSendModal(false)
+            setSelectedTenantIds([])
+          }}
+          isSending={sendNextMonth.isPending}
         />
       )}
     </div>

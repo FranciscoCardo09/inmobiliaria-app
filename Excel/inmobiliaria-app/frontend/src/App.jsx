@@ -38,6 +38,7 @@ const PaymentHistoryList = lazy(() => import('./pages/payment-history/PaymentHis
 const ServiceTypeList = lazy(() => import('./pages/services/ServiceTypeList'))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage'))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
+const NotificationDashboard = lazy(() => import('./pages/notifications/NotificationDashboard'))
 
 function App() {
   const { isAuthenticated, setLoading, isLoading, setUser, setGroups, setPendingInvites } = useAuthStore()
@@ -122,6 +123,9 @@ function App() {
 
           {/* Phase 6: Reports */}
           <Route path="reports" element={<ReportsPage />} />
+
+          {/* Notifications */}
+          <Route path="notifications" element={<NotificationDashboard />} />
 
           {/* Phase 7: Settings */}
           <Route path="settings" element={<SettingsPage />} />

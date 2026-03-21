@@ -12,6 +12,9 @@ import {
   XMarkIcon,
   PlusIcon,
   TrashIcon,
+  PhoneIcon,
+  EyeIcon,
+  EyeSlashIcon,
 } from '@heroicons/react/24/outline'
 import PhoneInput from '../../components/ui/PhoneInput'
 
@@ -45,9 +48,13 @@ export default function SettingsPage() {
     bankAccountNumber: '',
     bankCbu: '',
     bankAlias: '',
+    whatsappAccountSid: '',
+    whatsappAuthToken: '',
+    whatsappFrom: '',
   })
   const [logoPreview, setLogoPreview] = useState('')
   const [logoError, setLogoError] = useState('')
+  const [showWhatsappToken, setShowWhatsappToken] = useState(false)
 
   // Sync form when settings load
   useEffect(() => {
@@ -71,6 +78,9 @@ export default function SettingsPage() {
         bankAccountNumber: settings.bankAccountNumber || '',
         bankCbu: settings.bankCbu || '',
         bankAlias: settings.bankAlias || '',
+        whatsappAccountSid: settings.whatsappAccountSid || '',
+        whatsappAuthToken: settings.whatsappAuthToken || '',
+        whatsappFrom: settings.whatsappFrom || '',
       })
       if (settings.logo) {
         setLogoPreview(settings.logo)
@@ -431,6 +441,68 @@ export default function SettingsPage() {
               />
             </div>
           </div>
+        </Card>
+
+        {/* WhatsApp / Twilio */}
+        <Card title="WhatsApp (Twilio)" className="mt-4">
+          <p className="text-sm text-base-content/50 mt-1">
+            Credenciales de Twilio para enviar mensajes por WhatsApp. Cada grupo puede tener sus propias credenciales.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+            <div className="sm:col-span-2">
+              <label className="label"><span className="label-text font-medium">Account SID</span></label>
+              <input
+                type="text"
+                name="whatsappAccountSid"
+                className="input input-bordered w-full font-mono text-sm"
+                value={form.whatsappAccountSid}
+                onChange={handleChange}
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label"><span className="label-text font-medium">Auth Token</span></label>
+              <div className="relative">
+                <input
+                  type={showWhatsappToken ? 'text' : 'password'}
+                  name="whatsappAuthToken"
+                  className="input input-bordered w-full font-mono text-sm pr-10"
+                  value={form.whatsappAuthToken}
+                  onChange={handleChange}
+                  placeholder="Token de autenticación"
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-circle"
+                  onClick={() => setShowWhatsappToken(!showWhatsappToken)}
+                >
+                  {showWhatsappToken ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label"><span className="label-text font-medium">Número WhatsApp (From)</span></label>
+              <input
+                type="text"
+                name="whatsappFrom"
+                className="input input-bordered w-full font-mono text-sm"
+                value={form.whatsappFrom}
+                onChange={handleChange}
+                placeholder="whatsapp:+5491112345678"
+              />
+              <label className="label">
+                <span className="label-text-alt text-base-content/50">
+                  Formato: whatsapp:+549XXXXXXXXXX
+                </span>
+              </label>
+            </div>
+          </div>
+          {(!form.whatsappAccountSid || !form.whatsappAuthToken || !form.whatsappFrom) && (
+            <div className="alert alert-warning mt-3 text-sm py-2">
+              <PhoneIcon className="w-4 h-4" />
+              Sin credenciales de WhatsApp configuradas. Las notificaciones por WhatsApp no estarán disponibles.
+            </div>
+          )}
         </Card>
 
         {/* Logo */}

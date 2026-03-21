@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { usePaymentTransactions, usePunitoryPreview } from '../hooks/usePaymentTransactions'
 import { useCanPayCurrentMonth } from '../hooks/useDebts'
 import { useMonthlyRecordDetail } from '../hooks/useMonthlyRecords'
+import { useNotifications } from '../hooks/useNotifications'
 import { useAuthStore } from '../stores/authStore'
 import api from '../services/api'
 import toast from 'react-hot-toast'
@@ -15,6 +16,9 @@ import {
   ExclamationTriangleIcon,
   NoSymbolIcon,
   ClockIcon,
+  EnvelopeIcon,
+  PhoneIcon,
+  CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 
 const formatCurrency = (amount) => {
@@ -58,6 +62,10 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const [forgivePunitorios, setForgivePunitorios] = useState(false)
   const [generateReceipt, setGenerateReceipt] = useState(true)
   const [observations, setObservations] = useState('')
+  const [paymentSuccess, setPaymentSuccess] = useState(null) // { transactionId }
+
+  // Notification hook for sending receipts
+  const { sendCashReceipt } = useNotifications(groupId)
 
   // Get fresh record data in real-time
   const { data: freshRecord } = useMonthlyRecordDetail(groupId, recordProp?.id)
@@ -139,7 +147,20 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
         }
       }
 
-      onClose()
+      // Show success state with send receipt options instead of closing
+      setPaymentSuccess({ transactionId: result?.transaction?.id })
+    } catch (e) {
+      // Error handled by hook
+    }
+  }
+
+  const handleSendReceipt = async (channel) => {
+    if (!paymentSuccess?.transactionId) return
+    try {
+      await sendCashReceipt.mutateAsync({
+        transactionId: paymentSuccess.transactionId,
+        channels: [channel],
+      })
     } catch (e) {
       // Error handled by hook
     }
@@ -153,10 +174,66 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
     <Modal
       isOpen={true}
       onClose={onClose}
-      title="Registrar Pago"
+      title={paymentSuccess ? "Pago Registrado" : "Registrar Pago"}
       size="lg"
     >
       <div className="space-y-4">
+        {/* Success State - Send Receipt */}
+        {paymentSuccess && (
+          <>
+            <div className="text-center py-4">
+              <CheckCircleIcon className="w-12 h-12 text-success mx-auto mb-2" />
+              <h3 className="text-lg font-bold text-success">Pago registrado</h3>
+              <p className="text-sm text-base-content/60 mt-1">
+                {record?.tenant?.name} — {record?.property?.address}
+              </p>
+            </div>
+
+            <div className="bg-base-200 rounded-lg p-4 space-y-3">
+              <p className="text-sm font-medium text-center">Enviar recibo al inquilino</p>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="gap-1"
+                  loading={sendCashReceipt.isPending}
+                  onClick={() => handleSendReceipt('EMAIL')}
+                  disabled={!record?.tenant?.email}
+                  title={!record?.tenant?.email ? 'Sin email registrado' : ''}
+                >
+                  <EnvelopeIcon className="w-4 h-4" />
+                  Email
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="gap-1"
+                  loading={sendCashReceipt.isPending}
+                  onClick={() => handleSendReceipt('WHATSAPP')}
+                  disabled={!record?.tenant?.phone}
+                  title={!record?.tenant?.phone ? 'Sin teléfono registrado' : ''}
+                >
+                  <PhoneIcon className="w-4 h-4" />
+                  WhatsApp
+                </Button>
+              </div>
+              {(!record?.tenant?.email && !record?.tenant?.phone) && (
+                <p className="text-xs text-warning text-center">
+                  El inquilino no tiene email ni teléfono registrado
+                </p>
+              )}
+            </div>
+
+            <div className="modal-action">
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Cerrar
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Form (hidden on success) */}
+        {!paymentSuccess && <>
         {/* Contract Info Header */}
         <div className="bg-base-200 rounded-lg p-3">
           <div className="grid grid-cols-3 gap-2 text-sm">
@@ -475,26 +552,29 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
           />
         </div>
         </>}
+        </>}
       </div>
 
-      {/* Actions */}
-      <div className="modal-action">
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          Cancelar
-        </Button>
-        {!isBlocked && (
-          <Button
-            variant="primary"
-            size="sm"
-            loading={isRegistering}
-            onClick={handleSubmit}
-            disabled={!amount || parseFloat(amount) <= 0}
-          >
-            <CurrencyDollarIcon className="w-4 h-4" />
-            Registrar Pago
+      {/* Actions (hidden on success — success has its own close button) */}
+      {!paymentSuccess && (
+        <div className="modal-action">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancelar
           </Button>
-        )}
-      </div>
+          {!isBlocked && (
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isRegistering}
+              onClick={handleSubmit}
+              disabled={!amount || parseFloat(amount) <= 0}
+            >
+              <CurrencyDollarIcon className="w-4 h-4" />
+              Registrar Pago
+            </Button>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }

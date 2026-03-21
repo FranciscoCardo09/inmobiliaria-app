@@ -6,6 +6,8 @@ import Card from '../../components/ui/Card'
 import { LoadingPage } from '../../components/ui/Loading'
 import EmptyState from '../../components/ui/EmptyState'
 import DebtPaymentModal from '../../components/DebtPaymentModal'
+import SendNotificationModal from '../../components/notifications/SendNotificationModal'
+import { useNotifications } from '../../hooks/useNotifications'
 import {
   ExclamationTriangleIcon,
   CurrencyDollarIcon,
@@ -13,6 +15,7 @@ import {
   CheckCircleIcon,
   FunnelIcon,
   NoSymbolIcon,
+  BellIcon,
 } from '@heroicons/react/24/outline'
 
 const formatCurrency = (amount) => {
@@ -35,6 +38,9 @@ export default function DebtList() {
 
   const [statusFilter, setStatusFilter] = useState('')
   const [paymentModal, setPaymentModal] = useState({ open: false, debt: null })
+  const [selectedDebtIds, setSelectedDebtIds] = useState([])
+  const [showSendModal, setShowSendModal] = useState(false)
+  const { sendDebtors } = useNotifications(currentGroupId)
 
   const { debts, isLoading, summary, payDebt, isPaying } = useDebts(currentGroupId, {
     status: statusFilter || undefined,
@@ -118,9 +124,9 @@ export default function DebtList() {
         </div>
       )}
 
-      {/* Filter */}
+      {/* Filter + Notify */}
       <Card compact>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <FunnelIcon className="w-4 h-4" />
           <span className="text-sm font-semibold">Filtro</span>
           <select
@@ -133,6 +139,15 @@ export default function DebtList() {
             <option value="PARTIAL">Parciales</option>
             <option value="PAID">Pagadas</option>
           </select>
+          {selectedDebtIds.length > 0 && (
+            <button
+              className="btn btn-sm btn-primary gap-1 ml-auto"
+              onClick={() => setShowSendModal(true)}
+            >
+              <BellIcon className="w-4 h-4" />
+              Avisar {selectedDebtIds.length} deudores
+            </button>
+          )}
         </div>
       </Card>
 
@@ -148,6 +163,20 @@ export default function DebtList() {
             <table className="table table-sm table-zebra">
               <thead>
                 <tr className="bg-base-200">
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-xs"
+                      checked={openDebts.length > 0 && openDebts.every(d => selectedDebtIds.includes(d.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedDebtIds(openDebts.map(d => d.id))
+                        } else {
+                          setSelectedDebtIds([])
+                        }
+                      }}
+                    />
+                  </th>
                   <th className="text-xs">Periodo</th>
                   <th className="text-xs">Inquilino</th>
                   <th className="text-xs">Propiedad</th>
@@ -171,6 +200,22 @@ export default function DebtList() {
                         : ''
                     }
                   >
+                    <td>
+                      {debt.status !== 'PAID' && (
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-xs"
+                          checked={selectedDebtIds.includes(debt.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedDebtIds(prev => [...prev, debt.id])
+                            } else {
+                              setSelectedDebtIds(prev => prev.filter(id => id !== debt.id))
+                            }
+                          }}
+                        />
+                      )}
+                    </td>
                     <td className="text-xs font-medium whitespace-nowrap">
                       {debt.periodLabel}
                     </td>
@@ -252,6 +297,27 @@ export default function DebtList() {
           onPay={payDebt}
           isPaying={isPaying}
           onClose={() => setPaymentModal({ open: false, debt: null })}
+        />
+      )}
+
+      {/* Send Notification Modal */}
+      {showSendModal && (
+        <SendNotificationModal
+          isOpen={showSendModal}
+          onClose={() => setShowSendModal(false)}
+          type="DEBT_TOTAL"
+          recipients={debts
+            .filter(d => selectedDebtIds.includes(d.id))
+            .map(d => d.contract?.tenant)
+            .filter(Boolean)
+          }
+          recipientType="TENANT"
+          onSend={async ({ channels }) => {
+            await sendDebtors.mutateAsync({ debtIds: selectedDebtIds, channels })
+            setShowSendModal(false)
+            setSelectedDebtIds([])
+          }}
+          isSending={sendDebtors.isPending}
         />
       )}
     </div>

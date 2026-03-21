@@ -3,6 +3,7 @@ import { useState, useMemo } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
 import { useOwners } from '../../hooks/useOwners'
+import { useProperties } from '../../hooks/useProperties'
 import {
   useLiquidacion,
   useLiquidacionAll,
@@ -22,6 +23,8 @@ import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import { LoadingPage } from '../../components/ui/Loading'
 import EmptyState from '../../components/ui/EmptyState'
+import { useNotifications } from '../../hooks/useNotifications'
+import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import {
   DocumentTextIcon,
   ArrowDownTrayIcon,
@@ -39,6 +42,8 @@ import {
   ReceiptPercentIcon,
   BellAlertIcon,
   CodeBracketIcon,
+  BellIcon,
+  PhoneIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -166,9 +171,12 @@ function LiquidacionTab({ groupId }) {
   const [honorariosPercent, setHonorariosPercent] = useState('')
   // { [contractId]: { serviceIds: string[], extras: { id, concepto, importe }[] } }
   const [gastosAMiCargo, setGastosAMiCargo] = useState({})
+  const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
   const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
+  const { properties } = useProperties(groupId, { isActive: true })
   const { owners } = useOwners(groupId)
+  const { sendOwnerReport } = useNotifications(groupId)
   const { data: allData, isLoading } = useLiquidacionAll(groupId, {
     month: String(month),
     year: String(year),
@@ -351,8 +359,41 @@ function LiquidacionTab({ groupId }) {
               <PrinterIcon className="w-4 h-4" /> Imprimir
             </Button>
           </div>
+          {/* Send to owners */}
+          <div className="mt-3 pt-3 border-t border-base-300">
+            <p className="text-xs text-base-content/60 mb-2">Enviar liquidación a dueños</p>
+            <Button
+              onClick={() => setShowOwnerNotifyModal(true)}
+              className="btn-sm btn-primary gap-1.5"
+              disabled={!filteredData || filteredData.length === 0 || !owners?.length}
+            >
+              <BellIcon className="w-4 h-4" /> Enviar a dueños ({owners?.length || 0})
+            </Button>
+          </div>
         </div>
       </Card>
+
+      {/* Owner Notification Modal */}
+      {showOwnerNotifyModal && (
+        <SendNotificationModal
+          isOpen={showOwnerNotifyModal}
+          onClose={() => setShowOwnerNotifyModal(false)}
+          type="REPORT_OWNER"
+          recipients={(owners || []).map(o => ({ id: o.id, name: o.name, email: o.email, phone: o.phone }))}
+          recipientType="OWNER"
+          onSend={async ({ channels }) => {
+            await sendOwnerReport.mutateAsync({
+              ownerIds: owners.map(o => o.id),
+              reportType: 'liquidacion',
+              month,
+              year,
+              channels,
+            })
+            setShowOwnerNotifyModal(false)
+          }}
+          isSending={sendOwnerReport.isPending}
+        />
+      )}
 
       {isLoading && <LoadingPage />}
 
