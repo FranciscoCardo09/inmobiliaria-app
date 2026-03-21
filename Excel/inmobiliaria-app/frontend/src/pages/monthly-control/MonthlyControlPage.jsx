@@ -17,7 +17,6 @@ import CloseMonthWizard from './CloseMonthWizard'
 import BatchServiceModal from './BatchServiceModal'
 import { useDebts } from '../../hooks/useDebts'
 import { useNotifications } from '../../hooks/useNotifications'
-import TenantCheckboxList from '../../components/notifications/TenantCheckboxList'
 import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import {
   TableCellsIcon,
@@ -134,9 +133,7 @@ export default function MonthlyControlPage() {
   const { categories } = useCategories(currentGroupId)
 
   // Notification state
-  const [showNotifyPanel, setShowNotifyPanel] = useState(false)
-  const [selectedTenantIds, setSelectedTenantIds] = useState([])
-  const [showSendModal, setShowSendModal] = useState(false)
+  const [notifyModal, setNotifyModal] = useState({ open: false, record: null })
   const { sendNextMonth } = useNotifications(currentGroupId)
 
   // Send standard status to backend, handle HAS_DEBT locally
@@ -276,6 +273,10 @@ export default function MonthlyControlPage() {
 
   const handleTxHistory = useCallback((record) => {
     setTxHistoryModal({ open: true, record })
+  }, [])
+
+  const handleNotify = useCallback((record) => {
+    setNotifyModal({ open: true, record })
   }, [])
 
   // Sort handler
@@ -519,40 +520,6 @@ export default function MonthlyControlPage() {
         </div>
       </Card>
 
-      {/* Notification Panel */}
-      <Card compact>
-        <button
-          className="flex items-center gap-2 w-full text-left"
-          onClick={() => setShowNotifyPanel(!showNotifyPanel)}
-        >
-          <BellIcon className="w-5 h-5 text-primary" />
-          <span className="font-semibold text-sm">Avisar Inquilinos</span>
-          {showNotifyPanel ? (
-            <ChevronUpIcon className="w-4 h-4 ml-auto" />
-          ) : (
-            <ChevronDownIcon className="w-4 h-4 ml-auto" />
-          )}
-        </button>
-        {showNotifyPanel && (
-          <div className="mt-3 space-y-3">
-            <TenantCheckboxList
-              records={records}
-              selectedIds={selectedTenantIds}
-              onSelectionChange={setSelectedTenantIds}
-            />
-            {selectedTenantIds.length > 0 && (
-              <button
-                className="btn btn-sm btn-primary gap-1"
-                onClick={() => setShowSendModal(true)}
-              >
-                <BellIcon className="w-4 h-4" />
-                Avisar {selectedTenantIds.length} seleccionados
-              </button>
-            )}
-          </div>
-        )}
-      </Card>
-
       {/* Main Table */}
       {records.length === 0 ? (
         <EmptyState
@@ -609,6 +576,7 @@ export default function MonthlyControlPage() {
                     onDebtPayment={handleDebtPayment}
                     onTxHistory={handleTxHistory}
                     onForgiveBalance={forgiveBalance}
+                    onNotify={handleNotify}
                   />
                 ))}
               </tbody>
@@ -692,25 +660,22 @@ export default function MonthlyControlPage() {
       )}
 
       {/* Send Notification Modal */}
-      {showSendModal && (
+      {notifyModal.open && notifyModal.record && (
         <SendNotificationModal
-          isOpen={showSendModal}
-          onClose={() => setShowSendModal(false)}
+          isOpen={notifyModal.open}
+          onClose={() => setNotifyModal({ open: false, record: null })}
           type="NEXT_MONTH"
-          recipients={records
-            .map(r => r.tenants?.[0] || r.tenant)
-            .filter(t => t && selectedTenantIds.includes(t.id))
-          }
+          recipients={[notifyModal.record.tenants?.[0] || notifyModal.record.tenant].filter(Boolean)}
           recipientType="TENANT"
           onSend={async ({ channels }) => {
+            const tenant = notifyModal.record.tenants?.[0] || notifyModal.record.tenant
             await sendNextMonth.mutateAsync({
-              tenantIds: selectedTenantIds,
+              tenantIds: [tenant.id],
               channels,
               periodMonth,
               periodYear,
             })
-            setShowSendModal(false)
-            setSelectedTenantIds([])
+            setNotifyModal({ open: false, record: null })
           }}
           isSending={sendNextMonth.isPending}
         />
@@ -722,7 +687,7 @@ export default function MonthlyControlPage() {
 // Memoized table row to prevent re-renders when unrelated state changes
 const MonthlyRecordRow = memo(function MonthlyRecordRow({
   record, idx, isExpanded, showIvaColumn, groupId,
-  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance,
+  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance, onNotify,
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
@@ -1024,6 +989,15 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
               <CheckCircleIcon className="w-3 h-3" />
             </button>
           ) : null}
+          {!isPropietario && (
+            <button
+              className="btn btn-xs btn-ghost"
+              onClick={() => onNotify(record)}
+              title="Avisar inquilino"
+            >
+              <BellIcon className="w-3 h-3" />
+            </button>
+          )}
           </div>
         </td>
       </tr>
