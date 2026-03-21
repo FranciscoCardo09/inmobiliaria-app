@@ -216,9 +216,11 @@ const welcomeEmailTemplate = (name) => {
 };
 
 // Send email via Resend
-const sendWithResend = async ({ to, subject, html, attachments }) => {
+const sendWithResend = async ({ to, subject, html, attachments, fromName }) => {
+  const baseFrom = config.emailFrom // e.g. "Gestion Alquileres <no-reply@gestionalquileres.com.ar>"
+  const fromAddress = baseFrom.match(/<(.+)>/)?.[1] || baseFrom
   const emailData = {
-    from: config.emailFrom,
+    from: fromName ? `${fromName} <${fromAddress}>` : baseFrom,
     to: Array.isArray(to) ? to : [to],
     subject,
     html,
@@ -241,11 +243,13 @@ const sendWithResend = async ({ to, subject, html, attachments }) => {
 };
 
 // Send email via Nodemailer (fallback)
-const sendWithNodemailer = async ({ to, subject, html, attachments }) => {
+const sendWithNodemailer = async ({ to, subject, html, attachments, fromName }) => {
   const transporter = createTransporter();
+  const baseFrom = config.emailFrom
+  const fromAddress = baseFrom.match(/<(.+)>/)?.[1] || baseFrom
 
   const mailOptions = {
-    from: config.emailFrom,
+    from: fromName ? `${fromName} <${fromAddress}>` : baseFrom,
     to,
     subject,
     html,
@@ -259,15 +263,15 @@ const sendWithNodemailer = async ({ to, subject, html, attachments }) => {
 };
 
 // Unified send email function
-const sendEmail = async ({ to, subject, html, attachments }) => {
+const sendEmail = async ({ to, subject, html, attachments, fromName }) => {
   try {
     let result;
 
     if (resend) {
-      result = await sendWithResend({ to, subject, html, attachments });
+      result = await sendWithResend({ to, subject, html, attachments, fromName });
       console.log(`Email sent via Resend to ${to}: ${result.id}`);
     } else {
-      result = await sendWithNodemailer({ to, subject, html, attachments });
+      result = await sendWithNodemailer({ to, subject, html, attachments, fromName });
       console.log(`Email sent via Nodemailer to ${to}: ${result.messageId}`);
     }
 
@@ -339,9 +343,9 @@ const emailService = {
     });
   },
   // Send notification email (generic, for notification system)
-  sendNotificationEmail: async ({ to, subject, html, attachments }) => {
+  sendNotificationEmail: async ({ to, subject, html, attachments, fromName }) => {
     const fullHtml = baseTemplate(html, subject);
-    return sendEmail({ to, subject, html: fullHtml, attachments });
+    return sendEmail({ to, subject, html: fullHtml, attachments, fromName });
   },
 };
 

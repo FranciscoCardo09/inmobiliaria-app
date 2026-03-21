@@ -17,6 +17,7 @@ const getGroupWithCredentials = async (groupId) => {
     select: {
       id: true,
       name: true,
+      companyName: true,
       whatsappAccountSid: true,
       whatsappAuthToken: true,
       whatsappFrom: true,
@@ -71,6 +72,7 @@ const sendAndLog = async ({
         subject,
         html,
         attachments,
+        fromName: whatsappCredentials?.companyName || undefined,
       });
       if (!result.success) {
         status = 'FAILED';
@@ -160,6 +162,7 @@ const sendNextMonth = async (groupId, tenantIds, channels, periodMonth, periodYe
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   // Get monthly records for the period, filtered by tenantIds via contract
@@ -218,6 +221,7 @@ const sendDebtNotifications = async (groupId, debtIds, channels, userId) => {
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const debts = await prisma.debt.findMany({
@@ -268,6 +272,7 @@ const sendLatePayments = async (groupId) => {
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const now = new Date();
@@ -341,6 +346,7 @@ const sendAdjustmentNotice = async (groupId, contractIds, channels, userId) => {
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const contracts = await prisma.contract.findMany({
@@ -389,6 +395,7 @@ const sendContractExpiring = async (groupId, contractId, channels, userId) => {
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const contract = await prisma.contract.findUnique({
@@ -436,6 +443,7 @@ const sendCashReceipt = async (groupId, transactionId, channels, userId) => {
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const transaction = await prisma.paymentTransaction.findUnique({
@@ -486,6 +494,7 @@ const sendOwnerReport = async (groupId, ownerIds, reportType, periodMonth, perio
     accountSid: group.whatsappAccountSid,
     authToken: group.whatsappAuthToken,
     whatsappFrom: group.whatsappFrom,
+    companyName: group.companyName || group.name,
   };
 
   const owners = await prisma.owner.findMany({
