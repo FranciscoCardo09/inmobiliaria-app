@@ -379,10 +379,6 @@ function LiquidacionTab({ groupId }) {
             <Button onClick={handleDownloadPDF} className="btn-sm btn-ghost gap-1.5" disabled={!effectiveData || effectiveData.length === 0}>
               <PrinterIcon className="w-4 h-4" /> Imprimir
             </Button>
-          </div>
-          {/* Send to owners */}
-          <div className="mt-3 pt-3 border-t border-base-300">
-            <p className="text-xs text-base-content/60 mb-2">Enviar liquidación a dueños</p>
             {(() => {
               const targetOwners = selectedOwnerId
                 ? (owners || []).filter(o => o.id === selectedOwnerId)
