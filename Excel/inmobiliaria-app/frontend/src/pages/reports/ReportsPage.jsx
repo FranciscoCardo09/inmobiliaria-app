@@ -171,7 +171,7 @@ function LiquidacionTab({ groupId }) {
   const [honorariosPercent, setHonorariosPercent] = useState('')
   // { [contractId]: { serviceIds: string[], extras: { id, concepto, importe }[] } }
   const [gastosAMiCargo, setGastosAMiCargo] = useState({})
-  const [soloConPago, setSoloConPago] = useState(false)
+  const [soloConPago, setSoloConPago] = useState(true)
   const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
   const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
@@ -356,7 +356,7 @@ function LiquidacionTab({ groupId }) {
             onChange={(e) => setSoloConPago(e.target.checked)}
           />
           <label htmlFor="soloConPago" className="text-sm cursor-pointer select-none">
-            Solo contratos con pago registrado en este período
+            Solo contratos con cancelación en este período
           </label>
         </div>
 
