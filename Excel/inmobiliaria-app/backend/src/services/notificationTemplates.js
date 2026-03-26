@@ -255,6 +255,72 @@ const ownerReportTemplate = (owner, liquidation, groupName) => {
   return { subject, html, whatsappText };
 };
 
+const ownerImpuestosTemplate = (owner, data, groupName) => {
+  const { period, impuestos = [], grandTotal, banco } = data;
+  const subject = `Impuestos y Servicios ${period} - ${groupName}`;
+
+  // WhatsApp
+  const lines = [
+    `*Impuestos y Servicios ${period} - ${groupName}*`,
+    ``,
+    `Hola ${owner.name},`,
+    `A continuación el detalle de impuestos y servicios a pagar:`,
+    ``,
+  ];
+  for (const item of impuestos) {
+    lines.push(`*${item.propiedad}*`);
+    for (const imp of item.impuestos) {
+      lines.push(`  • ${imp.concepto}: ${formatCurrency(imp.monto)}`);
+    }
+    lines.push(`  Subtotal: ${formatCurrency(item.totalImpuestos)}`);
+    lines.push('');
+  }
+  if (grandTotal) lines.push(`*TOTAL: ${formatCurrency(grandTotal)}*`);
+  if (banco?.cbu) {
+    lines.push('');
+    lines.push(`*Datos bancarios:*`);
+    if (banco.titular) lines.push(`Titular: ${banco.titular}`);
+    if (banco.banco || banco.nombre) lines.push(`Banco: ${banco.banco || banco.nombre}`);
+    if (banco.cbu) lines.push(`CBU: ${banco.cbu}`);
+  }
+  const whatsappText = lines.filter(l => l !== undefined).join('\n');
+
+  // HTML
+  const itemsHtml = impuestos.map(item => `
+    <tr><td colspan="2" style="padding:8px 8px 2px;font-weight:bold;background:#f5f5f5">${item.propiedad} — ${item.inquilino || ''}</td></tr>
+    ${item.impuestos.map(imp => `<tr><td style="padding:4px 8px 4px 20px">${imp.concepto}</td><td style="padding:4px 8px;text-align:right">${formatCurrency(imp.monto)}</td></tr>`).join('')}
+    <tr><td style="padding:4px 8px 8px 20px;font-style:italic">Subtotal</td><td style="padding:4px 8px 8px;text-align:right;font-style:italic">${formatCurrency(item.totalImpuestos)}</td></tr>
+  `).join('');
+
+  const bancoHtml = banco?.cbu ? `
+    <h3 style="margin-top:20px">Datos Bancarios</h3>
+    <table style="width:100%;border-collapse:collapse">
+      ${banco.titular ? `<tr><td style="padding:4px 8px;color:#666">Titular</td><td style="padding:4px 8px">${banco.titular}</td></tr>` : ''}
+      ${(banco.banco || banco.nombre) ? `<tr><td style="padding:4px 8px;color:#666">Banco</td><td style="padding:4px 8px">${banco.banco || banco.nombre}</td></tr>` : ''}
+      ${banco.tipoCuenta ? `<tr><td style="padding:4px 8px;color:#666">Tipo</td><td style="padding:4px 8px">${banco.tipoCuenta}</td></tr>` : ''}
+      ${banco.numeroCuenta ? `<tr><td style="padding:4px 8px;color:#666">N° Cuenta</td><td style="padding:4px 8px">${banco.numeroCuenta}</td></tr>` : ''}
+      ${banco.cbu ? `<tr><td style="padding:4px 8px;color:#666">CBU</td><td style="padding:4px 8px"><strong>${banco.cbu}</strong></td></tr>` : ''}
+      ${banco.cuit ? `<tr><td style="padding:4px 8px;color:#666">CUIT</td><td style="padding:4px 8px">${banco.cuit}</td></tr>` : ''}
+    </table>
+  ` : '';
+
+  const html = `
+    <h2>Impuestos y Servicios ${period}</h2>
+    <p>Hola ${owner.name},</p>
+    <p>A continuación el detalle de impuestos y servicios a pagar:</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;border:1px solid #eee">
+      ${itemsHtml}
+      <tr style="font-weight:bold;border-top:2px solid #333">
+        <td style="padding:10px 8px">TOTAL</td>
+        <td style="padding:10px 8px;text-align:right">${formatCurrency(grandTotal)}</td>
+      </tr>
+    </table>
+    ${bancoHtml}
+  `;
+
+  return { subject, html, whatsappText };
+};
+
 module.exports = {
   nextMonthTemplate,
   debtTotalTemplate,
@@ -264,6 +330,7 @@ module.exports = {
   contractExpiringTemplate,
   cashReceiptTemplate,
   ownerReportTemplate,
+  ownerImpuestosTemplate,
   formatCurrency,
   monthNames,
 };

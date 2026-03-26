@@ -1260,9 +1260,11 @@ function ImpuestosTab({ groupId }) {
   const [year, setYear] = useState(now.getFullYear())
   const [selectedContractIds, setSelectedContractIds] = useState([])
   const [selectedOwnerId, setSelectedOwnerId] = useState('')
+  const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
   const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
   const { owners } = useOwners(groupId)
+  const { sendOwnerReport } = useNotifications(groupId)
   const { data, isLoading } = useImpuestos(groupId, {
     month: String(month),
     year: String(year),
@@ -1325,10 +1327,24 @@ function ImpuestosTab({ groupId }) {
               ))}
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <Button onClick={handleDownloadPDF} className="btn-sm btn-neutral gap-1.5" disabled={!data}>
               <ArrowDownTrayIcon className="w-4 h-4" /> PDF
             </Button>
+            {(() => {
+              const targetOwners = selectedOwnerId
+                ? (owners || []).filter(o => o.id === selectedOwnerId)
+                : (owners || [])
+              return (
+                <Button
+                  onClick={() => setShowOwnerNotifyModal(true)}
+                  className="btn-sm btn-primary gap-1.5"
+                  disabled={!data || data.impuestos.length === 0 || !targetOwners.length}
+                >
+                  <BellIcon className="w-4 h-4" /> Enviar a dueños ({targetOwners.length})
+                </Button>
+              )
+            })()}
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -1427,6 +1443,36 @@ function ImpuestosTab({ groupId }) {
             </Card>
           )}
         </>
+      )}
+
+      {/* Owner Notification Modal */}
+      {showOwnerNotifyModal && (
+        <SendNotificationModal
+          isOpen={showOwnerNotifyModal}
+          onClose={() => setShowOwnerNotifyModal(false)}
+          type="REPORT_OWNER"
+          recipients={(selectedOwnerId
+            ? (owners || []).filter(o => o.id === selectedOwnerId)
+            : (owners || [])
+          ).map(o => ({ id: o.id, name: o.name, email: o.email, phone: o.phone }))}
+          recipientType="OWNER"
+          onSend={async ({ channels }) => {
+            const targetOwnerIds = selectedOwnerId
+              ? [selectedOwnerId]
+              : (owners || []).map(o => o.id)
+            const contractIdsList = selectedContractIds.length > 0 ? selectedContractIds : undefined
+            await sendOwnerReport.mutateAsync({
+              ownerIds: targetOwnerIds,
+              reportType: 'impuestos',
+              month,
+              year,
+              channels,
+              contractIds: contractIdsList,
+            })
+            setShowOwnerNotifyModal(false)
+          }}
+          isSending={sendOwnerReport.isPending}
+        />
       )}
     </div>
   )

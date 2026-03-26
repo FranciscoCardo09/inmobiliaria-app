@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 const emailService = require('./emailService');
 const { sendWhatsApp } = require('./whatsappService');
 const templates = require('./notificationTemplates');
-const { getLiquidacionesAllContracts } = require('./reportDataService');
+const { getLiquidacionesAllContracts, getImpuestosData } = require('./reportDataService');
 
 // --- HELPERS ---
 
@@ -518,27 +518,40 @@ const sendOwnerReport = async (groupId, ownerIds, reportType, periodMonth, perio
 
   const allResults = [];
   for (const owner of owners) {
-    // Generate the actual liquidation data for this owner with the same options used in the preview
-    const liquidacionData = await getLiquidacionesAllContracts(
-      groupId, periodMonth, periodYear, null, reportOptions, owner.id, contractIdArray
-    );
+    let notifContent;
 
-    const totalIncome = liquidacionData.reduce((s, d) => s + (d.total || 0), 0);
-    const commission = liquidacionData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
-    const netAmount = totalIncome - commission;
-
-    const liquidation = {
-      period: `${templates.monthNames[periodMonth]} ${periodYear}`,
-      totalIncome: totalIncome > 0 ? totalIncome : null,
-      commission: commission > 0 ? commission : null,
-      netAmount: totalIncome > 0 ? netAmount : null,
-    };
-
-    const { subject, html, whatsappText } = templates.ownerReportTemplate(owner, liquidation, group.name);
+    if (reportType === 'impuestos') {
+      // Generate impuestos data for this owner
+      const impuestosData = await getImpuestosData(
+        groupId, periodMonth, periodYear, null, owner.id, contractIdArray
+      );
+      // Find the bank for this owner (first item that has one)
+      const bancoItem = impuestosData.impuestos.find(i => i.banco?.cbu || i.banco?.nombre);
+      notifContent = templates.ownerImpuestosTemplate(owner, {
+        period: `${templates.monthNames[periodMonth]} ${periodYear}`,
+        impuestos: impuestosData.impuestos,
+        grandTotal: impuestosData.grandTotal,
+        banco: bancoItem?.banco || null,
+      }, group.name);
+    } else {
+      // Default: liquidacion
+      const liquidacionData = await getLiquidacionesAllContracts(
+        groupId, periodMonth, periodYear, null, reportOptions, owner.id, contractIdArray
+      );
+      const totalIncome = liquidacionData.reduce((s, d) => s + (d.total || 0), 0);
+      const commission = liquidacionData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+      const netAmount = totalIncome - commission;
+      notifContent = templates.ownerReportTemplate(owner, {
+        period: `${templates.monthNames[periodMonth]} ${periodYear}`,
+        totalIncome: totalIncome > 0 ? totalIncome : null,
+        commission: commission > 0 ? commission : null,
+        netAmount: totalIncome > 0 ? netAmount : null,
+      }, group.name);
+    }
 
     const results = await sendForChannels(channels, {
       groupId, type: 'REPORT_OWNER', recipientType: 'OWNER',
-      recipient: owner, subject, html, whatsappText,
+      recipient: owner, subject: notifContent.subject, html: notifContent.html, whatsappText: notifContent.whatsappText,
       userId, whatsappCredentials,
     });
     allResults.push(...results.map(r => ({ ...r, recipientName: owner.name })));
