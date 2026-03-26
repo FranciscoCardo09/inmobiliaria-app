@@ -197,7 +197,7 @@ function LiquidacionTab({ groupId }) {
 
   const filteredData = useMemo(() => {
     const base = allData || []
-    return soloConPago ? base.filter((d) => d.isPaid) : base
+    return soloConPago ? base.filter((d) => d.isCancelled) : base
   }, [allData, soloConPago])
 
   // Build effective data applying local gastos selections for preview
