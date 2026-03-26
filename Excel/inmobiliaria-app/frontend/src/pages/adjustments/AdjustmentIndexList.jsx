@@ -536,7 +536,7 @@ export const AdjustmentIndexList = () => {
                           </span>
                         </td>
                         <td className="text-right font-mono">
-                          ${contract.baseRent?.toLocaleString()}
+                          ${(contract.rentBeforeAdjustment ?? contract.baseRent)?.toLocaleString()}
                         </td>
                         <td className="text-right font-mono">
                           {adjustedRent ? (
