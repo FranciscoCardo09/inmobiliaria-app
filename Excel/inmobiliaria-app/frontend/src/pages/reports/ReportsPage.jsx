@@ -171,6 +171,7 @@ function LiquidacionTab({ groupId }) {
   const [honorariosPercent, setHonorariosPercent] = useState('')
   // { [contractId]: { serviceIds: string[], extras: { id, concepto, importe }[] } }
   const [gastosAMiCargo, setGastosAMiCargo] = useState({})
+  const [soloConPago, setSoloConPago] = useState(false)
   const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
   const { contracts } = useContracts(groupId, { status: 'ACTIVE' })
@@ -194,7 +195,10 @@ function LiquidacionTab({ groupId }) {
     })
   }, [contracts])
 
-  const filteredData = useMemo(() => allData || [], [allData])
+  const filteredData = useMemo(() => {
+    const base = allData || []
+    return soloConPago ? base.filter((d) => d.isPaid) : base
+  }, [allData, soloConPago])
 
   // Build effective data applying local gastos selections for preview
   // Services stay in conceptos and total unchanged — gastos only affect honorarios section
@@ -221,10 +225,15 @@ function LiquidacionTab({ groupId }) {
         }
       }
     }
+    // If "solo con pago" is active, restrict contractIds to only paid ones
+    const paidContractIds = soloConPago ? filteredData.map((d) => d.contractId) : null
+
     return {
       month, year,
       honorariosPercent: honorariosPercent ? parseFloat(honorariosPercent) : undefined,
-      contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
+      contractIds: paidContractIds
+        ? paidContractIds
+        : selectedContractIds.length > 0 ? selectedContractIds : undefined,
       ownerId: selectedOwnerId || undefined,
       gastosAMiCargo: Object.keys(gastosBody).length > 0 ? gastosBody : undefined,
     }
@@ -337,6 +346,18 @@ function LiquidacionTab({ groupId }) {
               placeholder="Todos los dueños..."
             />
           </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="soloConPago"
+            className="checkbox checkbox-sm checkbox-primary"
+            checked={soloConPago}
+            onChange={(e) => setSoloConPago(e.target.checked)}
+          />
+          <label htmlFor="soloConPago" className="text-sm cursor-pointer select-none">
+            Solo contratos con pago registrado en este período
+          </label>
         </div>
 
         {/* Download buttons row */}
