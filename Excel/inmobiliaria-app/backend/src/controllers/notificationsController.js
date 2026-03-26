@@ -78,10 +78,10 @@ const sendCashReceipt = async (req, res, next) => {
 const sendOwnerReport = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { ownerIds, reportType, month, year, channels } = req.body;
+    const { ownerIds, reportType, month, year, channels, honorariosPercent, gastosAMiCargo, contractIds } = req.body;
     if (!ownerIds?.length) return ApiResponse.badRequest(res, 'Seleccione al menos un propietario');
     if (!channels?.length) return ApiResponse.badRequest(res, 'Seleccione al menos un canal');
-    const result = await notificationService.sendOwnerReport(groupId, ownerIds, reportType, month, year, channels, req.user.id);
+    const result = await notificationService.sendOwnerReport(groupId, ownerIds, reportType, month, year, channels, req.user.id, { honorariosPercent, gastosAMiCargo, contractIds });
     return ApiResponse.success(res, result, `${result.sent} notificaciones enviadas`);
   } catch (error) { next(error); }
 };

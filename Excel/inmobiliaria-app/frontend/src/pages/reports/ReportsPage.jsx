@@ -383,13 +383,20 @@ function LiquidacionTab({ groupId }) {
           {/* Send to owners */}
           <div className="mt-3 pt-3 border-t border-base-300">
             <p className="text-xs text-base-content/60 mb-2">Enviar liquidación a dueños</p>
-            <Button
-              onClick={() => setShowOwnerNotifyModal(true)}
-              className="btn-sm btn-primary gap-1.5"
-              disabled={!filteredData || filteredData.length === 0 || !owners?.length}
-            >
-              <BellIcon className="w-4 h-4" /> Enviar a dueños ({owners?.length || 0})
-            </Button>
+            {(() => {
+              const targetOwners = selectedOwnerId
+                ? (owners || []).filter(o => o.id === selectedOwnerId)
+                : (owners || [])
+              return (
+                <Button
+                  onClick={() => setShowOwnerNotifyModal(true)}
+                  className="btn-sm btn-primary gap-1.5"
+                  disabled={!filteredData || filteredData.length === 0 || !targetOwners.length}
+                >
+                  <BellIcon className="w-4 h-4" /> Enviar a dueños ({targetOwners.length})
+                </Button>
+              )
+            })()}
           </div>
         </div>
       </Card>
@@ -400,15 +407,25 @@ function LiquidacionTab({ groupId }) {
           isOpen={showOwnerNotifyModal}
           onClose={() => setShowOwnerNotifyModal(false)}
           type="REPORT_OWNER"
-          recipients={(owners || []).map(o => ({ id: o.id, name: o.name, email: o.email, phone: o.phone }))}
+          recipients={(selectedOwnerId
+            ? (owners || []).filter(o => o.id === selectedOwnerId)
+            : (owners || [])
+          ).map(o => ({ id: o.id, name: o.name, email: o.email, phone: o.phone }))}
           recipientType="OWNER"
           onSend={async ({ channels }) => {
+            const body = buildPostBody()
+            const targetOwnerIds = selectedOwnerId
+              ? [selectedOwnerId]
+              : (owners || []).map(o => o.id)
             await sendOwnerReport.mutateAsync({
-              ownerIds: owners.map(o => o.id),
+              ownerIds: targetOwnerIds,
               reportType: 'liquidacion',
               month,
               year,
               channels,
+              honorariosPercent: body.honorariosPercent,
+              gastosAMiCargo: body.gastosAMiCargo,
+              contractIds: body.contractIds,
             })
             setShowOwnerNotifyModal(false)
           }}

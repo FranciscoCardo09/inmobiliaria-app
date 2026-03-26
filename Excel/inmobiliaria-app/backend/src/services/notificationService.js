@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 const emailService = require('./emailService');
 const { sendWhatsApp } = require('./whatsappService');
 const templates = require('./notificationTemplates');
+const { getLiquidacionesAllContracts } = require('./reportDataService');
 
 // --- HELPERS ---
 
@@ -488,7 +489,7 @@ const sendCashReceipt = async (groupId, transactionId, channels, userId) => {
 /**
  * Send owner report / liquidation
  */
-const sendOwnerReport = async (groupId, ownerIds, reportType, periodMonth, periodYear, channels, userId) => {
+const sendOwnerReport = async (groupId, ownerIds, reportType, periodMonth, periodYear, channels, userId, options = {}) => {
   const group = await getGroupWithCredentials(groupId);
   const whatsappCredentials = {
     accountSid: group.whatsappAccountSid,
@@ -502,10 +503,35 @@ const sendOwnerReport = async (groupId, ownerIds, reportType, periodMonth, perio
     select: { id: true, name: true, email: true, phone: true },
   });
 
+  const { honorariosPercent, gastosAMiCargo, contractIds } = options;
+
+  const reportOptions = {};
+  if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
+    reportOptions.honorariosPercent = parseFloat(honorariosPercent);
+  }
+  if (gastosAMiCargo) {
+    reportOptions.gastosAMiCargo = gastosAMiCargo;
+  }
+  const contractIdArray = contractIds
+    ? (Array.isArray(contractIds) ? contractIds : contractIds.split(',').filter(Boolean))
+    : null;
+
   const allResults = [];
   for (const owner of owners) {
+    // Generate the actual liquidation data for this owner with the same options used in the preview
+    const liquidacionData = await getLiquidacionesAllContracts(
+      groupId, periodMonth, periodYear, null, reportOptions, owner.id, contractIdArray
+    );
+
+    const totalIncome = liquidacionData.reduce((s, d) => s + (d.total || 0), 0);
+    const commission = liquidacionData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+    const netAmount = totalIncome - commission;
+
     const liquidation = {
       period: `${templates.monthNames[periodMonth]} ${periodYear}`,
+      totalIncome: totalIncome > 0 ? totalIncome : null,
+      commission: commission > 0 ? commission : null,
+      netAmount: totalIncome > 0 ? netAmount : null,
     };
 
     const { subject, html, whatsappText } = templates.ownerReportTemplate(owner, liquidation, group.name);
