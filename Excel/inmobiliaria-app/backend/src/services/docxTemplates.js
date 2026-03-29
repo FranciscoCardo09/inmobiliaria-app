@@ -355,8 +355,8 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
       children.push(new Paragraph({
         children: [
-          new TextRun({ text: `    ${label}`, size: 16, font: 'Arial', color: MEDIUM }),
-          new TextRun({ text: `\t${fmt(c.importe, currency)}`, size: 16, font: 'Arial', color: DARK }),
+          new TextRun({ text: `    ${label}`, size: 16, font: 'Arial', color: MEDIUM, bold: !!c.isAjuste }),
+          new TextRun({ text: `\t${fmt(c.importe, currency)}`, size: 16, font: 'Arial', color: DARK, bold: !!c.isAjuste }),
         ],
         tabStops: [{ type: 'right', position: 9000 }],
       }));
@@ -389,8 +389,18 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   const totalLetras = numeroATexto(grandTotal);
   children.push(new Paragraph({
     children: [new TextRun({ text: `Son: ${totalLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
-    spacing: { after: 200 },
+    spacing: { after: 60 },
   }));
+
+  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+  if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
+    children.push(new Paragraph({
+      children: [
+        new TextRun({ text: `Alquileres: ${fmt(grandSubtotalAlquileres, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
+      ],
+      spacing: { after: 160 },
+    }));
+  }
 
   // Footer
   children.push(new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { before: 40 } }));

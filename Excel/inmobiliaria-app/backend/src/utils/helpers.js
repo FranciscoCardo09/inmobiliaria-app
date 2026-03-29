@@ -96,7 +96,7 @@ const numeroATexto = (numero) => {
   if (texto === '') texto = 'CERO';
 
   if (parteDecimal > 0) {
-    texto += ' CON ' + parteDecimal + '/100';
+    texto += ' CON ' + convertirGrupo(parteDecimal);
   }
 
   return texto + ' PESOS';

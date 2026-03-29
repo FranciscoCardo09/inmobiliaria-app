@@ -97,6 +97,40 @@ export const useContracts = (groupId, filters = {}) => {
     },
   })
 
+  const rescindMutation = useMutation({
+    mutationFn: async ({ id, rescissionDate }) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/rescind`, { rescissionDate })
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      toast.success('Contrato rescindido exitosamente')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al rescindir contrato')
+    },
+  })
+
+  const undoRescindMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/undo-rescind`)
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      toast.success('Rescisión deshecha exitosamente')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al deshacer rescisión')
+    },
+  })
+
   return {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
@@ -107,8 +141,12 @@ export const useContracts = (groupId, filters = {}) => {
     createContract: createMutation.mutate,
     updateContract: updateMutation.mutate,
     deleteContract: deleteMutation.mutateAsync,
+    rescindContract: rescindMutation.mutateAsync,
+    undoRescission: undoRescindMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
+    isRescinding: rescindMutation.isPending,
+    isUndoingRescission: undoRescindMutation.isPending,
   }
 }

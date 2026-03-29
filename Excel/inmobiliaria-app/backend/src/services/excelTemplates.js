@@ -160,6 +160,13 @@ const generateLiquidacionExcel = async (dataArray) => {
   applyTotalRowStyle(totalRow);
   totalRow.getCell(5).numFmt = CURRENCY_FORMAT;
 
+  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+  if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
+    const alqSummaryRow = summarySheet.addRow(['', 'Alquileres', '', '', grandSubtotalAlquileres, '']);
+    alqSummaryRow.getCell(2).font = { bold: true };
+    alqSummaryRow.getCell(5).numFmt = CURRENCY_FORMAT;
+  }
+
   // Individual sheets per tenant
   dataArray.forEach((data) => {
     const sheetName = data.inquilino.nombre.substring(0, 30).replace(/[*?/\\[\]]/g, '');
@@ -201,6 +208,7 @@ const generateLiquidacionExcel = async (dataArray) => {
         c.importe,
       ]);
       applyDataRowStyle(row, i);
+      if (c.isAjuste) row.getCell(1).font = { bold: true };
       if (typeof c.base === 'number') row.getCell(2).numFmt = CURRENCY_FORMAT;
       row.getCell(3).numFmt = CURRENCY_FORMAT;
     });
@@ -208,6 +216,12 @@ const generateLiquidacionExcel = async (dataArray) => {
     const tRow = sheet.addRow(['TOTAL A PAGAR', '', data.total]);
     applyTotalRowStyle(tRow);
     tRow.getCell(3).numFmt = CURRENCY_FORMAT;
+
+    if (data.subtotalAlquileres != null && data.subtotalAlquileres !== data.total) {
+      const alqRow = sheet.addRow(['Alquileres', '', data.subtotalAlquileres]);
+      alqRow.getCell(1).font = { bold: true };
+      alqRow.getCell(3).numFmt = CURRENCY_FORMAT;
+    }
 
     // Status
     sheet.addRow([]);

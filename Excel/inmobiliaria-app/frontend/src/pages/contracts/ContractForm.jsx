@@ -481,6 +481,25 @@ export const ContractForm = () => {
             </div>
           )}
 
+          {/* Rescission info (only when editing a rescinded contract) */}
+          {isEditing && contract?.rescindedAt && (
+            <div className="alert alert-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>
+              <div>
+                <h3 className="font-bold">Contrato Rescindido</h3>
+                <div className="text-sm space-y-1 mt-1">
+                  <div>Fecha de rescisión: <strong>{new Date(contract.rescindedAt).toLocaleDateString('es-AR')}</strong></div>
+                  {contract.rescissionPenalty != null && (
+                    <div>Multa por rescisión: <strong>${Math.round(contract.rescissionPenalty).toLocaleString('es-AR')}</strong></div>
+                  )}
+                  <p className="text-xs opacity-70 mt-1">
+                    La multa se cobra en el control mensual del mes siguiente a la rescisión. Puede deshacer la rescisión desde la lista de contratos.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Observaciones */}
           <div>
             <label className="label">

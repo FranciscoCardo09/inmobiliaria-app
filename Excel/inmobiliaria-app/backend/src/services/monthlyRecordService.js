@@ -37,7 +37,33 @@ function getMonthNumber(contract, periodMonth, periodYear) {
 function isContractActiveForMonth(contract, monthNumber) {
   // When startMonth > 1, monthNumber range is [startMonth .. startMonth + durationMonths - 1]
   const endMonth = contract.startMonth + contract.durationMonths - 1;
-  return monthNumber >= contract.startMonth && monthNumber <= endMonth && contract.active;
+  if (!contract.active) return false;
+  if (monthNumber < contract.startMonth || monthNumber > endMonth) return false;
+
+  // For rescinded contracts, cap the active range at the rescission month number
+  if (contract.rescindedAt) {
+    const rescDate = new Date(contract.rescindedAt);
+    const rescMonthNumber = getMonthNumber(contract, rescDate.getMonth() + 1, rescDate.getFullYear());
+    return monthNumber <= Math.min(endMonth, rescMonthNumber);
+  }
+
+  return true;
+}
+
+/**
+ * Returns the calendar {penaltyMonth, penaltyYear} for the penalty month of a rescinded contract
+ * (the calendar month immediately following the rescission month)
+ */
+function getRescissionPenaltyPeriod(contract) {
+  if (!contract.rescindedAt) return null;
+  const rescDate = new Date(contract.rescindedAt);
+  let penaltyMonth = rescDate.getMonth() + 2; // getMonth() is 0-indexed; +2 = next month in 1-indexed
+  let penaltyYear = rescDate.getFullYear();
+  if (penaltyMonth > 12) {
+    penaltyMonth = 1;
+    penaltyYear++;
+  }
+  return { penaltyMonth, penaltyYear };
 }
 
 /**
@@ -99,8 +125,21 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const activeContracts = [];
   for (const contract of contracts) {
     const monthNumber = getMonthNumber(contract, month, year);
+
+    // Check if this period is the penalty month for a rescinded contract
+    if (contract.rescindedAt) {
+      const penaltyPeriod = getRescissionPenaltyPeriod(contract);
+      if (penaltyPeriod && penaltyPeriod.penaltyMonth === month && penaltyPeriod.penaltyYear === year) {
+        // Include this contract as a penalty-only record
+        const rescDate = new Date(contract.rescindedAt);
+        const rescMonthNumber = getMonthNumber(contract, rescDate.getMonth() + 1, rescDate.getFullYear());
+        activeContracts.push({ contract, monthNumber: rescMonthNumber + 1, isPenaltyRecord: true });
+        continue;
+      }
+    }
+
     if (!isContractActiveForMonth(contract, monthNumber)) continue;
-    activeContracts.push({ contract, monthNumber });
+    activeContracts.push({ contract, monthNumber, isPenaltyRecord: false });
   }
 
   console.log(`[monthlyRecords] activeContracts=${activeContracts.length} of ${contracts.length} total`);
@@ -188,38 +227,62 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
   // --- BATCH 5: Bulk-create missing records (1 createMany instead of N creates) ---
   const recordsToCreate = [];
-  for (const { contract, monthNumber } of activeContracts) {
+  const penaltyRecordsToSetup = []; // contracts needing penalty service after bulk create
+  for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
     if (recordsByContractId.has(contract.id)) continue;
 
-    const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
-    let previousBalance = 0;
-    if (monthNumber - 1 >= 1) {
-      const prevRecord = prevRecordsByContractId.get(contract.id);
-      if (prevRecord && prevRecord.balance > 0) {
-        previousBalance = prevRecord.balance;
+    if (isPenaltyRecord) {
+      // Penalty month: rent=0, total=penalty amount
+      const penalty = contract.rescissionPenalty || 0;
+      recordsToCreate.push({
+        groupId,
+        contractId: contract.id,
+        monthNumber,
+        periodMonth: month,
+        periodYear: year,
+        rentAmount: 0,
+        includeIva: false,
+        ivaAmount: 0,
+        servicesTotal: penalty,
+        previousBalance: 0,
+        punitoryAmount: 0,
+        punitoryDays: 0,
+        totalDue: penalty,
+        amountPaid: 0,
+        balance: -penalty,
+      });
+      penaltyRecordsToSetup.push(contract);
+    } else {
+      const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
+      let previousBalance = 0;
+      if (monthNumber - 1 >= 1) {
+        const prevRecord = prevRecordsByContractId.get(contract.id);
+        if (prevRecord && prevRecord.balance > 0) {
+          previousBalance = prevRecord.balance;
+        }
       }
-    }
-    const includeIva = !!contract.pagaIva;
-    const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
-    const totalDue = rentAmount + ivaAmount - previousBalance;
+      const includeIva = !!contract.pagaIva;
+      const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
+      const totalDue = rentAmount + ivaAmount - previousBalance;
 
-    recordsToCreate.push({
-      groupId,
-      contractId: contract.id,
-      monthNumber,
-      periodMonth: month,
-      periodYear: year,
-      rentAmount,
-      includeIva,
-      ivaAmount,
-      servicesTotal: 0,
-      previousBalance,
-      punitoryAmount: 0,
-      punitoryDays: 0,
-      totalDue: Math.max(totalDue, 0),
-      amountPaid: 0,
-      balance: -Math.max(totalDue, 0),
-    });
+      recordsToCreate.push({
+        groupId,
+        contractId: contract.id,
+        monthNumber,
+        periodMonth: month,
+        periodYear: year,
+        rentAmount,
+        includeIva,
+        ivaAmount,
+        servicesTotal: 0,
+        previousBalance,
+        punitoryAmount: 0,
+        punitoryDays: 0,
+        totalDue: Math.max(totalDue, 0),
+        amountPaid: 0,
+        balance: -Math.max(totalDue, 0),
+      });
+    }
   }
 
   console.log(`[monthlyRecords] existing=${existingRecords.length} toCreate=${recordsToCreate.length}`);
@@ -322,6 +385,56 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     for (const r of newRecords) {
       recordsByContractId.set(r.contractId, r);
     }
+
+    // Create MonthlyService for penalty records (rescission multa)
+    if (penaltyRecordsToSetup.length > 0) {
+      for (const contract of penaltyRecordsToSetup) {
+        const penaltyRecord = recordsByContractId.get(contract.id);
+        if (!penaltyRecord || contract.rescissionPenalty <= 0) continue;
+
+        // Find or create the MULTA_RESCISION concept type for this group
+        const conceptType = await prisma.conceptType.upsert({
+          where: { groupId_name: { groupId: contract.groupId, name: 'MULTA_RESCISION' } },
+          update: {},
+          create: {
+            groupId: contract.groupId,
+            name: 'MULTA_RESCISION',
+            label: 'Multa por rescisión',
+            category: 'OTROS',
+            isDefault: false,
+          },
+        });
+
+        // Only create if service doesn't already exist
+        const existing = await prisma.monthlyService.findFirst({
+          where: { monthlyRecordId: penaltyRecord.id, conceptTypeId: conceptType.id },
+        });
+        if (!existing) {
+          await prisma.monthlyService.create({
+            data: {
+              monthlyRecordId: penaltyRecord.id,
+              conceptTypeId: conceptType.id,
+              amount: contract.rescissionPenalty,
+              description: 'Multa por rescisión anticipada del contrato',
+            },
+          });
+        }
+      }
+
+      // Re-fetch records that had penalty services added so they have the service included
+      const penaltyContractIds = penaltyRecordsToSetup.map(c => c.id);
+      const updatedPenaltyRecords = await prisma.monthlyRecord.findMany({
+        where: { groupId, periodMonth: month, periodYear: year, contractId: { in: penaltyContractIds } },
+        include: {
+          services: { include: { conceptType: { select: { id: true, name: true, label: true, category: true } } } },
+          transactions: { include: { concepts: true }, orderBy: { createdAt: 'asc' } },
+          debt: { include: { payments: { orderBy: { createdAt: 'asc' } } } },
+        },
+      });
+      for (const r of updatedPenaltyRecords) {
+        recordsByContractId.set(r.contractId, r);
+      }
+    }
   }
 
   const monthNames = [
@@ -331,7 +444,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
   const records = [];
 
-  for (const { contract, monthNumber } of activeContracts) {
+  for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
     let record = recordsByContractId.get(contract.id);
 
     if (!record) {
@@ -341,7 +454,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     // Refresh rentAmount, IVA for ALL existing records (including COMPLETE)
     // Refresh previousBalance only for non-COMPLETE records
-    if (record) {
+    // Skip rent refresh for penalty records (rent intentionally 0)
+    if (record && !isPenaltyRecord) {
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 
@@ -649,6 +763,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         }
         return {};
       })(),
+      isPenaltyRecord: !!isPenaltyRecord,
     });
   }
 

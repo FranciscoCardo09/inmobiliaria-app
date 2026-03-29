@@ -80,6 +80,8 @@ const enrichContract = (c) => {
   let status;
   if (!c.active) {
     status = 'TERMINATED';
+  } else if (c.rescindedAt) {
+    status = 'RESCINDED';
   } else if (now > endDate) {
     status = 'EXPIRED';
   } else {
@@ -102,6 +104,8 @@ const enrichContract = (c) => {
     isExpiringSoon,
     nextAdjustmentIsThisMonth,
     nextAdjustmentLabel,
+    rescindedAt: c.rescindedAt || null,
+    rescissionPenalty: c.rescissionPenalty || null,
   };
 };
 
@@ -725,6 +729,126 @@ const getContractRentHistory = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/contracts/:id/rescind
+const rescindContract = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { rescissionDate } = req.body;
+
+    if (!rescissionDate) {
+      return ApiResponse.badRequest(res, 'Se requiere la fecha de rescisión');
+    }
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      include: { rentHistory: { orderBy: { effectiveFromMonth: 'desc' } } },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    if (!contract.active) {
+      return ApiResponse.badRequest(res, 'El contrato ya está inactivo');
+    }
+
+    if (contract.rescindedAt) {
+      return ApiResponse.badRequest(res, 'El contrato ya está rescindido');
+    }
+
+    // Calculate the contract month number at the rescission date
+    const rescDate = parseLocalDate(rescissionDate);
+    const start = new Date(contract.startDate);
+    const monthsDiff =
+      (rescDate.getFullYear() - start.getFullYear()) * 12 +
+      (rescDate.getMonth() - start.getMonth());
+    const sm = contract.startMonth || 1;
+    const endMonth = sm + contract.durationMonths - 1;
+    const rescissionMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+
+    // Get effective rent at rescission month
+    let effectiveRent = contract.baseRent;
+    for (const rh of contract.rentHistory) {
+      if (rh.effectiveFromMonth <= rescissionMonthNumber) {
+        effectiveRent = rh.rentAmount;
+        break;
+      }
+    }
+
+    // Penalty = remaining months * rent * 10%
+    const remainingMonths = Math.max(0, endMonth - rescissionMonthNumber);
+    const rescissionPenalty = parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
+
+    const updated = await prisma.contract.update({
+      where: { id },
+      data: {
+        rescindedAt: rescDate,
+        rescissionPenalty,
+      },
+      include: {
+        tenant: { select: { id: true, name: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true } } }, orderBy: { isPrimary: 'desc' } },
+        property: { select: { id: true, address: true, owner: { select: { id: true, name: true } } } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+      },
+    });
+
+    return ApiResponse.success(res, enrichContract(updated));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/contracts/:id/undo-rescind
+const undoRescission = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+
+    const contract = await prisma.contract.findUnique({ where: { id } });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    if (!contract.rescindedAt) {
+      return ApiResponse.badRequest(res, 'El contrato no está rescindido');
+    }
+
+    // Remove the penalty month record if it exists and has no payments
+    const rescDate = new Date(contract.rescindedAt);
+    const penaltyMonth = rescDate.getMonth() === 11 ? 1 : rescDate.getMonth() + 2;
+    const penaltyYear = rescDate.getMonth() === 11 ? rescDate.getFullYear() + 1 : rescDate.getFullYear();
+
+    const penaltyRecord = await prisma.monthlyRecord.findFirst({
+      where: { contractId: id, periodMonth: penaltyMonth, periodYear: penaltyYear },
+      include: { transactions: true },
+    });
+
+    if (penaltyRecord && penaltyRecord.transactions.length > 0) {
+      return ApiResponse.badRequest(res, 'No se puede deshacer la rescisión: ya hay pagos registrados en el mes de multa');
+    }
+
+    if (penaltyRecord) {
+      await prisma.monthlyRecord.delete({ where: { id: penaltyRecord.id } });
+    }
+
+    const updated = await prisma.contract.update({
+      where: { id },
+      data: { rescindedAt: null, rescissionPenalty: null },
+      include: {
+        tenant: { select: { id: true, name: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true } } }, orderBy: { isPrimary: 'desc' } },
+        property: { select: { id: true, address: true, owner: { select: { id: true, name: true } } } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+      },
+    });
+
+    return ApiResponse.success(res, enrichContract(updated));
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getContracts,
   getExpiringContracts,
@@ -735,4 +859,6 @@ module.exports = {
   deleteContract,
   assignTenantToProperty,
   getContractRentHistory,
+  rescindContract,
+  undoRescission,
 };

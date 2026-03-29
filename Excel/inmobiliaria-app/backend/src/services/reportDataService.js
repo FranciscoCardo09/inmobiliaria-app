@@ -126,6 +126,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
           property: {
             include: { owner: { include: { transferBeneficiary: true } } },
           },
+          rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
         },
       },
       services: {
@@ -151,6 +152,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
               tenant: true,
               contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
               property: { include: { owner: { include: { transferBeneficiary: true } } } },
+              rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
             },
           },
           services: { include: { conceptType: true } },
@@ -232,15 +234,34 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     };
   }
 
+  // Detect if contract had a rent adjustment this month
+  const ajusteEstesMes = (contract.rentHistory || []).find(
+    h => h.effectiveFromMonth === monthlyRecord.monthNumber && h.reason !== 'INICIAL' && h.adjustmentPercent != null
+  );
+
+  // Only show IMPUESTO, SERVICIO, DESCUENTO, BONIFICACION in liquidation reports
+  const LIQUIDACION_CATEGORIES = new Set(['IMPUESTO', 'SERVICIO', 'DESCUENTO', 'BONIFICACION']);
+
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    conceptos.push({ concepto: `Alquiler ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`, base: monthlyRecord.rentAmount, importe: monthlyRecord.rentAmount });
+    let alquilerLabel = `Alquiler ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`;
+    if (ajusteEstesMes) {
+      const pctStr = ajusteEstesMes.adjustmentPercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      alquilerLabel += ` Ajuste ${pctStr}%`;
+    }
+    conceptos.push({
+      concepto: alquilerLabel,
+      base: monthlyRecord.rentAmount,
+      importe: monthlyRecord.rentAmount,
+      isAjuste: !!ajusteEstesMes,
+    });
   }
 
   for (const svc of monthlyRecord.services) {
-    const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
     const cat = svc.conceptType?.category;
+    if (!LIQUIDACION_CATEGORIES.has(cat)) continue;
+    const isDiscount = cat === 'DESCUENTO' || cat === 'BONIFICACION';
     const label = svc.conceptType?.label || svc.description || 'Servicio';
     const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
     conceptos.push({
@@ -256,8 +277,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     conceptos.push({ concepto: 'IVA (21%)', base: monthlyRecord.rentAmount, importe: monthlyRecord.ivaAmount });
   }
 
-  if (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) {
-    conceptos.push({ concepto: `Punitorios (${monthlyRecord.punitoryDays} días)`, base: null, importe: monthlyRecord.punitoryAmount });
+  const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
+  if (punitoryAmt > 0) {
+    conceptos.push({ concepto: `Punitorios (${monthlyRecord.punitoryDays} días)`, base: null, importe: punitoryAmt });
   }
 
   if (monthlyRecord.previousBalance !== 0) {
@@ -267,6 +289,12 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       importe: monthlyRecord.previousBalance > 0 ? -monthlyRecord.previousBalance : Math.abs(monthlyRecord.previousBalance),
     });
   }
+
+  // Total from visible conceptos only (gastos/mantenimiento excluded)
+  const total = conceptos.reduce((sum, c) => sum + c.importe, 0);
+
+  // Subtotal alquileres = rent + punitorios (base for honorarios calculation)
+  const subtotalAlquileres = monthlyRecord.rentAmount + punitoryAmt;
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
   const serviciosDisponibles = monthlyRecord.services
@@ -289,8 +317,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}`, mesContrato: monthlyRecord.monthNumber, mesVencido, anioVencido, labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}` },
     conceptos,
     serviciosDisponibles,
-    total: monthlyRecord.totalDue,
-    totalEnLetras: numeroATexto(monthlyRecord.totalDue),
+    total,
+    totalEnLetras: numeroATexto(total),
+    subtotalAlquileres,
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
@@ -325,12 +354,16 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
   const empresa = await getEmpresaData(groupId);
 
   // Build where clause for a single batch query
+  const soloConPago = options.soloConPago !== false; // default true: only show cancelled (paid) records
   const where = {
     groupId,
     periodMonth: month,
     periodYear: year,
     contract: { active: true },
   };
+  if (soloConPago) {
+    where.isCancelled = true;
+  }
 
   // contractIds takes priority over propertyIds
   if (contractIds && contractIds.length > 0) {
@@ -352,6 +385,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: { include: { owner: { include: { transferBeneficiary: true } } } },
+          rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
         },
       },
       services: { include: { conceptType: true } },

@@ -28,6 +28,18 @@ router.put(
   contractsController.updateContract
 );
 
+router.post(
+  '/:id/rescind',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  contractsController.rescindContract
+);
+
+router.post(
+  '/:id/undo-rescind',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  contractsController.undoRescission
+);
+
 router.delete(
   '/:id',
   requireGroupAccess(['ADMIN']),

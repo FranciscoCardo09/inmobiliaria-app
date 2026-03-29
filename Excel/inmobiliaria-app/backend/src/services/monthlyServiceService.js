@@ -221,12 +221,48 @@ const batchAddServices = async (distributions, conceptTypeId, description = null
   return results;
 };
 
+/**
+ * Bulk assign a service to multiple months for multiple contracts.
+ * Applies the same amount uniformly to every contract+month combination.
+ */
+const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amount, months, description = null) => {
+  // Validate conceptType belongs to this group
+  const conceptType = await prisma.conceptType.findFirst({
+    where: { id: conceptTypeId, groupId, isActive: true },
+  });
+  if (!conceptType) throw new Error('Tipo de concepto no encontrado o inactivo');
+
+  // Validate all contracts belong to this group
+  const contracts = await prisma.contract.findMany({
+    where: { id: { in: contractIds }, groupId },
+    select: { id: true },
+  });
+  if (contracts.length !== contractIds.length) {
+    throw new Error('Algunos contratos no pertenecen a este grupo');
+  }
+
+  let totalAssigned = 0;
+  const errors = [];
+
+  for (const contractId of contractIds) {
+    try {
+      const results = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description);
+      totalAssigned += results.length;
+    } catch (e) {
+      errors.push({ contractId, error: e.message });
+    }
+  }
+
+  return { totalAssigned, errors };
+};
+
 module.exports = {
   addService,
   updateService,
   removeService,
   getServicesForRecord,
   bulkAssign,
+  bulkAssignMultiContract,
   copyConfig,
   batchAddServices,
 };

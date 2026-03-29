@@ -39,6 +39,13 @@ router.post(
   controller.batchAddServices
 );
 
+// Bulk load: same service+amount to multiple properties x multiple months
+router.post(
+  '/bulk-load-services',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.bulkLoadServices
+);
+
 // IVA toggle
 router.patch(
   '/:recordId/iva',

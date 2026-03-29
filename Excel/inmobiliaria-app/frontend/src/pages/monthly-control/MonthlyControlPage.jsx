@@ -15,6 +15,7 @@ import TransactionHistoryModal from '../../components/TransactionHistoryModal'
 import DebtPaymentModal from '../../components/DebtPaymentModal'
 import CloseMonthWizard from './CloseMonthWizard'
 import BatchServiceModal from './BatchServiceModal'
+import BulkLoadServiceModal from './BulkLoadServiceModal'
 import { useDebts } from '../../hooks/useDebts'
 import { useNotifications } from '../../hooks/useNotifications'
 import SendNotificationModal from '../../components/notifications/SendNotificationModal'
@@ -38,6 +39,7 @@ import {
   BanknotesIcon,
   EyeIcon,
   BellIcon,
+  CalendarDaysIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -125,6 +127,7 @@ export default function MonthlyControlPage() {
   const [txHistoryModal, setTxHistoryModal] = useState({ open: false, record: null })
   const [closeMonthWizard, setCloseMonthWizard] = useState(false)
   const [showBatchService, setShowBatchService] = useState(false)
+  const [showBulkLoad, setShowBulkLoad] = useState(false)
 
   // Debt payment hook
   const { payDebt, isPaying } = useDebts(currentGroupId)
@@ -324,10 +327,18 @@ export default function MonthlyControlPage() {
           <button
               className="btn btn-sm btn-primary gap-1"
               onClick={() => setShowBatchService(true)}
-              title="Cargar servicio a múltiples propiedades"
+              title="Cargar servicio a múltiples propiedades (distribuir)"
             >
               <WrenchScrewdriverIcon className="w-4 h-4" />
               Cargar Servicio
+            </button>
+            <button
+              className="btn btn-sm btn-secondary gap-1"
+              onClick={() => setShowBulkLoad(true)}
+              title="Cargar mismo servicio a múltiples propiedades y meses"
+            >
+              <CalendarDaysIcon className="w-4 h-4" />
+              Carga Masiva
             </button>
           {allRecords.some((r) => (r.status === 'PENDING' || r.status === 'PARTIAL') && !r.debtInfo) && (
             <button
@@ -649,6 +660,15 @@ export default function MonthlyControlPage() {
           onClose={() => setShowBatchService(false)}
         />
       )}
+      {showBulkLoad && (
+        <BulkLoadServiceModal
+          groupId={currentGroupId}
+          records={allRecords}
+          periodMonth={periodMonth}
+          periodYear={periodYear}
+          onClose={() => setShowBulkLoad(false)}
+        />
+      )}
       {closeMonthWizard && (
         <CloseMonthWizard
           groupId={currentGroupId}
@@ -691,7 +711,11 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
-  const rowClass = record.status === 'COMPLETE'
+  const isPenalty = !!record.isPenaltyRecord
+
+  const rowClass = isPenalty
+    ? 'bg-warning/15 border-l-4 border-warning'
+    : record.status === 'COMPLETE'
     ? 'bg-success/25'
     : record.status === 'PARTIAL'
     ? 'bg-warning/10'
@@ -742,7 +766,12 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           )}
         </td>
         <td className="text-xs whitespace-nowrap">
-          {record.periodLabel}
+          <div className="flex items-center gap-1">
+            {record.periodLabel}
+            {isPenalty && (
+              <span className="badge badge-warning badge-xs">Multa rescisión</span>
+            )}
+          </div>
         </td>
         <td className="text-xs">
           {record.nextAdjustmentLabel || '-'}

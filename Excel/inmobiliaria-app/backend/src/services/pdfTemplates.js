@@ -252,7 +252,7 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
     colWidths = null, totalRow = null,
     fontSize = 8.5, headerFontSize = 7.5,
     rowHeight = 22, headerHeight = 26,
-    colAligns = null,
+    colAligns = null, rowMeta = null,
   } = opts;
 
   const n = headers.length;
@@ -298,12 +298,13 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
       .lineTo(PAGE.width - PAGE.margin, y + rowHeight - 0.5).stroke();
 
     x = PAGE.margin;
-    doc.font(F.r).fontSize(fontSize).fillColor(C.black);
+    const isBoldRow = rowMeta?.[rowIdx]?.bold;
+    doc.font(isBoldRow ? F.b : F.r).fontSize(fontSize).fillColor(C.black);
 
     row.forEach((cell, i) => {
       const str = String(cell ?? '-');
-      if (i === 0) doc.font(F.r).fillColor(C.black);
-      else doc.font(F.r).fillColor(C.dark);
+      if (i === 0) doc.font(isBoldRow ? F.b : F.r).fillColor(C.black);
+      else doc.font(isBoldRow ? F.b : F.r).fillColor(C.dark);
 
       doc.text(str, x + 8, y + (rowHeight - fontSize) / 2, {
         width: widths[i] - 16, align: aligns[i],
@@ -390,11 +391,13 @@ const generateLiquidacionPDF = (data) => {
 
     // Detail table
     const rows = data.conceptos.map(c => [c.concepto, fmt(c.importe, data.currency)]);
+    const rowMeta = data.conceptos.map(c => ({ bold: !!c.isAjuste }));
     y = drawTable(doc, y, ['Concepto', 'Importe'], rows, {
       colWidths: [W * 0.7, W * 0.3],
       fontSize: 8.5,
       headerFontSize: 8,
-      colAligns: ['left', 'right']
+      colAligns: ['left', 'right'],
+      rowMeta,
     });
 
     // Total - black box
@@ -411,8 +414,16 @@ const generateLiquidacionPDF = (data) => {
     if (data.totalEnLetras) {
       doc.font(F.r).fontSize(8).fillColor(C.dark)
         .text(`Son: ${data.totalEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-      y += 18;
+      y += 14;
     }
+
+    // Subtotal alquileres (rent + punitorios)
+    if (data.subtotalAlquileres != null && data.subtotalAlquileres !== data.total) {
+      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
+        .text(`Alquileres: ${fmt(data.subtotalAlquileres, data.currency)}`, PAGE.margin + 4, y, { width: W - 8 });
+      y += 14;
+    }
+    y += 4;
 
     // Honorarios section
     if (data.honorarios) {
@@ -420,7 +431,8 @@ const generateLiquidacionPDF = (data) => {
       const hon = data.honorarios;
       const gastos = hon.gastosAMiCargo || [];
       const rowH = 16;
-      const honH = 14 + rowH * (1 + gastos.length) + (gastos.length > 0 ? 10 : 0) + 20;
+      const alquilerLines = hon.porcentaje > 0 ? 1 : 0;
+      const honH = 14 + rowH * (alquilerLines + gastos.length) + (gastos.length > 0 ? 10 : 0) + 34;
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
@@ -975,6 +987,26 @@ const generateMultiPagoEfectivoPDF = (dataArray) => {
             .text(`${fechaStr} — ${fmt(p.monto, data.currency)} — ${p.metodo}`, rMargin + 10, y, { width: rContent - 16 });
           y += 10;
         }
+        y += 2;
+
+        // Total pagado
+        const totalPagado = data.pagos.reduce((s, p) => s + p.monto, 0);
+        doc.moveTo(rMargin + 4, y).lineTo(rMargin + rContent - 4, y).strokeColor('#CCCCCC').lineWidth(0.3).stroke();
+        y += 5;
+        doc.font(F.b).fontSize(8).fillColor(C.black);
+        doc.text('Total Pagado:', rMargin + 4, y, { width: rContent * 0.55 });
+        doc.text(fmt(totalPagado, data.currency), rMargin + 4, y, { width: rContent - 8, align: 'right' });
+        y += 12;
+
+        // Saldo
+        const saldo = data.total - totalPagado;
+        if (Math.abs(saldo) > 0.01) {
+          const saldoLabel = saldo > 0 ? 'Saldo a Pagar:' : 'Saldo a Favor:';
+          doc.font(F.b).fontSize(8).fillColor(C.black);
+          doc.text(saldoLabel, rMargin + 4, y, { width: rContent * 0.55 });
+          doc.text(fmt(Math.abs(saldo), data.currency), rMargin + 4, y, { width: rContent - 8, align: 'right' });
+          y += 12;
+        }
         y += 4;
       }
 
@@ -1235,9 +1267,10 @@ const generateLiquidacionAllPDF = (dataArray) => {
       // Conceptos
       for (const c of conceptosFiltered) {
         const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
-        doc.font(F.r).fontSize(8).fillColor(C.medium)
+        const conceptFont = c.isAjuste ? F.b : F.r;
+        doc.font(conceptFont).fontSize(8).fillColor(C.medium)
           .text(label, PAGE.margin + 24, iy, { width: W * 0.55 });
-        doc.font(F.r).fontSize(8).fillColor(C.dark)
+        doc.font(conceptFont).fontSize(8).fillColor(C.dark)
           .text(fmt(c.importe, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
         iy += 18;
       }
@@ -1260,7 +1293,16 @@ const generateLiquidacionAllPDF = (dataArray) => {
     const totalLetras = numeroATexto(grandTotal);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-    y += 24;
+    y += 14;
+
+    // Subtotal alquileres (rent + punitorios across all contracts)
+    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+    if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
+      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
+        .text(`Alquileres: ${fmt(grandSubtotalAlquileres, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
+      y += 14;
+    }
+    y += 10;
 
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
@@ -1281,7 +1323,9 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
       const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
       const rowH = 16;
-      const honH = 14 + rowH * (1 + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 20;
+      const honPct = firstHon.honorarios.porcentaje;
+      const alquilerLines = honPct > 0 ? 1 : 0;
+      const honH = 14 + rowH * (alquilerLines + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 34;
       checkNewPage(honH + 20);
 
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
@@ -1292,7 +1336,6 @@ const generateLiquidacionAllPDF = (dataArray) => {
         .text('HONORARIOS', PAGE.margin + 12, hy);
       hy += 12;
 
-      const honPct = firstHon.honorarios.porcentaje;
       if (honPct > 0) {
         const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
         doc.font(F.r).fontSize(9).fillColor(C.dark)

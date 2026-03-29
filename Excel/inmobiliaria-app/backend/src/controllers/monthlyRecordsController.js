@@ -10,6 +10,7 @@ const {
   updateService,
   removeService,
   getServicesForRecord,
+  bulkAssignMultiContract,
 } = require('../services/monthlyServiceService');
 
 const prisma = require('../lib/prisma');
@@ -307,6 +308,45 @@ const forgiveBalance = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/monthly-records/bulk-load-services
+const bulkLoadServices = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { contractIds, conceptTypeId, amount, months, description } = req.body;
+
+    if (!Array.isArray(contractIds) || contractIds.length === 0) {
+      return ApiResponse.badRequest(res, 'contractIds debe ser un array no vacío');
+    }
+    if (!conceptTypeId) {
+      return ApiResponse.badRequest(res, 'conceptTypeId es requerido');
+    }
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return ApiResponse.badRequest(res, 'amount debe ser un número mayor a 0');
+    }
+    if (!Array.isArray(months) || months.length === 0) {
+      return ApiResponse.badRequest(res, 'months debe ser un array no vacío de {month, year}');
+    }
+    for (const m of months) {
+      if (!m.month || !m.year || m.month < 1 || m.month > 12) {
+        return ApiResponse.badRequest(res, 'Cada mes debe tener month (1-12) y year válidos');
+      }
+    }
+
+    const result = await bulkAssignMultiContract(
+      groupId,
+      contractIds,
+      conceptTypeId,
+      Number(amount),
+      months,
+      description || null
+    );
+
+    return ApiResponse.success(res, result, `Se asignaron ${result.totalAssigned} servicios correctamente`);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMonthlyRecords,
   getMonthlyRecordDetail,
@@ -319,4 +359,5 @@ module.exports = {
   updateRecordService,
   deleteRecordService,
   batchAddServices,
+  bulkLoadServices,
 };

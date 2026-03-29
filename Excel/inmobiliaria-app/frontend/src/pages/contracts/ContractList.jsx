@@ -1,5 +1,5 @@
-// Contract List Page - Table with filters, alerts, and search
-import { useState } from 'react'
+// Contract List Page - Table with filters, alerts, search, and rescission
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   PlusIcon,
@@ -8,6 +8,8 @@ import {
   TrashIcon,
   ExclamationTriangleIcon,
   ClockIcon,
+  NoSymbolIcon,
+  ArrowUturnLeftIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
@@ -25,8 +27,13 @@ export const ContractList = () => {
     status: '',
   })
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [rescindModal, setRescindModal] = useState(null) // contract to rescind
+  const [rescissionDate, setRescissionDate] = useState('')
 
-  const { contracts, isLoading, deleteContract, isDeleting } = useContracts(currentGroup?.id, filters)
+  const {
+    contracts, isLoading, deleteContract, isDeleting,
+    rescindContract, isRescinding, undoRescission, isUndoingRescission,
+  } = useContracts(currentGroup?.id, filters)
 
   const handleDelete = async () => {
     if (!confirmDelete) return
@@ -34,6 +41,43 @@ export const ContractList = () => {
       await deleteContract(confirmDelete.id)
     } catch { /* toast handles error */ }
     setConfirmDelete(null)
+  }
+
+  const handleRescind = async () => {
+    if (!rescindModal || !rescissionDate) return
+    try {
+      await rescindContract({ id: rescindModal.id, rescissionDate })
+    } catch { /* toast handles error */ }
+    setRescindModal(null)
+    setRescissionDate('')
+  }
+
+  const handleUndoRescission = async (contract) => {
+    try {
+      await undoRescission(contract.id)
+    } catch { /* toast handles error */ }
+  }
+
+  // Calculate penalty preview for the modal
+  const penaltyPreview = useMemo(() => {
+    if (!rescindModal || !rescissionDate) return null
+    const rescDate = new Date(rescissionDate + 'T12:00:00')
+    const start = new Date(rescindModal.startDate)
+    const monthsDiff =
+      (rescDate.getFullYear() - start.getFullYear()) * 12 +
+      (rescDate.getMonth() - start.getMonth())
+    const sm = rescindModal.startMonth || 1
+    const endMonth = sm + rescindModal.durationMonths - 1
+    const rescMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth))
+    const remainingMonths = Math.max(0, endMonth - rescMonthNumber)
+    const rent = rescindModal.rentAmount || rescindModal.baseRent || 0
+    const penalty = remainingMonths * rent * 0.10
+    return { remainingMonths, rent, penalty }
+  }, [rescindModal, rescissionDate])
+
+  const openRescindModal = (contract) => {
+    setRescissionDate(new Date().toISOString().split('T')[0])
+    setRescindModal(contract)
   }
 
   const getStatusBadge = (contract) => {
@@ -46,7 +90,8 @@ export const ContractList = () => {
     const statusMap = {
       ACTIVE: { class: 'badge-success', label: 'Activo' },
       EXPIRED: { class: 'badge-error', label: 'Vencido' },
-      TERMINATED: { class: 'badge-ghost', label: 'Rescindido' },
+      TERMINATED: { class: 'badge-ghost', label: 'Finalizado' },
+      RESCINDED: { class: 'badge-warning', label: 'Rescindido' },
       RENEWED: { class: 'badge-info', label: 'Renovado' },
     }
     const s = statusMap[contract.status] || { class: 'badge-ghost', label: contract.status }
@@ -152,8 +197,9 @@ export const ContractList = () => {
             <tbody>
               {contracts.map((contract) => {
                 const isProp = contract.contractType === 'PROPIETARIO'
+                const isRescinded = contract.status === 'RESCINDED'
                 return (
-                <tr key={contract.id} className={`hover ${contract.isExpiringSoon ? 'bg-warning/10' : ''}`}>
+                <tr key={contract.id} className={`hover ${contract.isExpiringSoon ? 'bg-warning/10' : ''} ${isRescinded ? 'bg-warning/5' : ''}`}>
                   <td>
                     <span className={`badge badge-sm ${isProp ? 'badge-secondary' : 'badge-primary'}`}>
                       {isProp ? 'PROP' : 'INQ'}
@@ -202,6 +248,29 @@ export const ContractList = () => {
                       >
                         <PencilIcon className="w-4 h-4" />
                       </button>
+                      {/* Rescind button - only for active INQUILINO contracts that are not already rescinded */}
+                      {!isProp && contract.active && !isRescinded && (
+                        <button
+                          onClick={() => openRescindModal(contract)}
+                          className="btn btn-sm btn-ghost text-warning"
+                          title="Rescindir contrato"
+                        >
+                          <NoSymbolIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/* Undo rescission button */}
+                      {isRescinded && (
+                        <button
+                          onClick={() => handleUndoRescission(contract)}
+                          className="btn btn-sm btn-ghost text-info"
+                          title="Deshacer rescisión"
+                          disabled={isUndoingRescission}
+                        >
+                          {isUndoingRescission
+                            ? <span className="loading loading-spinner loading-xs" />
+                            : <ArrowUturnLeftIcon className="w-4 h-4" />}
+                        </button>
+                      )}
                       <button
                         onClick={() => setConfirmDelete(contract)}
                         className="btn btn-sm btn-ghost text-error"
@@ -235,6 +304,12 @@ export const ContractList = () => {
           <div className="stat-title">Por Vencer</div>
           <div className="stat-value text-warning">
             {contracts.filter((c) => c.isExpiringSoon).length}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-title">Rescindidos</div>
+          <div className="stat-value text-warning">
+            {contracts.filter((c) => c.status === 'RESCINDED').length}
           </div>
         </div>
       </div>
@@ -279,6 +354,75 @@ export const ContractList = () => {
             </div>
           </div>
           <div className="modal-backdrop" onClick={() => !isDeleting && setConfirmDelete(null)} />
+        </div>
+      )}
+
+      {/* Rescission modal */}
+      {rescindModal && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg text-warning">
+              <NoSymbolIcon className="w-5 h-5 inline mr-2" />
+              Rescindir Contrato
+            </h3>
+            <div className="py-4 space-y-4">
+              <p>
+                Vas a rescindir el contrato de{' '}
+                <span className="font-semibold">
+                  {rescindModal.tenants?.length > 0
+                    ? rescindModal.tenants.map((t) => t.name).join(' / ')
+                    : rescindModal.tenant?.name || 'Sin inquilino'}
+                </span>{' '}
+                en <span className="font-semibold">{rescindModal.property?.address}</span>.
+              </p>
+
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text font-medium">Fecha de rescisión (último mes activo)</span>
+                </label>
+                <input
+                  type="date"
+                  className="input input-bordered"
+                  value={rescissionDate}
+                  onChange={(e) => setRescissionDate(e.target.value)}
+                />
+              </div>
+
+              {penaltyPreview && (
+                <div className="alert alert-warning">
+                  <div>
+                    <div className="font-medium">Cálculo de la multa</div>
+                    <div className="text-sm space-y-1 mt-1">
+                      <div>Meses restantes: <strong>{penaltyPreview.remainingMonths}</strong></div>
+                      <div>Alquiler actual: <strong>${Math.round(penaltyPreview.rent).toLocaleString('es-AR')}</strong></div>
+                      <div>Multa (10%): <strong className="text-lg">${Math.round(penaltyPreview.penalty).toLocaleString('es-AR')}</strong></div>
+                    </div>
+                    <p className="text-xs mt-2 opacity-70">
+                      La multa aparecerá como cargo en el control mensual del mes siguiente a la fecha de rescisión.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setRescindModal(null); setRescissionDate('') }}
+                disabled={isRescinding}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-warning btn-sm"
+                onClick={handleRescind}
+                disabled={isRescinding || !rescissionDate}
+              >
+                {isRescinding ? <span className="loading loading-spinner loading-xs" /> : <NoSymbolIcon className="w-4 h-4" />}
+                Confirmar Rescisión
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => !isRescinding && setRescindModal(null)} />
         </div>
       )}
     </div>

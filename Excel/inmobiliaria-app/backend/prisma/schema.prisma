@@ -369,6 +369,11 @@ model Contract {
 
   pagaIva             Boolean  @default(false) @map("paga_iva")
   observations        String?
+
+  // Rescisión anticipada
+  rescindedAt         DateTime? @map("rescinded_at")        // Fecha de rescisión (último mes activo)
+  rescissionPenalty   Float?    @map("rescission_penalty")  // Monto de la multa calculada
+
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 

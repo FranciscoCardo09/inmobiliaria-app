@@ -23,11 +23,14 @@ const generateLiquidacionHTML = (data) => {
   const emp = data.empresa;
   const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
 
-  const conceptRows = data.conceptos.map((c, i) => `
+  const conceptRows = data.conceptos.map((c, i) => {
+    const boldStyle = c.isAjuste ? 'font-weight:bold;' : '';
+    return `
     <tr style="background:${i % 2 === 1 ? '#F5F5F5' : '#FFFFFF'}">
-      <td style="padding:6px 10px;border-bottom:1px solid #E0E0E0;font-family:Arial;font-size:11pt;color:#000">${escHtml(c.concepto)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #E0E0E0;font-family:Arial;font-size:11pt;color:#333;text-align:right">${fmt(c.importe, data.currency)}</td>
-    </tr>`).join('');
+      <td style="padding:6px 10px;border-bottom:1px solid #E0E0E0;font-family:Arial;font-size:11pt;color:#000;${boldStyle}">${escHtml(c.concepto)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #E0E0E0;font-family:Arial;font-size:11pt;color:#333;text-align:right;${boldStyle}">${fmt(c.importe, data.currency)}</td>
+    </tr>`;
+  }).join('');
 
   let paymentsSection = '';
   if (data.transacciones && data.transacciones.length > 0) {
@@ -103,6 +106,7 @@ const generateLiquidacionHTML = (data) => {
   </table>
 
   ${data.totalEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.totalEnLetras)}</p>` : ''}
+  ${data.subtotalAlquileres != null && data.subtotalAlquileres !== data.total ? `<p style="font-family:Arial;font-size:9pt;color:#333;font-weight:bold;margin:4px 0">Alquileres: ${fmt(data.subtotalAlquileres, data.currency)}</p>` : ''}
 
   ${data.honorarios ? (() => {
     const hon = data.honorarios;
@@ -164,7 +168,8 @@ const generateLiquidacionAllHTML = (dataArray) => {
 
     const rows = conceptosFiltered.map(c => {
       const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
-      return `<tr><td style="padding:3px 20px;font-family:Arial;font-size:9pt;color:#666">${escHtml(label)}</td><td style="padding:3px 10px;font-family:Arial;font-size:9pt;color:#333;text-align:right">${fmt(c.importe, currency)}</td></tr>`;
+      const boldStyle = c.isAjuste ? 'font-weight:bold;' : '';
+      return `<tr><td style="padding:3px 20px;font-family:Arial;font-size:9pt;color:#666;${boldStyle}">${escHtml(label)}</td><td style="padding:3px 10px;font-family:Arial;font-size:9pt;color:#333;text-align:right;${boldStyle}">${fmt(c.importe, currency)}</td></tr>`;
     }).join('');
 
     return `
@@ -196,6 +201,14 @@ const generateLiquidacionAllHTML = (dataArray) => {
     <strong style="font-family:Arial;font-size:13pt">TOTAL</strong>
     <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandTotal, currency)}</strong>
   </div>
+  <p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:6px 0 2px 0">Son: ${escHtml(numeroATexto(grandTotal))}</p>
+  ${(() => {
+    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+    if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
+      return `<p style="font-family:Arial;font-size:9pt;color:#333;font-weight:bold;margin:4px 0">${escHtml('Alquileres: ' + fmt(grandSubtotalAlquileres, currency))}</p>`;
+    }
+    return '';
+  })()}
   ${(() => {
     const firstHon = dataArray.find(d => d.honorarios);
     if (!firstHon) return '';
@@ -312,14 +325,23 @@ const generatePagoEfectivoHTML = (data) => {
 
   ${data.totalEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.totalEnLetras)}</p>` : ''}
 
-  ${data.pagos && data.pagos.length > 0 ? `
+  ${data.pagos && data.pagos.length > 0 ? (() => {
+    const totalPagado = data.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = data.total - totalPagado;
+    const saldoRow = Math.abs(saldo) > 0.01
+      ? `<p style="font-family:Arial;font-size:9pt;font-weight:bold;margin:4px 0 0 0">${saldo > 0 ? 'Saldo a Pagar' : 'Saldo a Favor'}: ${fmt(Math.abs(saldo), data.currency)}</p>`
+      : '';
+    return `
   <div style="margin-top:12px;border-top:1px solid #E0E0E0;padding-top:8px">
     <p style="font-family:Arial;font-size:8pt;font-weight:bold;margin:0 0 4px 0">Pagos realizados:</p>
     ${data.pagos.map(p => {
       const fechaStr = p.fecha ? new Date(p.fecha).toLocaleDateString('es-AR', { timeZone: 'UTC' }) : '-';
       return `<p style="font-family:Arial;font-size:8pt;margin:2px 0 2px 10px">- ${fechaStr} — ${fmt(p.monto, data.currency)} — ${escHtml(p.metodo)}</p>`;
     }).join('')}
-  </div>` : ''}
+    <p style="font-family:Arial;font-size:9pt;font-weight:bold;margin:6px 0 2px 0">Total Pagado: ${fmt(totalPagado, data.currency)}</p>
+    ${saldoRow}
+  </div>`;
+  })() : ''}
 
   <!-- FOOTER -->
   <div style="margin-top:20px;border-top:1px solid #E0E0E0;padding-top:8px">
