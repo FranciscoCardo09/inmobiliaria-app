@@ -400,27 +400,33 @@ const generateLiquidacionPDF = (data) => {
       rowMeta,
     });
 
-    // Total - black box
+    // TOTAL ALQUILERES box
     y += 8;
     const totalH = 34;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
+    doc.font(F.b).fontSize(11).fillColor(C.white)
+      .text('TOTAL ALQUILERES', PAGE.margin + 14, y + 10);
+    doc.text(fmt(data.subtotalAlquileres, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
+    y += totalH + 10;
 
+    // Amount in words for Alquileres
+    if (data.subtotalAlquileresEnLetras) {
+      doc.font(F.r).fontSize(8).fillColor(C.dark)
+        .text(`Son: ${data.subtotalAlquileresEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
+      y += 18;
+    }
+
+    // TOTAL A PAGAR box
+    fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
     doc.font(F.b).fontSize(11).fillColor(C.white)
       .text('TOTAL A PAGAR', PAGE.margin + 14, y + 10);
     doc.text(fmt(data.total, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
-    // Amount in words
+    // Amount in words for Total
     if (data.totalEnLetras) {
       doc.font(F.r).fontSize(8).fillColor(C.dark)
         .text(`Son: ${data.totalEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-      y += 14;
-    }
-
-    // Subtotal alquileres (rent + punitorios)
-    if (data.subtotalAlquileres != null && data.subtotalAlquileres !== data.total) {
-      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
-        .text(`Alquileres: ${fmt(data.subtotalAlquileres, data.currency)}`, PAGE.margin + 4, y, { width: W - 8 });
       y += 14;
     }
     y += 4;
@@ -1278,30 +1284,37 @@ const generateLiquidacionAllPDF = (dataArray) => {
       y += cardH + 10;
     }
 
-    // ── TOTAL ──
+    // TOTAL ALQUILERES box
     checkNewPage(60);
     y += 4;
     const totalH = 34;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
+    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+    doc.font(F.b).fontSize(11).fillColor(C.white)
+      .text('TOTAL ALQUILERES', PAGE.margin + 14, y + 10);
+    doc.text(fmt(grandSubtotalAlquileres, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
+    y += totalH + 10;
+
+    // Amount in words for Alquileres
+    const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
+    doc.font(F.r).fontSize(8).fillColor(C.dark)
+      .text(`Son: ${alquilerLetras}`, PAGE.margin + 4, y, { width: W - 8 });
+    y += 18;
+
+    // TOTAL box
+    checkNewPage(60);
+    fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
     doc.font(F.b).fontSize(11).fillColor(C.white)
       .text('TOTAL', PAGE.margin + 14, y + 10);
     doc.text(fmt(grandTotal, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
-    // Amount in words
+    // Amount in words for Total
     const totalLetras = numeroATexto(grandTotal);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 14;
-
-    // Subtotal alquileres (rent + punitorios across all contracts)
-    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
-    if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
-      doc.font(F.b).fontSize(8.5).fillColor(C.dark)
-        .text(`Alquileres: ${fmt(grandSubtotalAlquileres, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
-      y += 14;
-    }
     y += 10;
 
     // ── Honorarios (if any contract has them) ──

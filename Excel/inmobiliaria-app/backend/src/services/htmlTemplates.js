@@ -100,13 +100,21 @@ const generateLiquidacionHTML = (data) => {
     </tr>
     ${conceptRows}
     <tr style="background:#000">
+      <td style="padding:8px 10px;font-family:Arial;font-size:13pt;color:#FFF;font-weight:bold">TOTAL ALQUILERES</td>
+      <td style="padding:8px 10px;font-family:Arial;font-size:13pt;color:#FFF;font-weight:bold;text-align:right">${fmt(data.subtotalAlquileres, data.currency)}</td>
+    </tr>
+  </table>
+
+  ${data.subtotalAlquileresEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.subtotalAlquileresEnLetras)}</p>` : ''}
+
+  <table style="width:100%;border-collapse:collapse;margin-top:15px">
+    <tr style="background:#000">
       <td style="padding:8px 10px;font-family:Arial;font-size:13pt;color:#FFF;font-weight:bold">TOTAL A PAGAR</td>
       <td style="padding:8px 10px;font-family:Arial;font-size:13pt;color:#FFF;font-weight:bold;text-align:right">${fmt(data.total, data.currency)}</td>
     </tr>
   </table>
 
   ${data.totalEnLetras ? `<p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin-top:8px">Son: ${escHtml(data.totalEnLetras)}</p>` : ''}
-  ${data.subtotalAlquileres != null && data.subtotalAlquileres !== data.total ? `<p style="font-family:Arial;font-size:9pt;color:#333;font-weight:bold;margin:4px 0">Alquileres: ${fmt(data.subtotalAlquileres, data.currency)}</p>` : ''}
 
   ${data.honorarios ? (() => {
     const hon = data.honorarios;
@@ -197,18 +205,17 @@ const generateLiquidacionAllHTML = (dataArray) => {
   <p style="font-family:Arial;font-size:9pt;color:#666;margin:0 0 15px">${escHtml(periodo.label)} &middot; ${dataArray.length} propiedades</p>
   <hr style="border:none;border-top:1px solid #000;margin-bottom:15px">
   ${propertyBlocks}
-  <div style="background:#000;color:#FFF;padding:10px;margin-top:10px">
+  <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
+    <strong style="font-family:Arial;font-size:13pt">TOTAL ALQUILERES</strong>
+    <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandSubtotalAlquileres, currency)}</strong>
+  </div>
+  <p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:6px 0 2px 0">Son: ${escHtml(numeroATexto(grandSubtotalAlquileres))}</p>
+
+  <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
     <strong style="font-family:Arial;font-size:13pt">TOTAL</strong>
     <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandTotal, currency)}</strong>
   </div>
   <p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:6px 0 2px 0">Son: ${escHtml(numeroATexto(grandTotal))}</p>
-  ${(() => {
-    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
-    if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
-      return `<p style="font-family:Arial;font-size:9pt;color:#333;font-weight:bold;margin:4px 0">${escHtml('Alquileres: ' + fmt(grandSubtotalAlquileres, currency))}</p>`;
-    }
-    return '';
-  })()}
   ${(() => {
     const firstHon = dataArray.find(d => d.honorarios);
     if (!firstHon) return '';

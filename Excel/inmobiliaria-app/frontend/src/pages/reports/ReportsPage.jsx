@@ -1,6 +1,7 @@
 // Reports Page - Phase 6: Professional Reports
 import { useState, useMemo } from 'react'
 import { useAuthStore } from '../../stores/authStore'
+import { numeroATexto } from '../../utils/formatters'
 import { useContracts } from '../../hooks/useContracts'
 import { useOwners } from '../../hooks/useOwners'
 import { useProperties } from '../../hooks/useProperties'
@@ -288,6 +289,7 @@ function LiquidacionTab({ groupId }) {
   }, [effectiveData])
 
   const grandTotal = useMemo(() => effectiveData.reduce((s, d) => s + d.total, 0), [effectiveData])
+  const grandSubtotalAlquileres = useMemo(() => effectiveData.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0), [effectiveData])
   const totalPagado = useMemo(() => allTransactions.reduce((s, t) => s + t.monto, 0), [allTransactions])
   const saldo = grandTotal - totalPagado
 
@@ -575,10 +577,29 @@ function LiquidacionTab({ groupId }) {
               )
             })}
 
-            {/* Grand Total */}
-            <div className="mt-4 pt-3 border-t-2 border-base-content flex justify-between items-center">
-              <span className="font-bold text-lg">TOTAL</span>
-              <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
+            {/* Totals Summary */}
+            <div className="mt-6 space-y-4">
+              {/* Grand Total Alquileres */}
+              <div>
+                <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
+                  <span className="font-bold text-lg uppercase">Total Alquileres</span>
+                  <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
+                </div>
+                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
+                  Son: {numeroATexto(grandSubtotalAlquileres)}
+                </div>
+              </div>
+
+              {/* Grand Total a Pagar */}
+              <div>
+                <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
+                  <span className="font-bold text-lg uppercase">Total a Pagar</span>
+                  <span className="font-bold text-xl">{formatCurrency(grandTotal)}</span>
+                </div>
+                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
+                  Son: {numeroATexto(grandTotal)}
+                </div>
+              </div>
             </div>
 
             {/* Honorarios summary (all contracts) */}

@@ -156,7 +156,41 @@ const generateLiquidacionDOCX = async (data) => {
     });
   });
 
-  // Total row
+  // TOTAL ALQUILERES row
+  const alquileresRow = new TableRow({
+    children: [
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL ALQUILERES', bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+        shading: { type: ShadingType.SOLID, color: BLACK },
+        borders: THIN_BORDER,
+      }),
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: fmt(data.subtotalAlquileres, data.currency), bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.RIGHT })],
+        shading: { type: ShadingType.SOLID, color: BLACK },
+        borders: THIN_BORDER,
+      }),
+    ],
+  });
+
+  children.push(
+    new Table({
+      rows: [headerRow, ...dataRows, alquileresRow],
+      width: { size: 100, type: WidthType.PERCENTAGE },
+    })
+  );
+
+  // Amount in words for Alquileres
+  if (data.subtotalAlquileresEnLetras) {
+    children.push(new Paragraph({ spacing: { before: 80 } }));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `Son: ${data.subtotalAlquileresEnLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
+        spacing: { after: 160 },
+      })
+    );
+  }
+
+  // TOTAL A PAGAR row
   const totalRow = new TableRow({
     children: [
       new TableCell({
@@ -174,14 +208,14 @@ const generateLiquidacionDOCX = async (data) => {
 
   children.push(
     new Table({
-      rows: [headerRow, ...dataRows, totalRow],
+      rows: [totalRow],
       width: { size: 100, type: WidthType.PERCENTAGE },
     })
   );
 
-  // Amount in words
+  // Amount in words for Total
   if (data.totalEnLetras) {
-    children.push(new Paragraph({ spacing: { before: 120 } }));
+    children.push(new Paragraph({ spacing: { before: 80 } }));
     children.push(
       new Paragraph({
         children: [new TextRun({ text: `Son: ${data.totalEnLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
@@ -374,33 +408,61 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
     children.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { after: 80 } }));
   }
 
-  // Grand Total
-  children.push(new Paragraph({ spacing: { before: 80 } }));
-  children.push(new Paragraph({
-    children: [
-      new TextRun({ text: 'TOTAL', bold: true, size: 26, font: 'Arial', color: BLACK }),
-      new TextRun({ text: `\t${fmt(grandTotal, currency)}`, bold: true, size: 26, font: 'Arial', color: BLACK }),
+  // TOTAL ALQUILERES
+  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+  children.push(new Paragraph({ spacing: { before: 160 } }));
+  children.push(new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL ALQUILERES', bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(grandSubtotalAlquileres, currency), bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.RIGHT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+        ],
+      }),
     ],
-    tabStops: [{ type: 'right', position: 9000 }],
-    shading: { type: ShadingType.SOLID, color: LIGHT_BG },
-    spacing: { after: 80 },
+  }));
+
+  const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
+  children.push(new Paragraph({
+    children: [new TextRun({ text: `Son: ${alquilerLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
+    spacing: { before: 60, after: 160 },
+  }));
+
+  // Grand Total
+  children.push(new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(grandTotal, currency), bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.RIGHT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+        ],
+      }),
+    ],
   }));
 
   const totalLetras = numeroATexto(grandTotal);
   children.push(new Paragraph({
     children: [new TextRun({ text: `Son: ${totalLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
-    spacing: { after: 60 },
+    spacing: { before: 60, after: 120 },
   }));
-
-  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
-  if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
-    children.push(new Paragraph({
-      children: [
-        new TextRun({ text: `Alquileres: ${fmt(grandSubtotalAlquileres, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
-      ],
-      spacing: { after: 160 },
-    }));
-  }
 
   // Footer
   children.push(new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { before: 40 } }));

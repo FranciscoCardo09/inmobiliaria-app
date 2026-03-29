@@ -320,6 +320,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     total,
     totalEnLetras: numeroATexto(total),
     subtotalAlquileres,
+    subtotalAlquileresEnLetras: numeroATexto(subtotalAlquileres),
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
