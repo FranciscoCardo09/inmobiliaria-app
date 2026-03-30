@@ -574,6 +574,27 @@ const updateContract = async (req, res, next) => {
       },
     });
 
+    // Sincronizar comprobantes con los MonthlyRecords existentes
+    if (comprobantes !== undefined) {
+      const records = await prisma.monthlyRecord.findMany({
+        where: { contractId: id }
+      });
+      for (const record of records) {
+        const currentStatus = Array.isArray(record.comprobantesStatus) ? record.comprobantesStatus : [];
+        const statusMap = new Map(currentStatus.map(c => [c.id, c.presented]));
+        
+        const newStatus = comprobantes.map(c => ({
+          ...c,
+          presented: statusMap.has(c.id) ? statusMap.get(c.id) : false
+        }));
+
+        await prisma.monthlyRecord.update({
+          where: { id: record.id },
+          data: { comprobantesStatus: newStatus }
+        });
+      }
+    }
+
     const tenants = updated.contractTenants.length > 0
       ? updated.contractTenants.map((ct) => ct.tenant)
       : updated.tenant ? [updated.tenant] : [];
