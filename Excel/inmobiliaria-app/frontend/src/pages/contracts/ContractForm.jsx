@@ -15,7 +15,6 @@ import SearchableSelect from '../../components/ui/SearchableSelect'
 import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 import CreatableMultiSelect from '../../components/ui/CreatableMultiSelect'
 import { useConceptTypes } from '../../hooks/usePayments'
-import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 
 export const ContractForm = () => {
   const navigate = useNavigate()
