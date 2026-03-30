@@ -369,6 +369,7 @@ model Contract {
 
   pagaIva             Boolean  @default(false) @map("paga_iva")
   observations        String?
+  comprobantes        Json?    @default("[]") // Servicios de los que se debe presentar comprobante [{ id: string, name: string }]
 
   // Rescisión anticipada
   rescindedAt         DateTime? @map("rescinded_at")        // Fecha de rescisión (último mes activo)
@@ -534,6 +535,7 @@ model MonthlyRecord {
   isCancelled         Boolean   @default(false) @map("is_cancelled")  // CANCELÓ (SI/NO)
 
   observations        String?
+  comprobantesStatus  Json?     @default("[]") // Estado de comprobantes en este mes [{ id: string, name: string, presented: boolean }]
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

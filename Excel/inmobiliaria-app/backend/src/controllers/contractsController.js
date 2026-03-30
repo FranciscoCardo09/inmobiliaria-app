@@ -282,6 +282,7 @@ const createContract = async (req, res, next) => {
       punitoryPercent,
       pagaIva,
       observations,
+      comprobantes,
     } = req.body;
 
     const resolvedContractType = contractType === 'PROPIETARIO' ? 'PROPIETARIO' : 'INQUILINO';
@@ -390,6 +391,7 @@ const createContract = async (req, res, next) => {
         punitoryPercent: punitoryPercent ? parseFloat(punitoryPercent) : 0.006,
         pagaIva: resolvedPagaIva,
         observations,
+        comprobantes: comprobantes || [],
         contractTenants: resolvedTenantIds.length > 0 ? {
           create: resolvedTenantIds.map((tid, i) => ({
             tenantId: tid,
@@ -442,6 +444,7 @@ const updateContract = async (req, res, next) => {
       active,
       observations,
       tenantIds,
+      comprobantes,
     } = req.body;
 
     const contract = await prisma.contract.findUnique({ where: { id } });
@@ -473,6 +476,7 @@ const updateContract = async (req, res, next) => {
     if (pagaIva !== undefined) data.pagaIva = !!pagaIva;
     if (active !== undefined) data.active = active;
     if (observations !== undefined) data.observations = observations;
+    if (comprobantes !== undefined) data.comprobantes = comprobantes;
 
     // Handle tenantIds update
     if (tenantIds !== undefined) {

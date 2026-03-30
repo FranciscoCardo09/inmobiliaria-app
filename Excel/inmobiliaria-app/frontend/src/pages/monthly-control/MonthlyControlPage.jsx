@@ -141,7 +141,7 @@ export default function MonthlyControlPage() {
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
-  const { records: allRecords, summary, isLoading, toggleIva, forgiveBalance } = useMonthlyRecords(
+  const { records: allRecords, summary, isLoading, toggleIva, forgiveBalance, toggleComprobante } = useMonthlyRecords(
     currentGroupId,
     periodMonth,
     periodYear,
@@ -558,6 +558,7 @@ export default function MonthlyControlPage() {
                   <th className="text-xs">Próx. Ajuste</th>
                   <SortableHeader label="Alquiler" column="alquiler" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
                   <th className="text-xs text-right">Servicios</th>
+                  <th className="text-xs text-center w-28">Comprobantes</th>
                   {showIvaColumn && <th className="text-xs text-right">IVA (21%)</th>}
                   <th className="text-xs text-right">A Favor Ant.</th>
                   <th className="text-xs text-right">Punitorios</th>
@@ -587,6 +588,7 @@ export default function MonthlyControlPage() {
                     onDebtPayment={handleDebtPayment}
                     onTxHistory={handleTxHistory}
                     onForgiveBalance={forgiveBalance}
+                    onToggleComprobante={toggleComprobante}
                     onNotify={handleNotify}
                   />
                 ))}
@@ -707,7 +709,7 @@ export default function MonthlyControlPage() {
 // Memoized table row to prevent re-renders when unrelated state changes
 const MonthlyRecordRow = memo(function MonthlyRecordRow({
   record, idx, isExpanded, showIvaColumn, groupId,
-  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance, onNotify,
+  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance, onToggleComprobante, onNotify,
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
@@ -802,6 +804,37 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           <span className="underline decoration-dotted">
             {formatCurrency(record.servicesTotal)}
           </span>
+        </td>
+        <td className="text-xs p-1">
+          {(!record.comprobantesStatus || record.comprobantesStatus.length === 0) ? (
+            <span className="text-base-content/30 text-[10px] block text-center">-</span>
+          ) : (
+            <div className="flex flex-col gap-1 items-center">
+              {record.comprobantesStatus.map(comp => (
+                <div 
+                  key={comp.id} 
+                  className={`flex items-center justify-between w-full px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer transition-colors border ${
+                    comp.presented 
+                      ? 'bg-success/10 border-success text-success-content dark:text-success' 
+                      : 'bg-warning/10 border-warning text-warning-content dark:text-warning hover:bg-warning/20'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleComprobante({ recordId: record.id, conceptTypeId: comp.id, presented: !comp.presented })
+                  }}
+                  title={comp.presented ? 'Presentado (Click para desmarcar)' : 'Pendiente (Click para marcar)'}
+                >
+                  <span className="truncate max-w-[65px]">{comp.name}</span>
+                  <input
+                    type="checkbox"
+                    className={`checkbox checkbox-xs rounded-sm ${comp.presented ? 'checkbox-success' : 'checkbox-warning'}`}
+                    checked={comp.presented}
+                    readOnly
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </td>
         {showIvaColumn && (
           <td className="text-xs text-right font-mono">

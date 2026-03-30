@@ -250,6 +250,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         totalDue: penalty,
         amountPaid: 0,
         balance: -penalty,
+        comprobantesStatus: Array.isArray(contract.comprobantes) 
+          ? contract.comprobantes.map(c => ({ ...c, presented: false })) 
+          : [],
       });
       penaltyRecordsToSetup.push(contract);
     } else {
@@ -281,6 +284,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         totalDue: Math.max(totalDue, 0),
         amountPaid: 0,
         balance: -Math.max(totalDue, 0),
+        comprobantesStatus: Array.isArray(contract.comprobantes) 
+          ? contract.comprobantes.map(c => ({ ...c, presented: false })) 
+          : [],
       });
     }
   }

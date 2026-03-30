@@ -60,6 +60,13 @@ router.patch(
   controller.forgiveBalance
 );
 
+// Toggle comprobante status
+router.patch(
+  '/:recordId/comprobantes',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.toggleComprobante
+);
+
 // Monthly Services (nested under records)
 router.get(
   '/:recordId/services',

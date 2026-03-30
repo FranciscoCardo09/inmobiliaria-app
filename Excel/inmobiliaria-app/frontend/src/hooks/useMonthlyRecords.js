@@ -92,6 +92,22 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     },
   })
 
+  const toggleComprobanteMutation = useMutation({
+    mutationFn: async ({ recordId, conceptTypeId, presented }) => {
+      const response = await api.patch(
+        `/groups/${groupId}/monthly-records/${recordId}/comprobantes`,
+        { conceptTypeId, presented }
+      )
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al actualizar comprobante')
+    },
+  })
+
   return {
     records: recordsQuery.data?.records || [],
     summary: recordsQuery.data?.summary || {},
@@ -102,6 +118,7 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     isUpdating: updateMutation.isPending,
     toggleIva: toggleIvaMutation.mutate,
     forgiveBalance: forgiveBalanceMutation.mutate,
+    toggleComprobante: toggleComprobanteMutation.mutate,
   }
 }
 

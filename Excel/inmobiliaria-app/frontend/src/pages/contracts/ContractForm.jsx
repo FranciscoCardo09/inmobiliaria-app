@@ -13,6 +13,9 @@ import Card from '../../components/ui/Card'
 import DateInput from '../../components/ui/DateInput'
 import SearchableSelect from '../../components/ui/SearchableSelect'
 import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
+import CreatableMultiSelect from '../../components/ui/CreatableMultiSelect'
+import { useConceptTypes } from '../../hooks/usePayments'
+import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 
 export const ContractForm = () => {
   const navigate = useNavigate()
@@ -27,6 +30,7 @@ export const ContractForm = () => {
   const { tenants } = useTenants(currentGroup?.id, { isActive: true })
   const { properties } = useProperties(currentGroup?.id, { isActive: true })
   const { indices } = useAdjustmentIndices(currentGroup?.id)
+  const { conceptTypes, createConceptType, isCreating: isCreatingConcept } = useConceptTypes(currentGroup?.id)
   const { data: contract, isLoading: isLoadingContract } = isEditing ? useContract(id) : { data: null, isLoading: false }
 
   const [formData, setFormData] = useState({
@@ -43,6 +47,7 @@ export const ContractForm = () => {
     pagaIva: false,
     active: true,
     observations: '',
+    comprobantes: [],
   })
   const [errors, setErrors] = useState({})
 
@@ -68,6 +73,7 @@ export const ContractForm = () => {
         pagaIva: contract.pagaIva ?? false,
         active: contract.active ?? true,
         observations: contract.observations || '',
+        comprobantes: Array.isArray(contract.comprobantes) ? contract.comprobantes.map(c => c.id) : [],
       })
     }
   }, [contract])
@@ -141,6 +147,10 @@ export const ContractForm = () => {
       punitoryStartDay: isPropietario ? 10 : parseInt(formData.punitoryStartDay, 10),
       punitoryPercent: isPropietario ? 0.006 : parseFloat(formData.punitoryPercent) / 100,
       pagaIva: isPropietario ? false : formData.pagaIva,
+      comprobantes: isPropietario ? [] : formData.comprobantes.map(compId => {
+        const ct = conceptTypes.find(c => c.id === compId)
+        return ct ? { id: ct.id, name: ct.name } : null
+      }).filter(Boolean),
     }
 
     if (isEditing) {
@@ -392,6 +402,39 @@ export const ContractForm = () => {
               </div>
             </label>
           </div>
+          )}
+
+          {/* Servicios como Comprobantes - only for INQUILINO */}
+          {!isPropietario && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Servicios (Solo Comprobante)</h2>
+              <div className="alert alert-info py-3 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <span className="text-sm">
+                  Los servicios marcados aquí <b>NO</b> generarán deuda ni aparecerán en los reportes o liquidaciones. Solo sirven como recordatorio en el Control Mensual para verificar que el inquilino envió el ticket de pago.
+                </span>
+              </div>
+              
+              <CreatableMultiSelect
+                label="¿De qué servicios debe presentar comprobante el inquilino?"
+                options={conceptTypes.map(c => ({ value: c.id, label: c.label || c.name }))}
+                value={formData.comprobantes}
+                onChange={(vals) => setFormData({ ...formData, comprobantes: vals })}
+                placeholder="Buscar o crear servicio (ej: Agua, Rentas)..."
+                isCreating={isCreatingConcept}
+                onCreate={(newLabel) => {
+                  createConceptType({
+                    name: newLabel.toUpperCase().replace(/\s+/g, '_'),
+                    label: newLabel,
+                    category: 'OTROS',
+                  }, {
+                    onSuccess: (newConcept) => {
+                      setFormData(prev => ({ ...prev, comprobantes: [...prev.comprobantes, newConcept.id] }))
+                    }
+                  })
+                }}
+              />
+            </div>
           )}
 
           {/* Ajustes - only for INQUILINO */}

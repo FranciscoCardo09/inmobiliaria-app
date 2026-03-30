@@ -237,6 +237,70 @@ const toggleIva = async (req, res, next) => {
   }
 };
 
+// PATCH /api/groups/:groupId/monthly-records/:recordId/comprobantes
+const toggleComprobante = async (req, res, next) => {
+  try {
+    const { groupId, recordId } = req.params;
+    const { conceptTypeId, presented } = req.body;
+
+    if (!conceptTypeId || presented === undefined) {
+      return ApiResponse.badRequest(res, 'conceptTypeId y presented son requeridos');
+    }
+
+    const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+    if (!record || record.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    let comprobantesStatus = [];
+    if (record.comprobantesStatus && Array.isArray(record.comprobantesStatus)) {
+      comprobantesStatus = [...record.comprobantesStatus];
+    }
+
+    // Buscar si existe
+    const index = comprobantesStatus.findIndex(c => c.id === conceptTypeId);
+    if (index !== -1) {
+      comprobantesStatus[index].presented = presented;
+    } else {
+      // Si por alguna razón no estaba, lo ignora o lo agrega (mejor ignorar si no estaba, o agregarlo)
+      // Como solo se cambian los comprobantes exigidos por el contrato, lo agregamos defensivamente
+      const concept = await prisma.conceptType.findUnique({ where: { id: conceptTypeId } });
+      if (concept) {
+        comprobantesStatus.push({ id: concept.id, name: concept.name, presented });
+      } else {
+        return ApiResponse.notFound(res, 'ConceptType no encontrado');
+      }
+    }
+
+    const updated = await prisma.monthlyRecord.update({
+      where: { id: recordId },
+      data: { comprobantesStatus },
+      // Opcionalmente hacer un includes si es necesario devolver todo hidratado, 
+      // pero ApiResponse normalmente devuelve el record
+      include: {
+        services: {
+          include: {
+            conceptType: { select: { id: true, name: true, label: true, category: true } },
+          },
+        },
+        transactions: {
+          include: { concepts: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        debt: {
+          include: {
+            payments: { orderBy: { createdAt: 'asc' } },
+          },
+        },
+      }
+    });
+
+    return ApiResponse.success(res, updated, 'Estado de comprobante actualizado');
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/groups/:groupId/monthly-records/batch-services
 const batchAddServices = async (req, res, next) => {
   try {
@@ -360,4 +424,5 @@ module.exports = {
   deleteRecordService,
   batchAddServices,
   bulkLoadServices,
+  toggleComprobante,
 };
