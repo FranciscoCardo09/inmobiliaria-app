@@ -324,8 +324,8 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
-    isPaid: monthlyRecord.isPaid,
-    isCancelled: monthlyRecord.isCancelled,
+    isPaid: monthlyRecord.isPaid || (monthlyRecord.amountPaid > 0 && monthlyRecord.balance >= -1),
+    isCancelled: monthlyRecord.isCancelled || (monthlyRecord.amountPaid > 0 && monthlyRecord.balance >= -1),
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
     transacciones: monthlyRecord.transactions.map((t) => ({

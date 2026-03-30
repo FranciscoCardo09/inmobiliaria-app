@@ -184,6 +184,7 @@ function LiquidacionTab({ groupId }) {
     year: String(year),
     contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
     ownerId: selectedOwnerId || undefined,
+    soloConPago: false,
   })
   const { downloadPDFPost, downloadDOCXPost, downloadHTMLPost, downloadExcelPost } = useReportDownload(groupId)
 

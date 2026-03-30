@@ -843,8 +843,8 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
   if (openDebt) {
     // Si hay deuda abierta, NUNCA marcar como COMPLETE
     status = amountPaid > 0 ? 'PARTIAL' : 'PENDING';
-  } else if (effectiveBalance >= 0 && amountPaid > 0) {
-    // Paid enough (or forgiven enough) to cover everything
+  } else if (effectiveBalance >= -1 && amountPaid > 0) {
+    // Paid enough (or forgiven enough) to cover everything (allow up to 1 peso rounding error)
     status = 'COMPLETE';
   } else if (amountPaid > 0) {
     status = 'PARTIAL';

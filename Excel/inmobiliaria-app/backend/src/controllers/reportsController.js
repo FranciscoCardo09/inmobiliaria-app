@@ -81,9 +81,12 @@ const getLiquidacionAll = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (req.query.soloConPago !== undefined) {
+      options.soloConPago = req.query.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
@@ -255,9 +258,12 @@ const downloadLiquidacionAllPDF = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (req.query.soloConPago !== undefined) {
+      options.soloConPago = req.query.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
@@ -474,9 +480,12 @@ const downloadLiquidacionExcel = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (req.query.soloConPago !== undefined) {
+      options.soloConPago = req.query.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
@@ -692,9 +701,12 @@ const downloadLiquidacionAllDOCX = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (req.query.soloConPago !== undefined) {
+      options.soloConPago = req.query.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
@@ -728,12 +740,15 @@ const downloadLiquidacionAllPDFPost = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (req.body.soloConPago !== undefined) {
+      options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
@@ -766,12 +781,15 @@ const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (req.body.soloConPago !== undefined) {
+      options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
@@ -804,12 +822,15 @@ const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (req.body.soloConPago !== undefined) {
+      options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
@@ -841,12 +862,15 @@ const downloadLiquidacionAllExcelPost = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (req.body.soloConPago !== undefined) {
+      options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? (Array.isArray(propertyIds) ? propertyIds : propertyIds.split(',').filter(Boolean)) : null;
@@ -912,9 +936,12 @@ const downloadLiquidacionAllHTMLEndpoint = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = {};
+    const options = { soloConPago: false };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
+    }
+    if (req.query.soloConPago !== undefined) {
+      options.soloConPago = req.query.soloConPago === 'true';
     }
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
