@@ -70,9 +70,10 @@ if (config.nodeEnv === 'development') {
 app.get('/', (req, res) => {
   res.json({
     name: 'Inmobiliaria API',
-    version: '1.5.0',
+    version: '1.5.1',
     phase: '1.5',
     status: 'running',
+    trigger: 'redeploy-check-2026-03-30',
     features: ['email-auth', 'google-oauth'],
     docs: '/api/health',
   });
