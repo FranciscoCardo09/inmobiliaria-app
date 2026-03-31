@@ -791,12 +791,27 @@ const rescindContract = async (req, res, next) => {
     const endMonth = sm + contract.durationMonths - 1;
     const rescissionMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
 
-    // Get effective rent at rescission month
-    let effectiveRent = contract.baseRent;
-    for (const rh of contract.rentHistory) {
-      if (rh.effectiveFromMonth <= rescissionMonthNumber) {
-        effectiveRent = rh.rentAmount;
-        break;
+    // Get rent from last month paid (COMPLETE)
+    let effectiveRent = null;
+    const lastPaidRecord = await prisma.monthlyRecord.findFirst({
+      where: { contractId: id, status: 'COMPLETE' },
+      orderBy: [
+        { periodYear: 'desc' },
+        { periodMonth: 'desc' }
+      ]
+    });
+
+    if (lastPaidRecord) {
+      effectiveRent = lastPaidRecord.rentAmount;
+    } else {
+      // Fallback: rent at the month BEFORE rescission (last contractual price)
+      const fallbackMonth = Math.max(1, rescissionMonthNumber - 1);
+      effectiveRent = contract.baseRent;
+      for (const rh of contract.rentHistory) {
+        if (rh.effectiveFromMonth <= fallbackMonth) {
+          effectiveRent = rh.rentAmount;
+          break;
+        }
       }
     }
 
