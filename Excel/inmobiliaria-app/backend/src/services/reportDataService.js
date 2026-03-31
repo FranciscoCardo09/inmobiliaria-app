@@ -395,7 +395,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     orderBy: { contract: { property: { address: 'asc' } } },
   });
 
-  return records.map((record) => {
+  const result = records.map((record) => {
     // Route per-contract gastosAMiCargo if provided as a map { [contractId]: {...} }
     const contractOptions = { ...options };
     if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
@@ -403,6 +403,16 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     }
     return buildLiquidacionFromRecord(record, empresa, month, year, contractOptions);
   });
+
+  // Natural sort by address: handles numbers correctly (Torre 1, Torre 2, ..., Torre 10)
+  // and normalizes extra spaces that cause wrong lexicographic order
+  result.sort((a, b) => {
+    const addrA = (a.propiedad?.direccion || '').trim().replace(/\s+/g, ' ');
+    const addrB = (b.propiedad?.direccion || '').trim().replace(/\s+/g, ' ');
+    return addrA.localeCompare(addrB, 'es', { numeric: true, sensitivity: 'base' });
+  });
+
+  return result;
 };
 
 // ============================================

@@ -199,8 +199,10 @@ function LiquidacionTab({ groupId }) {
 
   const filteredData = useMemo(() => {
     const base = allData || []
+    // When specific contracts or owner are selected, show all — don't filter by payment status
+    if (selectedContractIds.length > 0 || selectedOwnerId) return base
     return soloConPago ? base.filter((d) => d.isCancelled) : base
-  }, [allData, soloConPago])
+  }, [allData, soloConPago, selectedContractIds, selectedOwnerId])
 
   // Build effective data applying local gastos selections for preview
   // Services stay in conceptos and total unchanged — gastos only affect honorarios section
@@ -227,15 +229,22 @@ function LiquidacionTab({ groupId }) {
         }
       }
     }
-    // If "solo con pago" is active, restrict contractIds to only paid ones
-    const paidContractIds = soloConPago ? filteredData.map((d) => d.contractId) : null
+    // Determine which contractIds to send, matching what the preview shows
+    let contractIdsForDownload
+    if (selectedContractIds.length > 0) {
+      // Explicit selection always wins — send all selected contracts
+      contractIdsForDownload = selectedContractIds
+    } else if (soloConPago && !selectedOwnerId) {
+      // No explicit selection and no owner filter: restrict to paid contracts only
+      contractIdsForDownload = filteredData.map((d) => d.contractId)
+      if (contractIdsForDownload.length === 0) contractIdsForDownload = undefined
+    }
+    // Otherwise (owner selected, or soloConPago=false with no selection): no contractIds restriction
 
     return {
       month, year,
       honorariosPercent: honorariosPercent ? parseFloat(honorariosPercent) : undefined,
-      contractIds: paidContractIds
-        ? paidContractIds
-        : selectedContractIds.length > 0 ? selectedContractIds : undefined,
+      contractIds: contractIdsForDownload,
       ownerId: selectedOwnerId || undefined,
       gastosAMiCargo: Object.keys(gastosBody).length > 0 ? gastosBody : undefined,
     }
@@ -580,17 +589,6 @@ function LiquidacionTab({ groupId }) {
 
             {/* Totals Summary */}
             <div className="mt-6 space-y-4">
-              {/* Grand Total Alquileres */}
-              <div>
-                <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
-                  <span className="font-bold text-lg uppercase">Total Alquileres</span>
-                  <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
-                </div>
-                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
-                  Son: {numeroATexto(grandSubtotalAlquileres)}
-                </div>
-              </div>
-
               {/* Grand Total a Pagar */}
               <div>
                 <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
@@ -599,6 +597,17 @@ function LiquidacionTab({ groupId }) {
                 </div>
                 <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
                   Son: {numeroATexto(grandTotal)}
+                </div>
+              </div>
+
+              {/* Grand Total Alquileres */}
+              <div>
+                <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
+                  <span className="font-bold text-lg uppercase">Total Alquileres</span>
+                  <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
+                </div>
+                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
+                  Son: {numeroATexto(grandSubtotalAlquileres)}
                 </div>
               </div>
             </div>
