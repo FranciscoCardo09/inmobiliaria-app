@@ -15,6 +15,7 @@ router.get('/adjustments', contractsController.getContractAdjustments);
 router.get('/', contractsController.getContracts);
 router.get('/:id', contractsController.getContractById);
 router.get('/:id/rent-history', contractsController.getContractRentHistory);
+router.get('/:id/rescission-preview', contractsController.getRescissionPreview);
 
 router.post(
   '/',

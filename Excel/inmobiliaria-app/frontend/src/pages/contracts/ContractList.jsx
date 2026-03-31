@@ -1,5 +1,5 @@
 // Contract List Page - Table with filters, alerts, search, and rescission
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   PlusIcon,
@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
+import api from '../../services/api'
 import Button from '../../components/ui/Button'
 import EmptyState from '../../components/ui/EmptyState'
 import ContractAlerts from '../../components/ContractAlerts'
@@ -58,22 +59,27 @@ export const ContractList = () => {
     } catch { /* toast handles error */ }
   }
 
-  // Calculate penalty preview for the modal
-  const penaltyPreview = useMemo(() => {
-    if (!rescindModal || !rescissionDate) return null
-    const rescDate = new Date(rescissionDate + 'T12:00:00')
-    const start = new Date(rescindModal.startDate)
-    const monthsDiff =
-      (rescDate.getFullYear() - start.getFullYear()) * 12 +
-      (rescDate.getMonth() - start.getMonth())
-    const sm = rescindModal.startMonth || 1
-    const endMonth = sm + rescindModal.durationMonths - 1
-    const rescMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth))
-    const remainingMonths = Math.max(0, endMonth - rescMonthNumber)
-    const rent = rescindModal.rentAmount || rescindModal.baseRent || 0
-    const penalty = remainingMonths * rent * 0.10
-    return { remainingMonths, rent, penalty }
-  }, [rescindModal, rescissionDate])
+  // Fetch penalty preview from the backend (uses last paid month's rent)
+  const [penaltyPreview, setPenaltyPreview] = useState(null)
+  const [penaltyLoading, setPenaltyLoading] = useState(false)
+  useEffect(() => {
+    if (!rescindModal || !rescissionDate || !currentGroup?.id) {
+      setPenaltyPreview(null)
+      return
+    }
+    let cancelled = false
+    setPenaltyLoading(true)
+    api.get(`/groups/${currentGroup.id}/contracts/${rescindModal.id}/rescission-preview`, {
+      params: { rescissionDate }
+    }).then(res => {
+      if (!cancelled) setPenaltyPreview(res.data.data)
+    }).catch(() => {
+      if (!cancelled) setPenaltyPreview(null)
+    }).finally(() => {
+      if (!cancelled) setPenaltyLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [rescindModal, rescissionDate, currentGroup?.id])
 
   const openRescindModal = (contract) => {
     setRescissionDate(new Date().toISOString().split('T')[0])
@@ -388,13 +394,16 @@ export const ContractList = () => {
                 />
               </div>
 
-              {penaltyPreview && (
+              {penaltyLoading && rescissionDate && (
+                <div className="text-sm text-base-content/60">Calculando multa...</div>
+              )}
+              {!penaltyLoading && penaltyPreview && (
                 <div className="alert alert-warning">
                   <div>
                     <div className="font-medium">Cálculo de la multa</div>
                     <div className="text-sm space-y-1 mt-1">
                       <div>Meses restantes: <strong>{penaltyPreview.remainingMonths}</strong></div>
-                      <div>Alquiler actual: <strong>${Math.round(penaltyPreview.rent).toLocaleString('es-AR')}</strong></div>
+                      <div>Alquiler último mes pagado: <strong>${Math.round(penaltyPreview.rent).toLocaleString('es-AR')}</strong></div>
                       <div>Multa (10%): <strong className="text-lg">${Math.round(penaltyPreview.penalty).toLocaleString('es-AR')}</strong></div>
                     </div>
                     <p className="text-xs mt-2 opacity-70">

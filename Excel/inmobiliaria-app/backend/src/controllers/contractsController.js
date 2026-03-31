@@ -754,6 +754,63 @@ const getContractRentHistory = async (req, res, next) => {
   }
 };
 
+// GET /api/groups/:groupId/contracts/:id/rescission-preview?rescissionDate=YYYY-MM-DD
+const getRescissionPreview = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { rescissionDate } = req.query;
+
+    if (!rescissionDate) {
+      return ApiResponse.badRequest(res, 'Se requiere rescissionDate');
+    }
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      include: { rentHistory: { orderBy: { effectiveFromMonth: 'desc' } } },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const rescDate = parseLocalDate(rescissionDate);
+    const start = new Date(contract.startDate);
+    const monthsDiff =
+      (rescDate.getFullYear() - start.getFullYear()) * 12 +
+      (rescDate.getMonth() - start.getMonth());
+    const sm = contract.startMonth || 1;
+    const endMonth = sm + contract.durationMonths - 1;
+    const rescissionMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+
+    // Same logic as rescindContract: use last paid record's rentAmount
+    let effectiveRent = null;
+    const lastPaidRecord = await prisma.monthlyRecord.findFirst({
+      where: { contractId: id, status: 'COMPLETE' },
+      orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
+    });
+
+    if (lastPaidRecord) {
+      effectiveRent = lastPaidRecord.rentAmount;
+    } else {
+      const fallbackMonth = Math.max(1, rescissionMonthNumber - 1);
+      effectiveRent = contract.baseRent;
+      for (const rh of contract.rentHistory) {
+        if (rh.effectiveFromMonth <= fallbackMonth) {
+          effectiveRent = rh.rentAmount;
+          break;
+        }
+      }
+    }
+
+    const remainingMonths = Math.max(0, endMonth - rescissionMonthNumber);
+    const rescissionPenalty = parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
+
+    return ApiResponse.success(res, { remainingMonths, rent: effectiveRent, penalty: rescissionPenalty });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // POST /api/groups/:groupId/contracts/:id/rescind
 const rescindContract = async (req, res, next) => {
   try {
@@ -899,6 +956,7 @@ module.exports = {
   deleteContract,
   assignTenantToProperty,
   getContractRentHistory,
+  getRescissionPreview,
   rescindContract,
   undoRescission,
 };
