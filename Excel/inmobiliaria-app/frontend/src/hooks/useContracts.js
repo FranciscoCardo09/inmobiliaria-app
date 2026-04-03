@@ -131,6 +131,23 @@ export const useContracts = (groupId, filters = {}) => {
     },
   })
 
+  const renewMutation = useMutation({
+    mutationFn: async ({ id, ...data }) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/renew`, data)
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts', groupId])
+      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
+      queryClient.invalidateQueries(['contractAdjustments', groupId])
+      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      toast.success('Contrato renovado exitosamente')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al renovar contrato')
+    },
+  })
+
   return {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
@@ -143,10 +160,12 @@ export const useContracts = (groupId, filters = {}) => {
     deleteContract: deleteMutation.mutateAsync,
     rescindContract: rescindMutation.mutateAsync,
     undoRescission: undoRescindMutation.mutateAsync,
+    renewContract: renewMutation.mutate,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
     isRescinding: rescindMutation.isPending,
     isUndoingRescission: undoRescindMutation.isPending,
+    isRenewing: renewMutation.isPending,
   }
 }

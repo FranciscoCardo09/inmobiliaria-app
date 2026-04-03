@@ -1,5 +1,5 @@
 // Contract Form Page - Create/Edit contract with Phase 3 fields + contractType
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
@@ -21,11 +21,12 @@ export const ContractForm = () => {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const isEditing = !!id
+  const isRenewing = isEditing && searchParams.get('mode') === 'renew'
 
   const { groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
-  const { createContract, updateContract, isCreating, isUpdating, useContract } = useContracts(currentGroup?.id)
+  const { createContract, updateContract, renewContract, isCreating, isUpdating, isRenewing: isRenewingPending, useContract } = useContracts(currentGroup?.id)
   const { tenants } = useTenants(currentGroup?.id, { isActive: true })
   const { properties } = useProperties(currentGroup?.id, { isActive: true })
   const { indices } = useAdjustmentIndices(currentGroup?.id)
@@ -52,6 +53,17 @@ export const ContractForm = () => {
 
   const isPropietario = formData.contractType === 'PROPIETARIO'
 
+  const computedEndDate = useMemo(() => {
+    if (!formData.startDate || !formData.durationMonths) return null
+    const months = parseInt(formData.durationMonths, 10)
+    if (isNaN(months) || months <= 0) return null
+    const start = new Date(formData.startDate + 'T12:00:00')
+    const end = new Date(start)
+    end.setMonth(end.getMonth() + months)
+    end.setDate(end.getDate() - 1)
+    return end
+  }, [formData.startDate, formData.durationMonths])
+
   // Load contract data when editing
   useEffect(() => {
     if (contract) {
@@ -61,16 +73,16 @@ export const ContractForm = () => {
           ? contract.contractTenants.map((ct) => ct.tenantId || ct.tenant?.id).filter(Boolean)
           : contract.tenantId ? [contract.tenantId] : [],
         propertyId: contract.propertyId || '',
-        startDate: contract.startDate ? contract.startDate.split('T')[0] : '',
+        startDate: isRenewing ? '' : (contract.startDate ? contract.startDate.split('T')[0] : ''),
         durationMonths: contract.durationMonths?.toString() || '24',
-        currentMonth: contract.currentMonth?.toString() || '1',
+        currentMonth: '1',
         baseRent: contract.baseRent?.toString() || '',
         baseRentDisplay: contract.baseRent ? contract.baseRent.toLocaleString('es-AR', { minimumFractionDigits: contract.baseRent % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 }) : '',
         adjustmentIndexId: contract.adjustmentIndexId || '',
         punitoryStartDay: contract.punitoryStartDay?.toString() || '10',
         punitoryPercent: contract.punitoryPercent ? (contract.punitoryPercent * 100).toString() : '0.6',
         pagaIva: contract.pagaIva ?? false,
-        active: contract.active ?? true,
+        active: true,
         observations: contract.observations || '',
         comprobantes: Array.isArray(contract.comprobantes) ? contract.comprobantes.map(c => c.id) : [],
       })
@@ -122,7 +134,7 @@ export const ContractForm = () => {
       if (!formData.durationMonths || parseInt(formData.durationMonths, 10) <= 0) {
         newErrors.durationMonths = 'Duración es requerida'
       }
-      if (!formData.currentMonth || parseInt(formData.currentMonth, 10) <= 0) {
+      if (!isRenewing && (!formData.currentMonth || parseInt(formData.currentMonth, 10) <= 0)) {
         newErrors.currentMonth = 'Mes actual es requerido'
       }
     }
@@ -152,7 +164,12 @@ export const ContractForm = () => {
       }).filter(Boolean),
     }
 
-    if (isEditing) {
+    if (isRenewing) {
+      renewContract(
+        { id, ...data },
+        { onSuccess: () => navigate('/contracts') }
+      )
+    } else if (isEditing) {
       updateContract(
         { id, ...data },
         { onSuccess: () => navigate('/contracts') }
@@ -172,9 +189,11 @@ export const ContractForm = () => {
     )
   }
 
-  const title = isPropietario
-    ? (isEditing ? 'Editar Obligación de Propietario' : 'Nueva Obligación de Propietario')
-    : (isEditing ? 'Editar Contrato' : 'Nuevo Contrato')
+  const title = isRenewing
+    ? 'Renovar Contrato'
+    : isPropietario
+      ? (isEditing ? 'Editar Obligación de Propietario' : 'Nueva Obligación de Propietario')
+      : (isEditing ? 'Editar Contrato' : 'Nuevo Contrato')
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -191,6 +210,16 @@ export const ContractForm = () => {
       {/* Form */}
       <Card>
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Renew mode banner */}
+          {isRenewing && (
+            <div className="alert alert-info">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <div>
+                <div className="font-medium">Renovación de contrato</div>
+                <div className="text-sm">Los inquilinos y la propiedad se mantienen. Completá los nuevos datos del período.</div>
+              </div>
+            </div>
+          )}
           {/* Contract Type Selector */}
           {!isEditing && (
             <div className="space-y-4">
@@ -307,19 +336,35 @@ export const ContractForm = () => {
                 placeholder="24"
                 error={errors.durationMonths}
               />
-              <Input
-                label="Mes Actual (1 a duración) *"
-                name="currentMonth"
-                type="number"
-                min="1"
-                max={formData.durationMonths}
-                value={formData.currentMonth}
-                onChange={handleChange}
-                placeholder="1"
-                error={errors.currentMonth}
-                helperText="¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)"
-              />
+              {!isRenewing && (
+                <Input
+                  label="Mes Actual (1 a duración) *"
+                  name="currentMonth"
+                  type="number"
+                  min="1"
+                  max={formData.durationMonths}
+                  value={formData.currentMonth}
+                  onChange={handleChange}
+                  placeholder="1"
+                  error={errors.currentMonth}
+                  helperText="¿En qué mes del contrato se encuentra hoy? (Para contratos nuevos, dejar en 1)"
+                />
+              )}
             </div>
+            {computedEndDate && (
+              <div className="form-control max-w-xs">
+                <label className="label">
+                  <span className="label-text font-medium">Fecha de Fin (calculada)</span>
+                </label>
+                <input
+                  type="text"
+                  className="input input-bordered bg-base-200 text-base-content/70"
+                  value={computedEndDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  readOnly
+                  disabled
+                />
+              </div>
+            )}
           </div>
           )}
 
@@ -504,8 +549,8 @@ export const ContractForm = () => {
           </div>
           )}
 
-          {/* Estado (solo en edición) */}
-          {isEditing && (
+          {/* Estado (solo en edición, no en renovación) */}
+          {isEditing && !isRenewing && (
             <div className="space-y-4">
               <h2 className="text-xl font-semibold">Estado</h2>
               <div className="form-control">
@@ -562,9 +607,9 @@ export const ContractForm = () => {
               type="submit"
               variant="primary"
               className="flex-1"
-              loading={isCreating || isUpdating}
+              loading={isCreating || isUpdating || isRenewingPending}
             >
-              {isEditing ? 'Actualizar' : 'Crear'} {isPropietario ? 'Obligación' : 'Contrato'}
+              {isRenewing ? 'Renovar Contrato' : isEditing ? `Actualizar ${isPropietario ? 'Obligación' : 'Contrato'}` : `Crear ${isPropietario ? 'Obligación' : 'Contrato'}`}
             </Button>
             <Button type="button" variant="outline" onClick={() => navigate('/contracts')}>
               Cancelar

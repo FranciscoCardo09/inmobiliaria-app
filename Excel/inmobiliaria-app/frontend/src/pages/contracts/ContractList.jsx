@@ -10,6 +10,7 @@ import {
   ClockIcon,
   NoSymbolIcon,
   ArrowUturnLeftIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
@@ -262,6 +263,16 @@ export const ContractList = () => {
                           title="Rescindir contrato"
                         >
                           <NoSymbolIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/* Renew button - only for expired INQUILINO contracts */}
+                      {!isProp && contract.status === 'EXPIRED' && (
+                        <button
+                          onClick={() => navigate(`/contracts/${contract.id}?mode=renew`)}
+                          className="btn btn-sm btn-ghost text-success"
+                          title="Renovar contrato"
+                        >
+                          <ArrowPathIcon className="w-4 h-4" />
                         </button>
                       )}
                       {/* Undo rescission button */}

@@ -896,6 +896,100 @@ const rescindContract = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/contracts/:id/renew
+const renewContract = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { startDate, durationMonths, baseRent, adjustmentIndexId, punitoryStartDay, punitoryPercent, pagaIva, observations, comprobantes } = req.body;
+
+    if (!startDate || !durationMonths || baseRent == null || parseFloat(baseRent) <= 0) {
+      return ApiResponse.badRequest(res, 'Se requieren fecha de inicio, duración y monto de alquiler');
+    }
+
+    const contract = await prisma.contract.findUnique({
+      where: { id },
+      include: { adjustmentIndex: true },
+    });
+
+    if (!contract || contract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const enriched = enrichContract(contract);
+    if (enriched.status !== 'EXPIRED') {
+      return ApiResponse.badRequest(res, 'Solo se pueden renovar contratos vencidos');
+    }
+
+    // Check no other active contract of the same type on the same property
+    const duplicate = await prisma.contract.findFirst({
+      where: {
+        groupId,
+        propertyId: contract.propertyId,
+        contractType: contract.contractType,
+        active: true,
+        id: { not: id },
+      },
+    });
+    if (duplicate) {
+      return ApiResponse.badRequest(res, 'Ya existe otro contrato activo del mismo tipo para esta propiedad');
+    }
+
+    // Validate adjustment index
+    let nextAdjustmentMonth = null;
+    if (adjustmentIndexId) {
+      const index = await prisma.adjustmentIndex.findUnique({ where: { id: adjustmentIndexId } });
+      if (!index || index.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Índice de ajuste no válido');
+      }
+      nextAdjustmentMonth = calculateNextAdjustmentMonth(1, 1, index.frequencyMonths, parseInt(durationMonths, 10));
+    }
+
+    const newStartDate = parseLocalDate(startDate);
+    const newBaseRent = parseFloat(baseRent);
+    const newDurationMonths = parseInt(durationMonths, 10);
+
+    const updated = await prisma.contract.update({
+      where: { id },
+      data: {
+        startDate: newStartDate,
+        startMonth: 1,
+        currentMonth: 1,
+        durationMonths: newDurationMonths,
+        baseRent: newBaseRent,
+        adjustmentIndexId: adjustmentIndexId || null,
+        nextAdjustmentMonth,
+        active: true,
+        rescindedAt: null,
+        rescissionPenalty: null,
+        punitoryStartDay: punitoryStartDay != null ? parseInt(punitoryStartDay, 10) : contract.punitoryStartDay,
+        punitoryPercent: punitoryPercent != null ? parseFloat(punitoryPercent) : contract.punitoryPercent,
+        pagaIva: pagaIva != null ? pagaIva : contract.pagaIva,
+        observations: observations !== undefined ? observations : contract.observations,
+        comprobantes: comprobantes !== undefined ? comprobantes : contract.comprobantes,
+      },
+      include: {
+        tenant: { select: { id: true, name: true } },
+        contractTenants: { include: { tenant: { select: { id: true, name: true } } }, orderBy: { isPrimary: 'desc' } },
+        property: { select: { id: true, address: true, owner: { select: { id: true, name: true } } } },
+        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+      },
+    });
+
+    await prisma.rentHistory.create({
+      data: {
+        contractId: id,
+        effectiveFromMonth: 1,
+        rentAmount: newBaseRent,
+        reason: 'RENOVACION',
+      },
+    });
+
+    return ApiResponse.success(res, enrichContract(updated));
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/groups/:groupId/contracts/:id/undo-rescind
 const undoRescission = async (req, res, next) => {
   try {
@@ -959,4 +1053,5 @@ module.exports = {
   getRescissionPreview,
   rescindContract,
   undoRescission,
+  renewContract,
 };
