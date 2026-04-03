@@ -15,10 +15,10 @@ const getOwners = async (req, res, next) => {
 
     if (search) {
       where.OR = [
-        { name: { contains: search } },
-        { dni: { contains: search } },
-        { phone: { contains: search } },
-        { email: { contains: search } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { dni: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
       ];
     }
 

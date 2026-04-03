@@ -19,10 +19,9 @@ const getProperties = async (req, res, next) => {
     }
 
     if (search) {
-      // SQLite doesn't support 'mode: insensitive', use contains only
       where.OR = [
-        { address: { contains: search } },
-        { observations: { contains: search } },
+        { address: { contains: search, mode: 'insensitive' } },
+        { observations: { contains: search, mode: 'insensitive' } },
       ];
     }
 

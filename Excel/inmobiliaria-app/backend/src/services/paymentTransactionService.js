@@ -327,9 +327,9 @@ const getPaymentHistory = async (groupId, filters = {}) => {
   }
   if (search) {
     where.OR = [
-      { monthlyRecord: { contract: { tenant: { name: { contains: search } } } } },
-      { monthlyRecord: { contract: { property: { address: { contains: search } } } } },
-      { receiptNumber: { contains: search } },
+      { monthlyRecord: { contract: { tenant: { name: { contains: search, mode: 'insensitive' } } } } },
+      { monthlyRecord: { contract: { property: { address: { contains: search, mode: 'insensitive' } } } } },
+      { receiptNumber: { contains: search, mode: 'insensitive' } },
     ];
   }
 

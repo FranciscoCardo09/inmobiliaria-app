@@ -41,8 +41,8 @@ const getPayments = async (req, res, next) => {
     // Text search on tenant name or property address
     if (search) {
       contractWhere.OR = [
-        { tenant: { name: { contains: search } } },
-        { property: { address: { contains: search } } },
+        { tenant: { name: { contains: search, mode: 'insensitive' } } },
+        { property: { address: { contains: search, mode: 'insensitive' } } },
       ];
     }
 

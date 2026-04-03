@@ -129,10 +129,10 @@ const getContracts = async (req, res, next) => {
 
     if (search) {
       where.OR = [
-        { contractTenants: { some: { tenant: { name: { contains: search } } } } },
-        { tenant: { is: { name: { contains: search } } } },
-        { property: { address: { contains: search } } },
-        { observations: { contains: search } },
+        { contractTenants: { some: { tenant: { name: { contains: search, mode: 'insensitive' } } } } },
+        { tenant: { is: { name: { contains: search, mode: 'insensitive' } } } },
+        { property: { address: { contains: search, mode: 'insensitive' } } },
+        { observations: { contains: search, mode: 'insensitive' } },
       ];
     }
 
