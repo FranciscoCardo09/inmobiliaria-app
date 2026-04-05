@@ -1080,6 +1080,7 @@ function ServiceManagerInline({ record, groupId }) {
   const { services, addService, updateService, removeService } = useMonthlyServices(groupId, record.id)
   const [selectedConceptId, setSelectedConceptId] = useState('')
   const [newAmount, setNewAmount] = useState('')
+  const [propagateForward, setPropagateForward] = useState(true)
 
   // Fetch available concept types using TanStack Query
   const { data: conceptTypes = [] } = useQuery({
@@ -1096,19 +1097,23 @@ function ServiceManagerInline({ record, groupId }) {
     if (!selectedConceptId || !newAmount) return
     addService({
       conceptTypeId: selectedConceptId,
-      amount: parseFloat(newAmount)
+      amount: parseFloat(newAmount),
+      propagateForward,
     })
     setSelectedConceptId('')
     setNewAmount('')
   }
 
   const handleUpdateService = (serviceId, newAmount) => {
-    updateService({ serviceId, amount: parseFloat(newAmount) })
+    updateService({ serviceId, amount: parseFloat(newAmount), propagateForward })
   }
 
   const handleRemoveService = (serviceId) => {
-    if (!confirm('¿Eliminar este servicio?')) return
-    removeService(serviceId)
+    const msg = propagateForward
+      ? '¿Eliminar este servicio de este mes y todos los meses siguientes del año?'
+      : '¿Eliminar este servicio?'
+    if (!confirm(msg)) return
+    removeService({ serviceId, propagateForward })
   }
 
   const getCategoryColor = (category) => {
@@ -1187,6 +1192,15 @@ function ServiceManagerInline({ record, groupId }) {
         >
           Agregar
         </button>
+        <label className="flex items-center gap-1 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="checkbox checkbox-xs checkbox-primary"
+            checked={propagateForward}
+            onChange={(e) => setPropagateForward(e.target.checked)}
+          />
+          Aplicar a meses siguientes
+        </label>
       </div>
     </div>
   )

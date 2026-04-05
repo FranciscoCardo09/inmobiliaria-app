@@ -25,16 +25,16 @@ export const useMonthlyServices = (groupId, recordId) => {
   }
 
   const addMutation = useMutation({
-    mutationFn: async (data) => {
+    mutationFn: async ({ propagateForward, ...data }) => {
       const response = await api.post(
         `/groups/${groupId}/monthly-records/${recordId}/services`,
-        data
+        { ...data, propagateForward: !!propagateForward }
       )
       return response.data.data
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       invalidateAll()
-      toast.success('Servicio agregado')
+      toast.success(variables.propagateForward ? 'Servicio agregado a este mes y los siguientes' : 'Servicio agregado')
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al agregar servicio')
@@ -42,16 +42,16 @@ export const useMonthlyServices = (groupId, recordId) => {
   })
 
   const updateMutation = useMutation({
-    mutationFn: async ({ serviceId, ...data }) => {
+    mutationFn: async ({ serviceId, propagateForward, ...data }) => {
       const response = await api.put(
         `/groups/${groupId}/monthly-records/${recordId}/services/${serviceId}`,
-        data
+        { ...data, propagateForward: !!propagateForward }
       )
       return response.data.data
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       invalidateAll()
-      toast.success('Servicio actualizado')
+      toast.success(variables.propagateForward ? 'Servicio actualizado en este mes y los siguientes' : 'Servicio actualizado')
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al actualizar')
@@ -59,14 +59,16 @@ export const useMonthlyServices = (groupId, recordId) => {
   })
 
   const removeMutation = useMutation({
-    mutationFn: async (serviceId) => {
+    mutationFn: async ({ serviceId, propagateForward }) => {
+      const params = propagateForward ? '?propagateForward=true' : ''
       await api.delete(
-        `/groups/${groupId}/monthly-records/${recordId}/services/${serviceId}`
+        `/groups/${groupId}/monthly-records/${recordId}/services/${serviceId}${params}`
       )
+      return { propagateForward }
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAll()
-      toast.success('Servicio eliminado')
+      toast.success(data.propagateForward ? 'Servicio eliminado de este mes y los siguientes' : 'Servicio eliminado')
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al eliminar')
@@ -78,7 +80,12 @@ export const useMonthlyServices = (groupId, recordId) => {
     isLoading: servicesQuery.isLoading,
     addService: addMutation.mutate,
     updateService: updateMutation.mutate,
-    removeService: removeMutation.mutate,
+    removeService: (serviceIdOrObj) =>
+      removeMutation.mutate(
+        typeof serviceIdOrObj === 'string'
+          ? { serviceId: serviceIdOrObj, propagateForward: false }
+          : serviceIdOrObj
+      ),
     isAdding: addMutation.isPending,
   }
 }

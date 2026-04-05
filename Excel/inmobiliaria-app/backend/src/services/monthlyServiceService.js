@@ -256,6 +256,48 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
   return { totalAssigned, errors };
 };
 
+/**
+ * Propagate a service forward from a given month to December of the same year.
+ * Uses bulkAssign (upsert) so existing services are updated, missing ones are created.
+ */
+const propagateServiceForward = async (groupId, contractId, conceptTypeId, amount, fromMonth, fromYear, description = null) => {
+  const months = [];
+  for (let m = fromMonth; m <= 12; m++) {
+    months.push({ month: m, year: fromYear });
+  }
+  return bulkAssign(groupId, contractId, conceptTypeId, amount, months, description);
+};
+
+/**
+ * Remove a service for a contract from a given month through December of the same year.
+ */
+const removeServiceForward = async (groupId, contractId, conceptTypeId, fromMonth, fromYear) => {
+  // Find all monthly records for this contract in the given range
+  const records = await prisma.monthlyRecord.findMany({
+    where: {
+      groupId,
+      contractId,
+      periodYear: fromYear,
+      periodMonth: { gte: fromMonth },
+    },
+    select: { id: true },
+  });
+
+  const recordIds = records.map((r) => r.id);
+  if (recordIds.length === 0) return;
+
+  await prisma.monthlyService.deleteMany({
+    where: {
+      monthlyRecordId: { in: recordIds },
+      conceptTypeId,
+    },
+  });
+
+  for (const id of recordIds) {
+    await recalculateMonthlyRecord(id);
+  }
+};
+
 module.exports = {
   addService,
   updateService,
@@ -265,4 +307,6 @@ module.exports = {
   bulkAssignMultiContract,
   copyConfig,
   batchAddServices,
+  propagateServiceForward,
+  removeServiceForward,
 };

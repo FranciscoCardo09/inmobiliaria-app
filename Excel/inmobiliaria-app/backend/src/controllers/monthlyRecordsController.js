@@ -11,6 +11,8 @@ const {
   removeService,
   getServicesForRecord,
   bulkAssignMultiContract,
+  propagateServiceForward,
+  removeServiceForward,
 } = require('../services/monthlyServiceService');
 
 const prisma = require('../lib/prisma');
@@ -158,7 +160,7 @@ const getRecordServices = async (req, res, next) => {
 const addRecordService = async (req, res, next) => {
   try {
     const { groupId, recordId } = req.params;
-    const { conceptTypeId, amount, description } = req.body;
+    const { conceptTypeId, amount, description, propagateForward } = req.body;
 
     if (!conceptTypeId || amount === undefined) {
       return ApiResponse.badRequest(res, 'conceptTypeId y amount son requeridos');
@@ -167,6 +169,19 @@ const addRecordService = async (req, res, next) => {
     const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
     if (!record || record.groupId !== groupId) {
       return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    if (propagateForward) {
+      await propagateServiceForward(
+        groupId,
+        record.contractId,
+        conceptTypeId,
+        parseFloat(amount),
+        record.periodMonth,
+        record.periodYear,
+        description || null
+      );
+      return ApiResponse.created(res, null, 'Servicio agregado y propagado a meses siguientes');
     }
 
     const service = await addService(recordId, conceptTypeId, parseFloat(amount), description);
@@ -182,11 +197,35 @@ const addRecordService = async (req, res, next) => {
 // PUT /api/groups/:groupId/monthly-records/:recordId/services/:serviceId
 const updateRecordService = async (req, res, next) => {
   try {
-    const { groupId, serviceId } = req.params;
-    const { amount, description } = req.body;
+    const { groupId, recordId, serviceId } = req.params;
+    const { amount, description, propagateForward } = req.body;
 
     if (amount === undefined) {
       return ApiResponse.badRequest(res, 'amount es requerido');
+    }
+
+    if (propagateForward) {
+      const existing = await prisma.monthlyService.findUnique({
+        where: { id: serviceId },
+        select: { conceptTypeId: true, description: true },
+      });
+      if (!existing) return ApiResponse.notFound(res, 'Servicio no encontrado');
+
+      const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+      if (!record || record.groupId !== groupId) {
+        return ApiResponse.notFound(res, 'Registro no encontrado');
+      }
+
+      await propagateServiceForward(
+        groupId,
+        record.contractId,
+        existing.conceptTypeId,
+        parseFloat(amount),
+        record.periodMonth,
+        record.periodYear,
+        description !== undefined ? description : existing.description
+      );
+      return ApiResponse.success(res, null, 'Servicio actualizado y propagado a meses siguientes');
     }
 
     const service = await updateService(serviceId, parseFloat(amount), description);
@@ -199,7 +238,31 @@ const updateRecordService = async (req, res, next) => {
 // DELETE /api/groups/:groupId/monthly-records/:recordId/services/:serviceId
 const deleteRecordService = async (req, res, next) => {
   try {
-    const { serviceId } = req.params;
+    const { groupId, recordId, serviceId } = req.params;
+    const { propagateForward } = req.query;
+
+    if (propagateForward === 'true') {
+      const existing = await prisma.monthlyService.findUnique({
+        where: { id: serviceId },
+        select: { conceptTypeId: true },
+      });
+      if (!existing) return ApiResponse.notFound(res, 'Servicio no encontrado');
+
+      const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+      if (!record || record.groupId !== groupId) {
+        return ApiResponse.notFound(res, 'Registro no encontrado');
+      }
+
+      // Remove from current month and all future months this year
+      await removeServiceForward(
+        groupId,
+        record.contractId,
+        existing.conceptTypeId,
+        record.periodMonth,
+        record.periodYear
+      );
+      return ApiResponse.success(res, null, 'Servicio eliminado de este mes y los siguientes');
+    }
 
     const service = await removeService(serviceId);
     if (!service) {
