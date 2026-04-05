@@ -597,23 +597,29 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     if (!isFullyPaid && !record.punitoryForgiven) {
       try {
-        // Calculate unpaid rent (payments cover services first, then rent, then punitorios)
         const amountPaid = record.amountPaid || 0;
         const servicesTotal = record.servicesTotal || 0;
         const prevBalance = record.previousBalance || 0;
         const frozenPunitory = record.punitoryAmount || 0;
         const totalCredits = amountPaid + prevBalance;
+        const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
 
-        // Credits cover: services → rent → frozen punitorios
+        // Saldo restante base (sin punitorios)
+        const baseNonPunitory = record.rentAmount + servicesTotal + ivaForPunitory;
+        const remainingBalance = Math.max(baseNonPunitory - totalCredits, 0);
+
+        // Regla de base para punitorios:
+        // - Sin pagos ni crédito: solo sobre alquiler
+        // - Con pagos: sobre el saldo restante total
+        const punitoryBase = totalCredits <= 0 ? record.rentAmount : remainingBalance;
+
+        // Punitorios congelados no cubiertos (para sumar a los nuevos)
         let remaining = totalCredits;
         const servicesCovered = Math.min(remaining, servicesTotal);
         remaining -= servicesCovered;
         const rentCovered = Math.min(remaining, record.rentAmount);
         remaining -= rentCovered;
         const punitoryCovered = Math.min(remaining, frozenPunitory);
-        remaining -= punitoryCovered;
-
-        const unpaidRent = Math.max(record.rentAmount - rentCovered, 0);
         const unpaidFrozenPunitory = Math.max(frozenPunitory - punitoryCovered, 0);
 
         // Get last payment date (if partial payment was made)
@@ -623,28 +629,23 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           lastPaymentDate = new Date(lastTx.paymentDate);
         }
 
-        // Calculate ADDITIONAL live punitorios on remaining unpaid rent since last payment
         const calculationDate = new Date();
-        // NOTE: `holidays` was pre-fetched once before the loop (batch optimization)
 
-        if (unpaidRent > 0) {
-          // There's still unpaid rent → calculate live punitorios on it
+        if (punitoryBase > 0) {
           const liveResult = calculatePunitoryV2(
             calculationDate,
             month,
             year,
-            unpaidRent,
+            punitoryBase,
             contract.punitoryStartDay,
             contract.punitoryGraceDay,
             contract.punitoryPercent,
             holidays,
             lastPaymentDate
           );
-          // Total punitorios = frozen unpaid + new live
           livePunitoryAmount = unpaidFrozenPunitory + liveResult.amount;
           livePunitoryDays = liveResult.days;
         } else {
-          // Rent fully paid → only unpaid frozen punitorios remain
           livePunitoryAmount = unpaidFrozenPunitory;
           livePunitoryDays = record.punitoryDays || 0;
         }

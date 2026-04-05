@@ -226,11 +226,20 @@ const preloadDebtDependencies = async (debts) => {
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
   const unpaidServicesAmount = debt.unpaidServicesAmount || 0;
-  // Los pagos se imputan: primero servicios, luego alquiler, luego punitorios
+  const totalBase = debt.unpaidRentAmount + unpaidServicesAmount;
+  const remainingBase = Math.max(totalBase - debt.amountPaid, 0);
+
+  // Regla de base para punitorios:
+  // - Sin pagos: solo sobre alquiler
+  // - Con pagos: sobre el saldo restante total (lo que falta pagar)
+  const punitoryBase = debt.amountPaid <= 0
+    ? debt.unpaidRentAmount
+    : remainingBase;
+
+  // Para display: cuánto queda de servicios vs alquiler (imputación servicios → alquiler)
   const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);
-  const rentPaid = Math.max(debt.amountPaid - unpaidServicesAmount, 0);
   const remainingServices = unpaidServicesAmount - servicePaid;
-  const remainingRent = Math.max(debt.unpaidRentAmount - rentPaid, 0);
+  const remainingRent = Math.max(debt.unpaidRentAmount - Math.max(debt.amountPaid - unpaidServicesAmount, 0), 0);
 
   // Helper to get contract - from preloaded cache or DB
   const getContract = async () => {
@@ -253,11 +262,12 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     return getHolidaysForYear(debt.periodYear);
   };
 
-  if (remainingRent <= 0) {
-    const contract = await getContract();
-    if (!contract) throw new Error('Contract not found for debt');
+  const contract = await getContract();
+  if (!contract) throw new Error('Contract not found for debt');
+  const holidays = await getHolidays();
 
-    const holidays = await getHolidays();
+  if (remainingBase <= 0) {
+    // Todo el base pagado; pueden quedar punitorios acumulados
     const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : new Date(debt.punitoryStartDate);
 
     const newPunitorios = calculatePunitoryV2(
@@ -273,12 +283,11 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     );
 
     const totalPunitory = accumulatedPunitory + newPunitorios.amount;
-    // Orden de imputación: servicios → alquiler → punitorios
-    const amountPaidToPunitory = Math.max(0, debt.amountPaid - unpaidServicesAmount - debt.unpaidRentAmount);
+    const amountPaidToPunitory = Math.max(0, debt.amountPaid - totalBase);
     const unpaidPunitory = Math.max(0, totalPunitory - amountPaidToPunitory);
 
     if (unpaidPunitory <= 0) {
-      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, remainingServices: 0, startDate: null, endDate: null };
+      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, remainingServices: 0, remainingRent: 0, startDate: null, endDate: null };
     }
 
     return {
@@ -286,18 +295,15 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       amount: unpaidPunitory,
       newPunitoryAmount: newPunitorios.amount,
       accumulatedPunitory,
-      remainingDebt: remainingServices, // servicios aún no cubiertos (deberían ser 0 en este path)
-      remainingServices,
+      remainingDebt: 0,
+      remainingServices: 0,
+      remainingRent: 0,
       startDate: newPunitorios.fromDate,
       endDate: newPunitorios.toDate,
     };
   }
 
-  const contract = await getContract();
-  if (!contract) throw new Error('Contract not found for debt');
-
-  const holidays = await getHolidays();
-
+  // Hay saldo base pendiente: calcular punitorios sobre punitoryBase
   const punitoryStartDate = new Date(debt.punitoryStartDate);
   let effectiveLastPaymentDate;
 
@@ -305,18 +311,16 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     effectiveLastPaymentDate = new Date(debt.lastPaymentDate);
   } else {
     const firstOfMonth = new Date(debt.periodYear, debt.periodMonth - 1, 1);
-    if (punitoryStartDate.getTime() !== firstOfMonth.getTime()) {
-      effectiveLastPaymentDate = punitoryStartDate;
-    } else {
-      effectiveLastPaymentDate = null;
-    }
+    effectiveLastPaymentDate = punitoryStartDate.getTime() !== firstOfMonth.getTime()
+      ? punitoryStartDate
+      : null;
   }
 
   const result = calculatePunitoryV2(
     paymentDate,
     debt.periodMonth,
     debt.periodYear,
-    remainingRent,
+    punitoryBase,  // sin pagos → alquiler; con pagos → saldo restante total
     contract.punitoryStartDay,
     contract.punitoryGraceDay,
     contract.punitoryPercent,
@@ -329,7 +333,7 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     amount: result.amount,
     newPunitoryAmount: result.amount,
     accumulatedPunitory,
-    remainingDebt: remainingServices + remainingRent, // servicios + alquiler impago
+    remainingDebt: remainingBase,
     remainingServices,
     remainingRent,
     startDate: result.fromDate,
