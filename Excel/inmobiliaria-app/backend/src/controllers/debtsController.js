@@ -6,6 +6,7 @@ const {
   getDebtsSummary,
   payDebt,
   cancelDebtPayment,
+  forgiveDebt,
   canPayCurrentMonth,
   calculateDebtPunitory,
 } = require('../services/debtService');
@@ -233,6 +234,27 @@ const cancelDebtPaymentHandler = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/debts/:id/forgive
+const forgiveDebtHandler = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const { observations } = req.body;
+
+    const debt = await prisma.debt.findUnique({ where: { id } });
+    if (!debt || debt.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Deuda no encontrada');
+    }
+
+    const result = await forgiveDebt(id, observations);
+    return ApiResponse.success(res, result, 'Deuda condonada');
+  } catch (error) {
+    if (error.message === 'Esta deuda ya está pagada') {
+      return ApiResponse.badRequest(res, error.message);
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   getAllDebts,
   getOpen,
@@ -241,6 +263,7 @@ module.exports = {
   getDebtPunitoryPreview,
   payDebtHandler,
   cancelDebtPaymentHandler,
+  forgiveDebtHandler,
   checkCanPayCurrentMonth,
   closeMonthPreview,
   closeMonthExecute,

@@ -42,7 +42,7 @@ export default function DebtList() {
   const [showSendModal, setShowSendModal] = useState(false)
   const { sendDebtors } = useNotifications(currentGroupId)
 
-  const { debts, isLoading, summary, payDebt, isPaying } = useDebts(currentGroupId, {
+  const { debts, isLoading, summary, payDebt, isPaying, forgiveDebt, isForgiving } = useDebts(currentGroupId, {
     status: statusFilter || undefined,
   })
 
@@ -250,16 +250,28 @@ export default function DebtList() {
                       <StatusBadge status={debt.status} />
                     </td>
                     <td className="text-center">
-                      {debt.status !== 'PAID' && (
-                        <button
-                          className="btn btn-xs btn-primary"
-                          onClick={() => setPaymentModal({ open: true, debt })}
-                          title="Pagar deuda"
-                        >
-                          <CurrencyDollarIcon className="w-3 h-3" />
-                        </button>
-                      )}
-                      {debt.status === 'PAID' && (
+                      {debt.status !== 'PAID' ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            className="btn btn-xs btn-primary"
+                            onClick={() => setPaymentModal({ open: true, debt })}
+                            title="Pagar deuda"
+                          >
+                            <CurrencyDollarIcon className="w-3 h-3" />
+                          </button>
+                          <button
+                            className="btn btn-xs btn-warning btn-outline"
+                            disabled={isForgiving}
+                            onClick={() => {
+                              if (window.confirm(`¿Condonar deuda de ${debt.periodLabel} (${formatCurrency(debt.liveCurrentTotal)})? Esta acción no se puede deshacer.`))
+                                forgiveDebt({ debtId: debt.id, observations: 'Condonada manualmente' })
+                            }}
+                            title="Condonar deuda"
+                          >
+                            <NoSymbolIcon className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
                         <CheckCircleIcon className="w-4 h-4 text-success inline" />
                       )}
                     </td>

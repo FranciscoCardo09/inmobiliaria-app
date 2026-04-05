@@ -313,7 +313,15 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
               variant="error"
               size="sm"
               className="w-full"
-              onClick={() => { onClose(); navigate('/debts'); }}
+              onClick={() => {
+                onClose()
+                const oldest = debtCheck.debts[0]
+                if (oldest?.periodMonth && oldest?.periodYear) {
+                  navigate(`/monthly-control?month=${oldest.periodMonth}&year=${oldest.periodYear}`)
+                } else {
+                  navigate('/monthly-control')
+                }
+              }}
             >
               <ExclamationTriangleIcon className="w-4 h-4" />
               Pagar deudas primero

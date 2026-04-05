@@ -659,6 +659,7 @@ model Debt {
 
   status              String    @default("OPEN")              // OPEN, PARTIAL, PAID
   closedAt            DateTime? @map("closed_at")
+  observations        String?
 
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")

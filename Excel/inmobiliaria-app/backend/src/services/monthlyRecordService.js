@@ -661,21 +661,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let totalHistorico = liveTotalDue; // Total con punitorios del record + IVA
 
     if (debtInfo && record.debt) {
-      // Si hay deuda, los punitorios del record se "transfirieron" a la deuda
-      // NO sumar ambos, usar SOLO los de la deuda (pagados + impagos)
+      // Punitorios: pagados a la deuda + impagos en vivo
       const debtPunitoriosPagados = Math.max(0, record.debt.amountPaid - record.debt.unpaidRentAmount);
       const debtPunitoriosImpagos = debtInfo.liveAccumulatedPunitory || 0;
-      const debtPunitoriosTotales = debtPunitoriosPagados + debtPunitoriosImpagos;
+      totalPunitoriosHistoricos = debtPunitoriosPagados + debtPunitoriosImpagos;
 
-      // IMPORTANTE: Reemplazar (no sumar) los punitorios del record con los de la deuda
-      totalPunitoriosHistoricos = debtPunitoriosTotales;
-
-      // NOTA: NO sumar debt.amountPaid porque record.amountPaid ya lo incluye
-      // (cuando se paga la deuda, se actualiza MonthlyRecord.amountPaid en payDebt)
-
-      // Total histórico = alquiler + servicios + punitorios de la deuda + IVA
-      totalHistorico = Math.round((record.rentAmount + record.servicesTotal + totalPunitoriosHistoricos + ivaAmount - record.previousBalance) * 100) / 100;
-
+      // Total coherente: lo pagado hasta ahora + lo que todavía se debe
+      // Esto evita contar servicios que no están trackeados en la deuda
+      totalHistorico = Math.round((record.amountPaid + debtInfo.liveCurrentTotal) * 100) / 100;
     }
 
     records.push({

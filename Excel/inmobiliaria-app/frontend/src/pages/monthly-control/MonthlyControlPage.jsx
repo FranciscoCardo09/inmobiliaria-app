@@ -1,5 +1,6 @@
 // Monthly Control Page - Vista tipo planilla Excel
 import { useState, useMemo, useEffect, memo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { useMonthlyRecords } from '../../hooks/useMonthlyRecords'
@@ -103,9 +104,16 @@ const SortableHeader = ({ label, column, sortColumn, sortDirection, onSort, alig
 export default function MonthlyControlPage() {
   const currentGroupId = useAuthStore((s) => s.currentGroupId)
   const now = new Date()
+  const [searchParams] = useSearchParams()
 
-  const [periodMonth, setPeriodMonth] = useState(now.getMonth() + 1)
-  const [periodYear, setPeriodYear] = useState(now.getFullYear())
+  const [periodMonth, setPeriodMonth] = useState(() => {
+    const m = parseInt(searchParams.get('month'))
+    return (m >= 1 && m <= 12) ? m : now.getMonth() + 1
+  })
+  const [periodYear, setPeriodYear] = useState(() => {
+    const y = parseInt(searchParams.get('year'))
+    return (y >= 2020 && y <= 2100) ? y : now.getFullYear()
+  })
   const [statusFilter, setStatusFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -130,7 +138,7 @@ export default function MonthlyControlPage() {
   const [showBulkLoad, setShowBulkLoad] = useState(false)
 
   // Debt payment hook
-  const { payDebt, isPaying } = useDebts(currentGroupId)
+  const { payDebt, isPaying, forgiveDebt } = useDebts(currentGroupId)
 
   // Categories for filter
   const { categories } = useCategories(currentGroupId)
@@ -588,6 +596,7 @@ export default function MonthlyControlPage() {
                     onDebtPayment={handleDebtPayment}
                     onTxHistory={handleTxHistory}
                     onForgiveBalance={forgiveBalance}
+                    onForgiveDebt={forgiveDebt}
                     onToggleComprobante={toggleComprobante}
                     onNotify={handleNotify}
                   />
@@ -709,7 +718,7 @@ export default function MonthlyControlPage() {
 // Memoized table row to prevent re-renders when unrelated state changes
 const MonthlyRecordRow = memo(function MonthlyRecordRow({
   record, idx, isExpanded, showIvaColumn, groupId,
-  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance, onToggleComprobante, onNotify,
+  onToggleRow, onToggleIva, onPayment, onDebtPayment, onTxHistory, onForgiveBalance, onForgiveDebt, onToggleComprobante, onNotify,
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
 
@@ -719,6 +728,8 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
     ? 'bg-warning/15 border-l-4 border-warning'
     : record.status === 'COMPLETE'
     ? 'bg-success/25'
+    : record.debtInfo && record.debtInfo.status !== 'PAID'
+    ? 'bg-error/10'
     : record.status === 'PARTIAL'
     ? 'bg-warning/10'
     : isPropietario
@@ -1000,13 +1011,25 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
         <td className="text-center">
           <div className="flex items-center justify-center gap-1">
           {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
-            <button
-              className="btn btn-xs btn-error"
-              onClick={() => onDebtPayment(record.debtInfo)}
-              title="Pagar deuda"
-            >
-              <BanknotesIcon className="w-3 h-3" />
-            </button>
+            <>
+              <button
+                className="btn btn-xs btn-error"
+                onClick={() => onDebtPayment(record.debtInfo)}
+                title="Pagar deuda"
+              >
+                <BanknotesIcon className="w-3 h-3" />
+              </button>
+              <button
+                className="btn btn-xs btn-warning btn-outline"
+                onClick={() => {
+                  if (window.confirm(`¿Condonar deuda de ${record.debtInfo.periodLabel}?`))
+                    onForgiveDebt({ debtId: record.debtInfo.id, observations: 'Condonada manualmente' })
+                }}
+                title="Condonar deuda"
+              >
+                <NoSymbolIcon className="w-3 h-3" />
+              </button>
+            </>
           ) : record.status === 'COMPLETE' ? (
             <CheckCircleIcon className="w-4 h-4 text-success" />
           ) : (

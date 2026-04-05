@@ -53,8 +53,6 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
 
   // Use preview data when available, fallback to debt data
   const unpaidRent = preview?.remainingDebt ?? Math.max((debt?.unpaidRentAmount || 0) - (debt?.amountPaid || 0), 0)
-  const accumulatedPunitory = preview?.accumulatedPunitory ?? (debt?.accumulatedPunitory || 0)
-  const newPunitoryAmount = preview?.newPunitoryAmount ?? 0
   const totalPunitory = preview?.amount ?? (debt?.liveAccumulatedPunitory || 0)
   const punitoryDays = preview?.days ?? (debt?.livePunitoryDays || 0)
   const totalToPay = preview?.totalToPay ?? (debt?.liveCurrentTotal || (unpaidRent + totalPunitory))
@@ -132,55 +130,31 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
         <div className="bg-base-100 border border-base-300 rounded-lg p-4">
           <h3 className="font-semibold text-sm mb-3">Desglose</h3>
           <div className="space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span>Monto original adeudado</span>
-              <span className="font-mono">{formatCurrency(debt?.originalAmount)}</span>
-            </div>
-            <div className="flex justify-between text-success">
-              <span>Ya pagado (antes de cerrar)</span>
-              <span className="font-mono">-{formatCurrency(debt?.previousRecordPayment || 0)}</span>
-            </div>
             <div className="flex justify-between font-medium">
-              <span>Deuda base restante</span>
+              <span>Deuda base (alquiler impago)</span>
               <span className="font-mono">{formatCurrency(unpaidRent)}</span>
             </div>
 
-            {/* Punitorios del período (congelados) */}
-            {accumulatedPunitory > 0 && (
+            {totalPunitory > 0 && (
               <div className="flex justify-between text-error">
                 <span>
-                  Punitorios del período
-                  <span className="text-xs text-base-content/50 ml-1">(acumulados)</span>
+                  Punitorios
+                  {punitoryDays > 0 && (
+                    <span className="text-xs text-base-content/50 ml-1">
+                      ({punitoryDays} días al {(debt?.punitoryPercent * 100).toFixed(1)}% diario)
+                    </span>
+                  )}
                 </span>
-                <span className="font-mono text-error">{formatCurrency(accumulatedPunitory)}</span>
+                <span className="font-mono text-error">{formatCurrency(totalPunitory)}</span>
               </div>
             )}
-
-            <div className="divider my-1"></div>
-
-            {/* Nuevos punitorios sobre saldo pendiente */}
-            {newPunitoryAmount > 0 && (
-              <>
-                <div className="flex justify-between text-error">
-                  <span>
-                    Nuevos punitorios
-                    {punitoryDays > 0 && (
-                      <span className="text-xs text-base-content/50 ml-1">
-                        ({punitoryDays} días al {(debt.punitoryPercent * 100).toFixed(1)}% diario)
-                      </span>
-                    )}
-                  </span>
-                  <span className="font-mono text-error">{formatCurrency(newPunitoryAmount)}</span>
-                </div>
-                {punitoryFrom && punitoryTo && (
-                  <div className="flex items-center gap-1 text-xs text-base-content/60 mt-1">
-                    <ClockIcon className="w-3.5 h-3.5" />
-                    <span>
-                      Desde <span className="font-semibold">{formatDateLocal(punitoryFrom)}</span> hasta <span className="font-semibold">{formatDateLocal(punitoryTo)}</span>
-                    </span>
-                  </div>
-                )}
-              </>
+            {totalPunitory > 0 && punitoryFrom && punitoryTo && (
+              <div className="flex items-center gap-1 text-xs text-base-content/60">
+                <ClockIcon className="w-3.5 h-3.5" />
+                <span>
+                  Desde <span className="font-semibold">{formatDateLocal(punitoryFrom)}</span> hasta <span className="font-semibold">{formatDateLocal(punitoryTo)}</span>
+                </span>
+              </div>
             )}
 
             <div className="divider my-1"></div>

@@ -74,6 +74,20 @@ export const useDebts = (groupId, filters = {}) => {
     },
   })
 
+  const forgiveDebtMutation = useMutation({
+    mutationFn: async ({ debtId, observations }) => {
+      const response = await api.post(`/groups/${groupId}/debts/${debtId}/forgive`, { observations })
+      return { updatedDebt: response.data.data, debtId }
+    },
+    onSuccess: async (data, variables) => {
+      await invalidateDebtRelated(variables.debtId)
+      toast.success('Deuda condonada')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al condonar deuda')
+    },
+  })
+
   return {
     debts: debtsQuery.data || [],
     isLoading: debtsQuery.isLoading,
@@ -83,6 +97,8 @@ export const useDebts = (groupId, filters = {}) => {
     isPaying: payDebtMutation.isPending,
     cancelPayment: cancelPaymentMutation.mutateAsync,
     isCancelingPayment: cancelPaymentMutation.isPending,
+    forgiveDebt: forgiveDebtMutation.mutateAsync,
+    isForgiving: forgiveDebtMutation.isPending,
   }
 }
 

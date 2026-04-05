@@ -11,6 +11,7 @@ const {
   getDebtPunitoryPreview,
   payDebtHandler,
   cancelDebtPaymentHandler,
+  forgiveDebtHandler,
   checkCanPayCurrentMonth,
   closeMonthPreview,
   closeMonthExecute,
@@ -25,6 +26,7 @@ router.get('/debts/summary', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER'])
 router.get('/debts/:id', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getDebtById);
 router.get('/debts/:id/punitory-preview', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getDebtPunitoryPreview);
 router.post('/debts/:id/pay', requireGroupAccess(['ADMIN', 'OPERATOR']), payDebtHandler);
+router.post('/debts/:id/forgive', requireGroupAccess(['ADMIN']), forgiveDebtHandler);
 router.delete('/debts/:debtId/payments/:paymentId', requireGroupAccess(['ADMIN']), cancelDebtPaymentHandler);
 
 // Verificar si puede pagar mes actual

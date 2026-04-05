@@ -593,6 +593,8 @@ const canPayCurrentMonth = async (groupId, contractId) => {
     return {
       id: debt.id,
       periodLabel: debt.periodLabel,
+      periodMonth: debt.periodMonth,
+      periodYear: debt.periodYear,
       remainingDebt,
       punitory: currentPunitory,
       total: remainingDebt + currentPunitory,
@@ -747,6 +749,46 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
 };
 
 /**
+ * Condonar una deuda (marcarla como pagada sin cobrar).
+ */
+const forgiveDebt = async (debtId, observations = 'Deuda condonada') => {
+  const debt = await prisma.debt.findUnique({
+    where: { id: debtId },
+  });
+
+  if (!debt) throw new Error('Deuda no encontrada');
+  if (debt.status === 'PAID') throw new Error('Esta deuda ya está pagada');
+
+  const updatedDebt = await prisma.debt.update({
+    where: { id: debtId },
+    data: {
+      status: 'PAID',
+      closedAt: new Date(),
+      observations,
+    },
+  });
+
+  if (debt.monthlyRecordId) {
+    const { recalculateMonthlyRecord } = require('./monthlyRecordService');
+    const updatedRecord = await recalculateMonthlyRecord(debt.monthlyRecordId);
+
+    if (updatedRecord.status !== 'COMPLETE') {
+      await prisma.monthlyRecord.update({
+        where: { id: debt.monthlyRecordId },
+        data: {
+          status: 'COMPLETE',
+          isPaid: true,
+          isCancelled: true,
+          fullPaymentDate: new Date(),
+        },
+      });
+    }
+  }
+
+  return updatedDebt;
+};
+
+/**
  * Recalcular una deuda cuando el MonthlyRecord cambia (ej: se anula un pago previo al cierre)
  */
 const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
@@ -815,6 +857,7 @@ module.exports = {
   preloadDebtDependencies,
   payDebt,
   cancelDebtPayment,
+  forgiveDebt,
   recalculateDebtFromMonthlyRecord,
   getOpenDebts,
   getDebts,
