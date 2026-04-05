@@ -448,6 +448,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
   ];
 
+  // Batch: contratos con deudas abiertas (para marcar filas del mes actual)
+  const contractIds = activeContracts.map(({ contract }) => contract.id);
+  const openDebtsForContracts = await prisma.debt.findMany({
+    where: { contractId: { in: contractIds }, status: { in: ['OPEN', 'PARTIAL'] } },
+    select: { contractId: true },
+  });
+  const contractsWithOpenDebt = new Set(openDebtsForContracts.map(d => d.contractId));
+
   const records = [];
 
   for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
@@ -683,6 +691,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       totalPunitoriosHistoricos,  // Punitorios totales (record + deuda pagada + deuda impaga)
       totalAbonado,                // Total pagado (record + deuda)
       totalHistorico,              // Total real (alquiler + servicios + todos los punitorios)
+      contractHasOpenDebt: contractsWithOpenDebt.has(contract.id),
       // Enriched data
       contractType: contract.contractType || 'INQUILINO',
       contract: {

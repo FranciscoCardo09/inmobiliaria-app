@@ -728,7 +728,7 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
     ? 'bg-warning/15 border-l-4 border-warning'
     : record.status === 'COMPLETE'
     ? 'bg-success/25'
-    : record.debtInfo && record.debtInfo.status !== 'PAID'
+    : record.contractHasOpenDebt
     ? 'bg-error/10'
     : record.status === 'PARTIAL'
     ? 'bg-warning/10'
