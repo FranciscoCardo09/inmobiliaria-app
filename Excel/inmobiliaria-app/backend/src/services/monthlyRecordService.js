@@ -449,9 +449,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   ];
 
   // Batch: contratos con deudas abiertas (para marcar filas del mes actual)
-  const contractIds = activeContracts.map(({ contract }) => contract.id);
+  const contractIdsForDebt = activeContracts.map(({ contract }) => contract.id);
   const openDebtsForContracts = await prisma.debt.findMany({
-    where: { contractId: { in: contractIds }, status: { in: ['OPEN', 'PARTIAL'] } },
+    where: { contractId: { in: contractIdsForDebt }, status: { in: ['OPEN', 'PARTIAL'] } },
     select: { contractId: true },
   });
   const contractsWithOpenDebt = new Set(openDebtsForContracts.map(d => d.contractId));
