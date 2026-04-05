@@ -225,7 +225,20 @@ const preloadDebtDependencies = async (debts) => {
  */
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
-  const unpaidServicesAmount = debt.unpaidServicesAmount || 0;
+
+  // For legacy debts created before unpaidServicesAmount was tracked, load from monthly record
+  let unpaidServicesAmount = debt.unpaidServicesAmount || 0;
+  if (unpaidServicesAmount === 0 && debt.monthlyRecordId && debt.amountPaid === 0) {
+    const mr = await prisma.monthlyRecord.findUnique({
+      where: { id: debt.monthlyRecordId },
+      select: { servicesTotal: true },
+    });
+    if (mr?.servicesTotal > 0) {
+      unpaidServicesAmount = mr.servicesTotal;
+      // Persist so future calls don't need the lookup
+      await prisma.debt.update({ where: { id: debt.id }, data: { unpaidServicesAmount } });
+    }
+  }
   const totalBase = debt.unpaidRentAmount + unpaidServicesAmount;
   const remainingBase = Math.max(totalBase - debt.amountPaid, 0);
 

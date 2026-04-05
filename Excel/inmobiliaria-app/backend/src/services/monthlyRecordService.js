@@ -571,8 +571,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let debtInfo = null;
 
     if (record.debt && record.debt.status !== 'PAID') {
-      const { amount, days, startDate, endDate } = await calculateDebtPunitory(record.debt);
-      const remainingDebt = Math.max(0, record.debt.unpaidRentAmount - record.debt.amountPaid);
+      const { amount, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(record.debt);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
