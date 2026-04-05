@@ -52,10 +52,11 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const { cancelPayment, isCancelingPayment } = useDebts(groupId)
 
   // Use preview data when available, fallback to debt data
-  const unpaidRent = preview?.remainingDebt ?? Math.max((debt?.unpaidRentAmount || 0) - (debt?.amountPaid || 0), 0)
+  const unpaidServices = preview?.remainingServices ?? (debt?.unpaidServicesAmount || 0)
+  const unpaidRent = preview?.remainingRent ?? Math.max((debt?.unpaidRentAmount || 0) - Math.max((debt?.amountPaid || 0) - (debt?.unpaidServicesAmount || 0), 0), 0)
   const totalPunitory = preview?.amount ?? (debt?.liveAccumulatedPunitory || 0)
   const punitoryDays = preview?.days ?? (debt?.livePunitoryDays || 0)
-  const totalToPay = preview?.totalToPay ?? (debt?.liveCurrentTotal || (unpaidRent + totalPunitory))
+  const totalToPay = preview?.totalToPay ?? (debt?.liveCurrentTotal || (unpaidServices + unpaidRent + totalPunitory))
   const punitoryFrom = preview?.fromDate ?? debt?.punitoryFromDate
   const punitoryTo = preview?.toDate ?? debt?.punitoryToDate
 
@@ -130,8 +131,14 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
         <div className="bg-base-100 border border-base-300 rounded-lg p-4">
           <h3 className="font-semibold text-sm mb-3">Desglose</h3>
           <div className="space-y-1 text-sm">
+            {unpaidServices > 0 && (
+              <div className="flex justify-between">
+                <span>Servicios impagos</span>
+                <span className="font-mono">{formatCurrency(unpaidServices)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-medium">
-              <span>Deuda base (alquiler impago)</span>
+              <span>Alquiler impago</span>
               <span className="font-mono">{formatCurrency(unpaidRent)}</span>
             </div>
 

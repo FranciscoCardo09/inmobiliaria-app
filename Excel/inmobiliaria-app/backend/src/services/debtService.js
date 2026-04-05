@@ -51,6 +51,7 @@ function calculateImputation(monthlyRecord) {
   const unpaidRent = rentAmount - rentCovered;
   const unpaidIva = ivaAmount - ivaCovered;
   const unpaidPunitory = punitoryAmount - punitoryCovered;
+  const unpaidServices = (servicesTotal - servicesCovered) + unpaidIva; // servicios + IVA impagos
 
   return {
     servicesCovered,
@@ -59,9 +60,10 @@ function calculateImputation(monthlyRecord) {
     punitoryCovered,
     unpaidRent,
     unpaidIva,
+    unpaidServices,
     unpaidPunitory,
     totalOriginal: rentAmount + servicesTotal + punitoryAmount + ivaAmount,
-    totalUnpaid: unpaidRent + unpaidPunitory + unpaidIva,
+    totalUnpaid: unpaidRent + unpaidPunitory + unpaidServices,
   };
 }
 
@@ -129,7 +131,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
     punitoryAmount: currentPunitoryAmount,
   };
 
-  const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(recordWithCurrentPunitorios);
+  const { unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, totalUnpaid } = calculateImputation(recordWithCurrentPunitorios);
 
   // Si no queda nada impago (ni alquiler ni punitorios), no crear deuda
   if (totalUnpaid <= 0) {
@@ -172,9 +174,10 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       periodYear: monthlyRecord.periodYear,
       originalAmount: totalOriginal,
       unpaidRentAmount: unpaidRent,
+      unpaidServicesAmount: unpaidServices, // Servicios + IVA impagos
       previousRecordPayment, // Cuánto pagó antes de cerrar (para mostrar al usuario)
       accumulatedPunitory: unpaidPunitory, // Punitorios impagos del MonthlyRecord
-      currentTotal: unpaidRent + unpaidPunitory, // Total impago (alquiler + punitorios del record)
+      currentTotal: unpaidRent + unpaidServices + unpaidPunitory, // Total impago
       amountPaid: initialDebtPaid, // Siempre 0 al crear (pagos de la deuda)
       punitoryPercent: contract.punitoryPercent,
       punitoryStartDate,
@@ -222,7 +225,12 @@ const preloadDebtDependencies = async (debts) => {
  */
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
-  const remainingRent = Math.max(debt.unpaidRentAmount - debt.amountPaid, 0);
+  const unpaidServicesAmount = debt.unpaidServicesAmount || 0;
+  // Los pagos se imputan: primero servicios, luego alquiler, luego punitorios
+  const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);
+  const rentPaid = Math.max(debt.amountPaid - unpaidServicesAmount, 0);
+  const remainingServices = unpaidServicesAmount - servicePaid;
+  const remainingRent = Math.max(debt.unpaidRentAmount - rentPaid, 0);
 
   // Helper to get contract - from preloaded cache or DB
   const getContract = async () => {
@@ -265,11 +273,12 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     );
 
     const totalPunitory = accumulatedPunitory + newPunitorios.amount;
-    const amountPaidToPunitory = Math.max(0, debt.amountPaid - debt.unpaidRentAmount);
+    // Orden de imputación: servicios → alquiler → punitorios
+    const amountPaidToPunitory = Math.max(0, debt.amountPaid - unpaidServicesAmount - debt.unpaidRentAmount);
     const unpaidPunitory = Math.max(0, totalPunitory - amountPaidToPunitory);
 
     if (unpaidPunitory <= 0) {
-      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, startDate: null, endDate: null };
+      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, remainingServices: 0, startDate: null, endDate: null };
     }
 
     return {
@@ -277,7 +286,8 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       amount: unpaidPunitory,
       newPunitoryAmount: newPunitorios.amount,
       accumulatedPunitory,
-      remainingDebt: 0,
+      remainingDebt: remainingServices, // servicios aún no cubiertos (deberían ser 0 en este path)
+      remainingServices,
       startDate: newPunitorios.fromDate,
       endDate: newPunitorios.toDate,
     };
@@ -319,7 +329,9 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     amount: result.amount,
     newPunitoryAmount: result.amount,
     accumulatedPunitory,
-    remainingDebt: remainingRent,
+    remainingDebt: remainingServices + remainingRent, // servicios + alquiler impago
+    remainingServices,
+    remainingRent,
     startDate: result.fromDate,
     endDate: result.toDate,
   };
@@ -339,10 +351,9 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   if (debt.status === 'PAID') throw new Error('Esta deuda ya está pagada');
 
   // Calcular punitorios al momento del pago
-  const { amount: punitoryAmount, days } = await calculateDebtPunitory(debt, paymentDate);
+  const { amount: punitoryAmount, days, remainingDebt: remainingBase } = await calculateDebtPunitory(debt, paymentDate);
 
-  const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
-  const totalWithPunitory = remainingDebt + punitoryAmount;
+  const totalWithPunitory = remainingBase + punitoryAmount;
 
   // Crear registro de pago
   const debtPayment = await prisma.debtPayment.create({
@@ -356,11 +367,18 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
     },
   });
 
-  // Also create a PaymentTransaction so it appears in the payment history
-  // IMPORTANT: Payment order is RENT FIRST, then PUNITORIOS
+  // Orden de imputación: servicios → alquiler → punitorios
   const parsedAmount = parseFloat(amount);
-  const rentPortion = Math.min(remainingDebt, parsedAmount);
-  const punitoryPortion = Math.max(parsedAmount - rentPortion, 0);
+  const unpaidServicesNow = debt.unpaidServicesAmount || 0;
+  const servicePaidSoFar = Math.min(debt.amountPaid, unpaidServicesNow);
+  const remainingServicesBefore = unpaidServicesNow - servicePaidSoFar;
+  const rentPaidSoFar = Math.max(debt.amountPaid - unpaidServicesNow, 0);
+  const remainingRentBefore = Math.max(debt.unpaidRentAmount - rentPaidSoFar, 0);
+
+  const servicesPortion = Math.min(remainingServicesBefore, parsedAmount);
+  const afterServices = parsedAmount - servicesPortion;
+  const rentPortion = Math.min(remainingRentBefore, afterServices);
+  const punitoryPortion = Math.max(afterServices - rentPortion, 0);
 
   const transaction = await prisma.paymentTransaction.create({
     data: {
@@ -374,6 +392,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
       observations: observations || `Pago de deuda: ${debt.periodLabel || 'período anterior'}`,
       concepts: {
         create: [
+          ...(servicesPortion > 0 ? [{ type: 'SERVICIOS_DEUDA', description: 'Pago deuda servicios', amount: servicesPortion }] : []),
           ...(rentPortion > 0 ? [{ type: 'ALQUILER_DEUDA', description: 'Pago deuda alquiler', amount: rentPortion }] : []),
           ...(punitoryPortion > 0 ? [{ type: 'PUNITORIOS', description: 'Punitorios por mora', amount: punitoryPortion }] : []),
         ],
@@ -382,9 +401,9 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   });
 
   // Actualizar deuda
-  const newAmountPaid = debt.amountPaid + parseFloat(amount);
+  const newAmountPaid = debt.amountPaid + parsedAmount;
   const newAccumulatedPunitory = punitoryAmount;
-  const newCurrentTotal = debt.unpaidRentAmount + newAccumulatedPunitory - newAmountPaid;
+  const newCurrentTotal = debt.unpaidRentAmount + unpaidServicesNow + newAccumulatedPunitory - newAmountPaid;
 
   let status = 'OPEN';
   let closedAt = null;
@@ -480,8 +499,7 @@ const getOpenDebts = async (groupId, contractId = null) => {
   const preloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
 
   return Promise.all(debts.map(async (debt) => {
-    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
-    const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
+    const { amount: currentPunitory, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
@@ -524,8 +542,7 @@ const getDebts = async (groupId, filters = {}) => {
   return Promise.all(debts.map(async (debt) => {
     if (debt.status === 'PAID') return { ...debt, liveCurrentTotal: 0, livePunitoryDays: 0, liveAccumulatedPunitory: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
 
-    const { amount: currentPunitory, days, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
-    const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
+    const { amount: currentPunitory, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
@@ -588,8 +605,7 @@ const canPayCurrentMonth = async (groupId, contractId) => {
   // Batch-load dependencies and recalculate punitorios
   const preloaded = await preloadDebtDependencies(openDebts);
   const debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
-    const { amount: currentPunitory, days } = await calculateDebtPunitory(debt, new Date(), preloaded);
-    const remainingDebt = debt.unpaidRentAmount - debt.amountPaid;
+    const { amount: currentPunitory, remainingDebt } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       id: debt.id,
       periodLabel: debt.periodLabel,
@@ -720,7 +736,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     data: {
       amountPaid: newAmountPaid,
       accumulatedPunitory: newAccumulatedPunitory,
-      currentTotal: Math.max(debt.unpaidRentAmount + newAccumulatedPunitory - newAmountPaid, 0),
+      currentTotal: Math.max(debt.unpaidRentAmount + (debt.unpaidServicesAmount || 0) + newAccumulatedPunitory - newAmountPaid, 0),
       lastPaymentDate: newLastPaymentDate,
       status: newStatus,
       closedAt: newStatus === 'PAID' ? debt.closedAt : null,
@@ -810,14 +826,15 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
     return null;
   }
 
-  // Recalcular unpaidRent basado en el estado actual del MonthlyRecord
-  const { unpaidRent, totalOriginal } = calculateImputation(monthlyRecord);
+  // Recalcular unpaidRent y unpaidServices basado en el estado actual del MonthlyRecord
+  const { unpaidRent, unpaidServices, totalOriginal } = calculateImputation(monthlyRecord);
 
-  // Recalcular el status basándose en el nuevo unpaidRent y los pagos de la deuda
+  // Recalcular el status
   let newStatus = 'OPEN';
   let closedAt = null;
+  const totalBase = unpaidRent + unpaidServices;
 
-  if (debt.amountPaid >= unpaidRent) {
+  if (debt.amountPaid >= totalBase) {
     newStatus = 'PAID';
     closedAt = debt.closedAt || new Date();
   } else if (debt.amountPaid > 0) {
@@ -830,9 +847,9 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
     data: {
       originalAmount: totalOriginal,
       unpaidRentAmount: unpaidRent,
+      unpaidServicesAmount: unpaidServices,
       previousRecordPayment: monthlyRecord.amountPaid || 0,
-      // Recalcular currentTotal: unpaidRent + punitorios - pagos de la deuda
-      currentTotal: Math.max(unpaidRent + debt.accumulatedPunitory - debt.amountPaid, 0),
+      currentTotal: Math.max(totalBase + debt.accumulatedPunitory - debt.amountPaid, 0),
       status: newStatus,
       closedAt,
     },

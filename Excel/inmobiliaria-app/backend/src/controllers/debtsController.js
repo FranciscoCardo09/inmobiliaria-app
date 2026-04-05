@@ -193,13 +193,15 @@ const getDebtPunitoryPreview = async (req, res, next) => {
       return ApiResponse.success(res, { days: 0, amount: 0, remainingDebt: 0, totalToPay: 0 });
     }
 
-    const { amount, days, remainingDebt, startDate, endDate, accumulatedPunitory, newPunitoryAmount } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
+    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate, accumulatedPunitory, newPunitoryAmount } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
     return ApiResponse.success(res, {
       days,
       amount,
       accumulatedPunitory,
       newPunitoryAmount,
       remainingDebt,
+      remainingServices: remainingServices || 0,
+      remainingRent: remainingRent || 0,
       totalToPay: remainingDebt + amount,
       fromDate: startDate,
       toDate: endDate,

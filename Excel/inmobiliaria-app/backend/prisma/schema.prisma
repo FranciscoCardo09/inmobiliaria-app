@@ -646,7 +646,8 @@ model Debt {
   periodYear          Int       @map("period_year")
 
   originalAmount         Float     @map("original_amount")          // Total que debía ese mes
-  unpaidRentAmount       Float     @map("unpaid_rent_amount")       // Deuda post imputación servicios
+  unpaidRentAmount       Float     @map("unpaid_rent_amount")       // Alquiler impago post imputación
+  unpaidServicesAmount   Float     @default(0) @map("unpaid_services_amount") // Servicios + IVA impagos
   previousRecordPayment  Float     @default(0) @map("previous_record_payment") // Cuánto pagó del MonthlyRecord antes de cerrar
   accumulatedPunitory    Float     @default(0) @map("accumulated_punitory")
 
