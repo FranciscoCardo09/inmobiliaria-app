@@ -149,12 +149,23 @@ export default function MonthlyControlPage() {
 
   // Send standard status to backend, handle HAS_DEBT locally
   const backendStatus = statusFilter === 'HAS_DEBT' ? '' : statusFilter
-  const { records: allRecords, summary, isLoading, toggleIva, forgiveBalance, toggleComprobante } = useMonthlyRecords(
+  const { records: allRecords, summary, isLoading, refetch: refetchRecords, toggleIva, forgiveBalance, toggleComprobante } = useMonthlyRecords(
     currentGroupId,
     periodMonth,
     periodYear,
     { status: backendStatus, categoryId: categoryFilter }
   )
+
+  // Wrappers that refetch records after debt actions so the summary updates immediately
+  const handlePayDebt = useCallback(async (data) => {
+    await payDebt(data)
+    refetchRecords()
+  }, [payDebt, refetchRecords])
+
+  const handleForgiveDebt = useCallback(async (data) => {
+    await forgiveDebt(data)
+    refetchRecords()
+  }, [forgiveDebt, refetchRecords])
 
   // Apply local filters (search + debt + contractType) so results show instantly without API calls
   const records = useMemo(() => {
@@ -596,7 +607,7 @@ export default function MonthlyControlPage() {
                     onDebtPayment={handleDebtPayment}
                     onTxHistory={handleTxHistory}
                     onForgiveBalance={forgiveBalance}
-                    onForgiveDebt={forgiveDebt}
+                    onForgiveDebt={handleForgiveDebt}
                     onToggleComprobante={toggleComprobante}
                     onNotify={handleNotify}
                   />
@@ -655,7 +666,7 @@ export default function MonthlyControlPage() {
         <DebtPaymentModal
           debt={debtModal.debt}
           groupId={currentGroupId}
-          onPay={payDebt}
+          onPay={handlePayDebt}
           isPaying={isPaying}
           onClose={() => setDebtModal({ open: false, debt: null })}
         />
