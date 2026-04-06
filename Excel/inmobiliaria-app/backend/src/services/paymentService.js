@@ -1,5 +1,6 @@
 // Payment Service - Phase 4
 const { calculatePunitoryDays, calculatePunitoryAmount } = require('../utils/punitory');
+const { calculateRentForMonth } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
 
@@ -46,10 +47,12 @@ const getLastPaymentEditableConcepts = async (contractId) => {
 const calculatePaymentConcepts = async (contract, paymentDate) => {
   const concepts = [];
 
-  // 1. ALQUILER
+  // 1. ALQUILER — usar el alquiler del mes actual del contrato (no el baseRent que puede ser el último ajuste)
+  const rentForMonth = await calculateRentForMonth(contract, contract.currentMonth);
+
   concepts.push({
     type: 'ALQUILER',
-    amount: contract.baseRent,
+    amount: rentForMonth,
     isAutomatic: true,
   });
 
@@ -60,7 +63,7 @@ const calculatePaymentConcepts = async (contract, paymentDate) => {
     const date = new Date(paymentDate);
     const daysLate = calculatePunitoryDays(date, contract.punitoryStartDay);
     const punitoryAmount = calculatePunitoryAmount(
-      contract.baseRent,
+      rentForMonth,
       daysLate,
       contract.punitoryPercent
     );
@@ -68,7 +71,7 @@ const calculatePaymentConcepts = async (contract, paymentDate) => {
     if (punitoryAmount > 0) {
       concepts.push({
         type: 'PUNITORIOS',
-        amount: Math.round(punitoryAmount),
+        amount: punitoryAmount,
         description: `${daysLate} día(s) de atraso`,
         isAutomatic: true,
       });

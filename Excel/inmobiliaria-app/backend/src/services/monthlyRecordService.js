@@ -1,5 +1,5 @@
 // Monthly Record Service - Core auto-generation and control logic
-const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
+const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
 const { calculateNextAdjustmentMonth } = require('./adjustmentService');
 
@@ -489,9 +489,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       if (rentChanged || prevBalanceChanged || ivaChanged) {
         const effectiveRent = rentChanged ? currentRent : record.rentAmount;
         const effectiveIva = ivaChanged ? contractIva : record.includeIva;
-        const recordIva = effectiveIva ? effectiveRent * 0.21 : 0;
-        const newTotalDue = effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance;
-        const newBalance = record.amountPaid - Math.max(newTotalDue, 0);
+        const recordIva = round2(effectiveIva ? effectiveRent * 0.21 : 0);
+        const newTotalDue = round2(effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance);
+        const newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
 
         const updateData = {
           previousBalance: latestPrevBalance,
@@ -930,4 +930,5 @@ module.exports = {
   getMonthlyRecordById,
   getCalendarPeriod,
   getMonthNumber,
+  calculateRentForMonth,
 };

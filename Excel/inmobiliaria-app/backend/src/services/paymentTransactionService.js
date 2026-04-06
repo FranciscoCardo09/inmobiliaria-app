@@ -1,5 +1,5 @@
 // Payment Transaction Service - Register and manage payment transactions
-const { calculatePunitoryV2, getHolidaysForYear } = require('../utils/punitory');
+const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
 const { recalculateMonthlyRecord } = require('./monthlyRecordService');
 const { canPayCurrentMonth } = require('./debtService');
 
@@ -65,8 +65,8 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const totalCredits = amountPaidSoFar + prevBalance;
   // Credits cover services first, remainder goes to rent
   const paidTowardServices = Math.min(totalCredits, servicesTotal);
-  const paidTowardRent = Math.max(totalCredits - servicesTotal, 0);
-  const unpaidRent = Math.max(record.rentAmount - paidTowardRent, 0);
+  const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
+  const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
   // Get last payment date for this record (if partial payment was made)
   const lastTransaction = await prisma.paymentTransaction.findFirst({
@@ -102,8 +102,8 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const alreadyPaid = amountPaidSoFar + prevBalance;
 
   // Calculate what's still owed for each concept
-  const servicesStillOwed = Math.max(servicesTotal - alreadyPaid, 0);
-  const rentStillOwed = Math.max(record.rentAmount - Math.max(alreadyPaid - servicesTotal, 0), 0);
+  const servicesStillOwed = round2(Math.max(servicesTotal - alreadyPaid, 0));
+  const rentStillOwed = round2(Math.max(record.rentAmount - Math.max(alreadyPaid - servicesTotal, 0), 0));
 
   // 1. Previous balance (if any) - show as credit
   if (prevBalance > 0) {
@@ -254,8 +254,8 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const prevBalance = record.previousBalance || 0;
   // previousBalance (a favor) acts as an extra credit alongside actual payments
   const totalCredits = amountPaid + prevBalance;
-  const paidTowardRent = Math.max(totalCredits - servicesTotal, 0);
-  const unpaidRent = Math.max(record.rentAmount - paidTowardRent, 0);
+  const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
+  const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
   // Last payment date (transactions ordered desc, so [0] is most recent)
   const lastTx = record.transactions[0] || null;

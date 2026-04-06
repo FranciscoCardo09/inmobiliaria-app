@@ -185,6 +185,13 @@ async function getHolidaysForYear(year) {
   return holidays.map((h) => new Date(h.date));
 }
 
+/**
+ * Round a monetary value to 2 decimal places, eliminating floating-point drift.
+ */
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
 // Keep legacy functions for backward compatibility
 function calculatePunitoryDays(paymentDate, punitoryStartDay) {
   const payDay = paymentDate.getDate();
@@ -198,7 +205,7 @@ function calculatePunitoryDays(paymentDate, punitoryStartDay) {
 
 function calculatePunitoryAmount(baseRent, daysLate, punitoryPercent) {
   if (daysLate <= 0) return 0;
-  return baseRent * punitoryPercent * daysLate;
+  return round2(baseRent * punitoryPercent * daysLate);
 }
 
 module.exports = {
@@ -212,4 +219,5 @@ module.exports = {
   isHoliday,
   diffCalendarDays,
   toLocalDate,
+  round2,
 };
