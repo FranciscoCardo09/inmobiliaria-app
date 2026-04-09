@@ -181,6 +181,7 @@ export default function DebtList() {
                   <th className="text-xs">Inquilino</th>
                   <th className="text-xs">Propiedad</th>
                   <th className="text-xs text-right">Deuda Base</th>
+                  <th className="text-xs text-right text-base-content/50">Punt. Ant.</th>
                   <th className="text-xs text-right">Punitorios</th>
                   <th className="text-xs text-right">Pagado</th>
                   <th className="text-xs text-right font-bold">Total Actual</th>
@@ -227,6 +228,9 @@ export default function DebtList() {
                     </td>
                     <td className="text-xs text-right font-mono">
                       {formatCurrency(debt.unpaidRentAmount)}
+                    </td>
+                    <td className="text-[11px] text-right font-mono text-base-content/40">
+                      {debt.accumulatedPunitory > 0 ? formatCurrency(debt.accumulatedPunitory) : '-'}
                     </td>
                     <td className="text-xs text-right font-mono text-error">
                       {debt.status !== 'PAID'
