@@ -229,37 +229,47 @@ const preloadDebtDependencies = async (debts) => {
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
 
-  // Para deudas donde unpaidServicesAmount puede estar mal calculado (legacy o corruptas),
+  // Para deudas donde los montos impagos pueden estar mal calculados (legacy o corruptos),
   // recalcular usando calculateImputation solo cuando no se hizo ningún pago a la deuda aún.
   let unpaidServicesAmount = debt.unpaidServicesAmount || 0;
+  let unpaidRentAmount = debt.unpaidRentAmount || 0;
   if (debt.monthlyRecordId && debt.amountPaid === 0) {
     const mr = await prisma.monthlyRecord.findUnique({
       where: { id: debt.monthlyRecordId },
       select: { servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
     });
-    if (mr && mr.servicesTotal > 0) {
+    if (mr) {
       const imputation = calculateImputation(mr);
       const correctUnpaidServices = imputation.unpaidServices;
+      const correctUnpaidRent = imputation.unpaidRent;
+      const updateData = {};
       if (correctUnpaidServices !== unpaidServicesAmount) {
         unpaidServicesAmount = correctUnpaidServices;
-        await prisma.debt.update({ where: { id: debt.id }, data: { unpaidServicesAmount } });
+        updateData.unpaidServicesAmount = correctUnpaidServices;
+      }
+      if (correctUnpaidRent !== unpaidRentAmount) {
+        unpaidRentAmount = correctUnpaidRent;
+        updateData.unpaidRentAmount = correctUnpaidRent;
+      }
+      if (Object.keys(updateData).length > 0) {
+        await prisma.debt.update({ where: { id: debt.id }, data: updateData });
       }
     }
   }
-  const totalBase = round2(debt.unpaidRentAmount + unpaidServicesAmount);
+  const totalBase = round2(unpaidRentAmount + unpaidServicesAmount);
   const remainingBase = round2(Math.max(totalBase - debt.amountPaid, 0));
 
   // Regla de base para punitorios:
   // - Sin pagos: solo sobre alquiler
   // - Con pagos: sobre el saldo restante total (lo que falta pagar)
   const punitoryBase = debt.amountPaid <= 0
-    ? round2(debt.unpaidRentAmount)
+    ? round2(unpaidRentAmount)
     : remainingBase;
 
   // Para display: cuánto queda de servicios vs alquiler (imputación servicios → alquiler)
   const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);
   const remainingServices = round2(unpaidServicesAmount - servicePaid);
-  const remainingRent = round2(Math.max(debt.unpaidRentAmount - Math.max(debt.amountPaid - unpaidServicesAmount, 0), 0));
+  const remainingRent = round2(Math.max(unpaidRentAmount - Math.max(debt.amountPaid - unpaidServicesAmount, 0), 0));
 
   // Helper to get contract - from preloaded cache or DB
   const getContract = async () => {
