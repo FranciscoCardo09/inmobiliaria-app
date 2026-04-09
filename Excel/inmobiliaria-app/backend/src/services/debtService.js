@@ -228,7 +228,7 @@ const preloadDebtDependencies = async (debts) => {
  * Accepts optional pre-loaded contract and holidays to avoid DB queries (batch mode).
  */
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
-  const accumulatedPunitory = debt.accumulatedPunitory || 0;
+  let accumulatedPunitory = debt.accumulatedPunitory || 0;
 
   // Para deudas donde los montos impagos pueden estar mal calculados (legacy o corruptos),
   // recalcular usando calculateImputation solo cuando no se hizo ningún pago a la deuda aún.
@@ -243,6 +243,8 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       const imputation = calculateImputation(mr);
       const correctUnpaidServices = imputation.unpaidServices;
       const correctUnpaidRent = imputation.unpaidRent;
+      const correctUnpaidPunitory = imputation.unpaidPunitory;
+      
       const updateData = {};
       if (correctUnpaidServices !== unpaidServicesAmount) {
         unpaidServicesAmount = correctUnpaidServices;
@@ -252,7 +254,17 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
         unpaidRentAmount = correctUnpaidRent;
         updateData.unpaidRentAmount = correctUnpaidRent;
       }
+      if (correctUnpaidPunitory !== accumulatedPunitory) {
+        accumulatedPunitory = correctUnpaidPunitory;
+        updateData.accumulatedPunitory = correctUnpaidPunitory;
+      }
+      
       if (Object.keys(updateData).length > 0) {
+        // Enforce setting currentTotal correctly
+        updateData.currentTotal = correctUnpaidRent + correctUnpaidServices + correctUnpaidPunitory;
+        
+        // If everything is paid, we could close the debt, but we just set values.
+        // The display will show $0.
         await prisma.debt.update({ where: { id: debt.id }, data: updateData });
       }
     }
