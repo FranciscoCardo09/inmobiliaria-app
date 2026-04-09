@@ -598,6 +598,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let livePunitoryDays = record.punitoryDays || 0;
     const isFullyPaid = record.status === 'COMPLETE';
 
+    let punitoriosAnteriores = 0;
+    let punitoriosActuales = 0;
+
     if (!isFullyPaid && !record.punitoryForgiven) {
       try {
         const amountPaid = record.amountPaid || 0;
@@ -648,9 +651,13 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           );
           livePunitoryAmount = unpaidFrozenPunitory + liveResult.amount;
           livePunitoryDays = liveResult.days;
+          punitoriosAnteriores = unpaidFrozenPunitory;
+          punitoriosActuales = liveResult.amount;
         } else {
           livePunitoryAmount = unpaidFrozenPunitory;
           livePunitoryDays = record.punitoryDays || 0;
+          punitoriosAnteriores = unpaidFrozenPunitory;
+          punitoriosActuales = 0;
         }
 
       } catch (e) {
@@ -678,6 +685,11 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       const debtPunitoriosImpagos = debtInfo.liveAccumulatedPunitory || 0;
       totalPunitoriosHistoricos = debtPunitoriosPagados + debtPunitoriosImpagos;
 
+      // Split for display: The base debt holds its historical punitorios in accumulatedPunitory
+      // and calculateDebtPunitory gave us the new live ones in newPunitoryAmount
+      punitoriosAnteriores = debtPunitoriosPagados + (debtInfo.unpaidAccumulatedPunitory || 0);
+      punitoriosActuales = (debtPunitoriosImpagos + debtPunitoriosPagados) - punitoriosAnteriores;
+
       // Total coherente: lo pagado hasta ahora + lo que todavía se debe
       // Esto evita contar servicios que no están trackeados en la deuda
       totalHistorico = Math.round((record.amountPaid + debtInfo.liveCurrentTotal) * 100) / 100;
@@ -693,6 +705,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       liveBalance,
       // NUEVOS CAMPOS HISTÓRICOS
       totalPunitoriosHistoricos,  // Punitorios totales (record + deuda pagada + deuda impaga)
+      punitoriosAnteriores,
+      punitoriosActuales,
       totalAbonado,                // Total pagado (record + deuda)
       totalHistorico,              // Total real (alquiler + servicios + todos los punitorios)
       contractHasOpenDebt: contractsWithOpenDebt.has(contract.id),

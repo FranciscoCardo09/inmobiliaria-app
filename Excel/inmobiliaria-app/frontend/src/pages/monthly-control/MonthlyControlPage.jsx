@@ -880,17 +880,35 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
             ? formatCurrency(record.previousBalance)
             : '-'}
         </td>
-        <td className="text-xs text-right font-mono text-error">
-          {record.punitoryForgiven
-            ? <span className="text-success text-[10px]">Cond.</span>
-            : (record.totalPunitoriosHistoricos || record.livePunitoryAmount) > 0
-            ? <div className="flex flex-col items-end">
+        <td className="text-[11px] text-right font-mono min-w-[120px]">
+          {record.punitoryForgiven ? (
+            <span className="text-success font-semibold">Cond.</span>
+          ) : (record.punitoriosAnteriores > 0 || record.punitoriosActuales > 0) ? (
+            <div className="flex flex-col gap-1 text-error">
+              {record.punitoriosAnteriores > 0 && (
+                <div className="flex justify-between items-center w-full gap-2 opacity-80">
+                  <span className="text-[9px] uppercase tracking-wider">Atrasados</span>
+                  <span>{formatCurrency(record.punitoriosAnteriores)}</span>
+                </div>
+              )}
+              {record.punitoriosActuales > 0 && (
+                <div className="flex justify-between items-center w-full gap-2">
+                  <span className="text-[9px] uppercase tracking-wider">
+                    Actuales <span className="opacity-70 lowercase">({record.livePunitoryDays}d)</span>
+                  </span>
+                  <span>{formatCurrency(record.punitoriosActuales)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center w-full gap-2 mt-1 pt-1 border-t border-error/20 font-bold">
+                <span className="text-[9px] uppercase tracking-wider opacity-60">Total</span>
                 <span>{formatCurrency(record.totalPunitoriosHistoricos || record.livePunitoryAmount)}</span>
-                <span className="text-[9px] text-error/70">{record.livePunitoryDays}d</span>
               </div>
-            : record.punitoryAmount > 0
-            ? formatCurrency(record.punitoryAmount)
-            : '-'}
+            </div>
+          ) : record.punitoryAmount > 0 ? (
+            <span className="text-error">{formatCurrency(record.punitoryAmount)}</span>
+          ) : (
+            <span className="text-base-content/30">-</span>
+          )}
         </td>
         <td className="text-xs text-right font-mono font-bold">
           {(() => {
