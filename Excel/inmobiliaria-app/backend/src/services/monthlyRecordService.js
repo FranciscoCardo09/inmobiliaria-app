@@ -680,24 +680,32 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let totalHistorico = liveTotalDue; // Total con punitorios del record + IVA
 
     if (debtInfo && record.debt) {
-      // Punitorios pagados en el MonthlyRecord antes de ser deuda
-      const recordPunitoriosPaid = (record.transactions || []).reduce((sum, t) => sum + (t.punitoryAmount || 0), 0);
+      // Punitorios realmente pagados en el MonthlyRecord (imputación correcta en vez de sumar transacciones crudas)
+      const totalCredits = record.amountPaid + record.previousBalance;
+      const servicesCovered = Math.min(totalCredits, record.servicesTotal);
+      const ivaCovered = Math.min(totalCredits - servicesCovered, record.ivaAmount);
+      const rentCovered = Math.min(totalCredits - servicesCovered - ivaCovered, record.rentAmount);
+      const recordPunitoriosPaid = Math.max(0, totalCredits - servicesCovered - ivaCovered - rentCovered);
 
-      // Punitorios: pagados a la deuda + impagos en vivo
+      // En la deuda, dividimos claramente entre lo viejo (congelado) y lo nuevo (en vivo)
       const debtPunitoriosPagados = Math.max(0, record.debt.amountPaid - record.debt.unpaidRentAmount - (record.debt.unpaidServicesAmount || 0));
-      const debtPunitoriosImpagos = debtInfo.liveAccumulatedPunitory || 0;
-      totalPunitoriosHistoricos = recordPunitoriosPaid + debtPunitoriosPagados + debtPunitoriosImpagos;
+      
+      // El total acumulado impago de la deuda que ya existía (antes de nuevos punitorios)
+      const unpaidAccumulated = debtInfo.accumulatedPunitory - debtPunitoriosPagados;
+      
+      // Punitorios Anteriores: Lo pagado históricamente + lo viejo no pagado
+      punitoriosAnteriores = recordPunitoriosPaid + debtPunitoriosPagados + Math.max(0, unpaidAccumulated);
+      
+      // Punitorios Actuales: Exclusivamente los nuevos punitorios en vivo
+      punitoriosActuales = debtInfo.newPunitoryAmount || 0;
 
-      // Split for display: The base debt holds its historical punitorios in accumulatedPunitory
-      // and calculateDebtPunitory gave us the new live ones in newPunitoryAmount
-      punitoriosAnteriores = recordPunitoriosPaid + debtPunitoriosPagados + (debtInfo.unpaidAccumulatedPunitory || 0);
-      punitoriosActuales = totalPunitoriosHistoricos - punitoriosAnteriores;
+      // El total de punitorios en la historia
+      totalPunitoriosHistoricos = punitoriosAnteriores + punitoriosActuales;
 
-      // Corrección de días de mora para mostrar en el frontend (desde la deuda)
+      // Corrección de días de mora para mostrar en el frontend
       livePunitoryDays = debtInfo.livePunitoryDays || 0;
 
       // Total coherente: lo pagado hasta ahora + lo que todavía se debe
-      // Esto evita contar servicios que no están trackeados en la deuda
       totalHistorico = Math.round((record.amountPaid + debtInfo.liveCurrentTotal) * 100) / 100;
     }
 
