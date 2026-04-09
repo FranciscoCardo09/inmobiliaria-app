@@ -510,16 +510,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         if (newBalance >= -0.01) {
           updateData.isPaid = true;
           updateData.status = 'COMPLETE';
+          updateData.isCancelled = true;
           if (!record.fullPaymentDate) {
             updateData.fullPaymentDate = record.transactions?.[record.transactions.length - 1]?.paymentDate || new Date();
           }
         } else if (record.amountPaid > 0) {
           updateData.isPaid = false;
           updateData.status = 'PARTIAL';
+          updateData.isCancelled = false;
           updateData.fullPaymentDate = null;
         } else {
           updateData.isPaid = false;
           updateData.status = 'PENDING';
+          updateData.isCancelled = false;
           updateData.fullPaymentDate = null;
         }
 

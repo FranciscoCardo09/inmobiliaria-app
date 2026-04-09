@@ -121,7 +121,8 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
         lastPaymentDate
       );
 
-      currentPunitoryAmount = liveResult.amount;
+      // ADD new punitorios accrued since last payment to the ALREADY accumulated ones
+      currentPunitoryAmount = (monthlyRecord.punitoryAmount || 0) + liveResult.amount;
     } catch (error) {
       console.error('Error calculating live punitorios:', error);
       // Fallback to frozen value if calculation fails
