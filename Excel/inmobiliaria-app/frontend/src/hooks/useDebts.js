@@ -43,6 +43,7 @@ export const useDebts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId, debtId] }),
       queryClient.invalidateQueries({ queryKey: ['paymentTransactions', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] }),
     ])
   }
 

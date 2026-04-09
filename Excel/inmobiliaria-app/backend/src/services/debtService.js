@@ -137,8 +137,8 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   const { unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, totalUnpaid } = calculateImputation(recordWithCurrentPunitorios);
 
-  // Si no queda nada impago (ni alquiler ni punitorios), no crear deuda
-  if (totalUnpaid <= 0) {
+  // Si no queda nada impago (ni alquiler ni punitorios), o queda menos de $1 por decimales, no crear deuda
+  if (totalUnpaid <= 1) {
     return null;
   }
 
