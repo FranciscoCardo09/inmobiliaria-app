@@ -29,9 +29,11 @@ function calculateImputation(monthlyRecord) {
   const punitoryAmount = monthlyRecord.punitoryAmount || 0;
   const ivaAmount = monthlyRecord.ivaAmount || 0;
   const amountPaid = monthlyRecord.amountPaid || 0;
+  const previousBalance = monthlyRecord.previousBalance || 0;
 
   // Imputar primero a servicios, luego a IVA, luego a alquiler, luego a punitorios
-  let remaining = amountPaid;
+  // previousBalance (saldo a favor anterior) cuenta como crédito igual que amountPaid
+  let remaining = amountPaid + previousBalance;
 
   // 1. Cubrir servicios
   const servicesCovered = Math.min(remaining, servicesTotal);
@@ -87,12 +89,13 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   if (monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
     try {
-      // Calculate unpaid rent (payments cover services first, then rent)
+      // Calculate unpaid rent (payments cover services + IVA first, then rent)
       const amountPaid = monthlyRecord.amountPaid || 0;
       const servicesTotal = monthlyRecord.servicesTotal || 0;
+      const ivaAmount = monthlyRecord.ivaAmount || 0;
       const prevBalance = monthlyRecord.previousBalance || 0;
       const totalCredits = amountPaid + prevBalance;
-      const paidTowardRent = Math.max(totalCredits - servicesTotal, 0);
+      const paidTowardRent = Math.max(totalCredits - servicesTotal - ivaAmount, 0);
       const unpaidRent = Math.max(monthlyRecord.rentAmount - paidTowardRent, 0);
 
       // Get last payment date (if partial payment was made)
@@ -226,17 +229,21 @@ const preloadDebtDependencies = async (debts) => {
 const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
   const accumulatedPunitory = debt.accumulatedPunitory || 0;
 
-  // For legacy debts created before unpaidServicesAmount was tracked, load from monthly record
+  // Para deudas donde unpaidServicesAmount puede estar mal calculado (legacy o corruptas),
+  // recalcular usando calculateImputation solo cuando no se hizo ningún pago a la deuda aún.
   let unpaidServicesAmount = debt.unpaidServicesAmount || 0;
-  if (unpaidServicesAmount === 0 && debt.monthlyRecordId && debt.amountPaid === 0) {
+  if (debt.monthlyRecordId && debt.amountPaid === 0) {
     const mr = await prisma.monthlyRecord.findUnique({
       where: { id: debt.monthlyRecordId },
-      select: { servicesTotal: true },
+      select: { servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
     });
-    if (mr?.servicesTotal > 0) {
-      unpaidServicesAmount = mr.servicesTotal;
-      // Persist so future calls don't need the lookup
-      await prisma.debt.update({ where: { id: debt.id }, data: { unpaidServicesAmount } });
+    if (mr && mr.servicesTotal > 0) {
+      const imputation = calculateImputation(mr);
+      const correctUnpaidServices = imputation.unpaidServices;
+      if (correctUnpaidServices !== unpaidServicesAmount) {
+        unpaidServicesAmount = correctUnpaidServices;
+        await prisma.debt.update({ where: { id: debt.id }, data: { unpaidServicesAmount } });
+      }
     }
   }
   const totalBase = round2(debt.unpaidRentAmount + unpaidServicesAmount);
