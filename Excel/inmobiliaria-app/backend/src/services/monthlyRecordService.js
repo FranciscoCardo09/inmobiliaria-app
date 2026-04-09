@@ -574,7 +574,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let debtInfo = null;
 
     if (record.debt && record.debt.status !== 'PAID') {
-      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(record.debt);
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, newPunitoryAmount } = await calculateDebtPunitory(record.debt);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
@@ -582,11 +582,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + amount,
         remainingDebt,
         unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
+        newPunitoryAmount: newPunitoryAmount || 0,
         punitoryFromDate: startDate,
         punitoryToDate: endDate,
       };
     } else if (record.debt) {
-      debtInfo = { ...record.debt, liveCurrentTotal: 0, liveAccumulatedPunitory: 0, livePunitoryDays: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
+      debtInfo = { ...record.debt, liveCurrentTotal: 0, liveAccumulatedPunitory: 0, livePunitoryDays: 0, remainingDebt: 0, newPunitoryAmount: 0, punitoryFromDate: null, punitoryToDate: null };
     }
 
     // Calculate LIVE punitorios for display
