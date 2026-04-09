@@ -317,7 +317,7 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     const unpaidPunitory = round2(Math.max(0, totalPunitory - amountPaidToPunitory));
 
     if (unpaidPunitory <= 0) {
-      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, remainingDebt: 0, remainingServices: 0, remainingRent: 0, startDate: null, endDate: null };
+      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, unpaidAccumulatedPunitory: 0, remainingDebt: 0, remainingServices: 0, remainingRent: 0, startDate: null, endDate: null };
     }
 
     return {
@@ -325,6 +325,7 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       amount: unpaidPunitory,
       newPunitoryAmount: newPunitorios.amount,
       accumulatedPunitory,
+      unpaidAccumulatedPunitory: 0,
       remainingDebt: 0,
       remainingServices: 0,
       remainingRent: 0,
@@ -358,11 +359,22 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     effectiveLastPaymentDate
   );
 
+  // Punitorios históricos impagos que no están cubiertos por el cálculo live.
+  // Cuando amountPaid === 0: liveAccumulatedPunitory ya cubre desde punitoryStartDate,
+  //   por lo que accumulatedPunitory está contenido en él → no sumar.
+  // Cuando amountPaid > 0: liveAccumulatedPunitory solo cuenta desde lastPaymentDate,
+  //   y accumulatedPunitory acumulado hasta ese pago puede no haber sido pagado → sí sumar.
+  const paidToPunitory = round2(Math.max(debt.amountPaid - totalBase, 0));
+  const unpaidAccumulatedPunitory = debt.amountPaid > 0
+    ? round2(Math.max(accumulatedPunitory - paidToPunitory, 0))
+    : 0;
+
   return {
     days: result.days,
     amount: result.amount,
     newPunitoryAmount: result.amount,
     accumulatedPunitory,
+    unpaidAccumulatedPunitory,
     remainingDebt: remainingBase,
     remainingServices,
     remainingRent,
@@ -533,13 +545,14 @@ const getOpenDebts = async (groupId, contractId = null) => {
   const preloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
 
   return Promise.all(debts.map(async (debt) => {
-    const { amount: currentPunitory, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
       livePunitoryDays: days,
-      liveCurrentTotal: remainingDebt + currentPunitory,
+      liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
       remainingDebt,
+      unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
       punitoryFromDate: startDate,
       punitoryToDate: endDate,
     };
@@ -576,13 +589,14 @@ const getDebts = async (groupId, filters = {}) => {
   return Promise.all(debts.map(async (debt) => {
     if (debt.status === 'PAID') return { ...debt, liveCurrentTotal: 0, livePunitoryDays: 0, liveAccumulatedPunitory: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
 
-    const { amount: currentPunitory, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
       livePunitoryDays: days,
-      liveCurrentTotal: remainingDebt + currentPunitory,
+      liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
       remainingDebt,
+      unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
       punitoryFromDate: startDate,
       punitoryToDate: endDate,
     };
@@ -639,7 +653,7 @@ const canPayCurrentMonth = async (groupId, contractId) => {
   // Batch-load dependencies and recalculate punitorios
   const preloaded = await preloadDebtDependencies(openDebts);
   const debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
-    const { amount: currentPunitory, remainingDebt } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(), preloaded);
     return {
       id: debt.id,
       periodLabel: debt.periodLabel,
@@ -647,7 +661,7 @@ const canPayCurrentMonth = async (groupId, contractId) => {
       periodYear: debt.periodYear,
       remainingDebt,
       punitory: currentPunitory,
-      total: remainingDebt + currentPunitory,
+      total: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
     };
   }));
 

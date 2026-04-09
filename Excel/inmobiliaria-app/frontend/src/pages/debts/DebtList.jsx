@@ -230,7 +230,9 @@ export default function DebtList() {
                       {formatCurrency(debt.unpaidRentAmount)}
                     </td>
                     <td className="text-[11px] text-right font-mono text-base-content/40">
-                      {debt.accumulatedPunitory > 0 ? formatCurrency(debt.accumulatedPunitory) : '-'}
+                      {debt.amountPaid > 0 && debt.accumulatedPunitory > 0
+                        ? formatCurrency(debt.accumulatedPunitory)
+                        : '-'}
                     </td>
                     <td className="text-xs text-right font-mono text-error">
                       {debt.status !== 'PAID'

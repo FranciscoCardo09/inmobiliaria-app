@@ -571,13 +571,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let debtInfo = null;
 
     if (record.debt && record.debt.status !== 'PAID') {
-      const { amount, days, remainingDebt, startDate, endDate } = await calculateDebtPunitory(record.debt);
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(record.debt);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
         livePunitoryDays: days,
-        liveCurrentTotal: remainingDebt + amount,
+        liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + amount,
         remainingDebt,
+        unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
         punitoryFromDate: startDate,
         punitoryToDate: endDate,
       };
