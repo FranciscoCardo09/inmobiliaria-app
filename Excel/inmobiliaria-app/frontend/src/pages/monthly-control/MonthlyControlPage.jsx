@@ -884,30 +884,34 @@ const MonthlyRecordRow = memo(function MonthlyRecordRow({
           {record.punitoryForgiven ? (
             <span className="text-success font-semibold">Cond.</span>
           ) : (record.punitoriosAnteriores > 0 || record.punitoriosActuales > 0) ? (
-            <div className="flex flex-col gap-1 text-error">
-              {record.punitoriosAnteriores > 0 && (
-                <div className="flex justify-between items-center w-full gap-2 opacity-80">
-                  <span className="text-[9px] uppercase tracking-wider">Atrasados</span>
-                  <span>{formatCurrency(record.punitoriosAnteriores)}</span>
-                </div>
-              )}
-              {record.punitoriosActuales > 0 && (
-                <div className="flex justify-between items-center w-full gap-2">
-                  <span className="text-[9px] uppercase tracking-wider">
-                    Actuales <span className="opacity-70 lowercase">({record.livePunitoryDays}d)</span>
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1.5">
+                {record.punitoriosAnteriores > 0 && (
+                  <>
+                    <div className="flex flex-col items-end" title="Punitorios acumulados atrasados">
+                      <span className="text-[9px] text-base-content/50 leading-none uppercase tracking-wider">Acumulados</span>
+                      <span className="text-[10px] text-base-content/50">{formatCurrency(record.punitoriosAnteriores)}</span>
+                    </div>
+                    <span className="text-[10px] text-base-content/30">+</span>
+                  </>
+                )}
+                <div className="flex flex-col items-end text-error">
+                  <span className="text-[9px] leading-none opacity-80 uppercase tracking-wider">
+                    Actuales {record.livePunitoryDays > 0 ? `(${record.livePunitoryDays}d)` : ''}
                   </span>
-                  <span>{formatCurrency(record.punitoriosActuales)}</span>
+                  <span className="font-bold text-sm">{formatCurrency(record.punitoriosActuales)}</span>
+                </div>
+              </div>
+              {(record.punitoriosAnteriores > 0 || record.punitoriosActuales > 0) && (
+                <div className="text-[10px] text-error font-bold mt-0.5 pt-0.5 border-t border-error/20 w-fit pl-4">
+                  Total: {formatCurrency(record.totalPunitoriosHistoricos || record.livePunitoryAmount)}
                 </div>
               )}
-              <div className="flex justify-between items-center w-full gap-2 mt-1 pt-1 border-t border-error/20 font-bold">
-                <span className="text-[9px] uppercase tracking-wider opacity-60">Total</span>
-                <span>{formatCurrency(record.totalPunitoriosHistoricos || record.livePunitoryAmount)}</span>
-              </div>
             </div>
           ) : record.punitoryAmount > 0 ? (
             <span className="text-error">{formatCurrency(record.punitoryAmount)}</span>
           ) : (
-            <span className="text-base-content/30">-</span>
+             <span className="text-base-content/30">-</span>
           )}
         </td>
         <td className="text-xs text-right font-mono font-bold">
