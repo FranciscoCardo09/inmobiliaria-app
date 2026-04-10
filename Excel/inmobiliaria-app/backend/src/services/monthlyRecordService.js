@@ -469,7 +469,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     debtPreloaded.monthlyRecordMap.set(r.id, r);
   }
 
-  const updatePromises = [];
+  const updatesToPerform = [];
   const records = [];
 
   for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
@@ -541,11 +541,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         }
 
         // Optimize: Don't perform a heavy include on every update inside a loop.
-        // Parallelize updates to avoid sequential network roundtrips.
-        updatePromises.push(prisma.monthlyRecord.update({
-          where: { id: record.id },
+        // Queue data for batch chunked update to avoid sequential performance hit
+        // and avoid saturating DB connection pool.
+        updatesToPerform.push({
+          id: record.id,
           data: updateData
-        }));
+        });
         
         // Update in-memory record so subsequent logic uses correct values
         Object.assign(record, updateData);
@@ -812,10 +813,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     });
   }
 
-  // Wait for all non-nested updates to complete
-  if (updatePromises.length > 0) {
-    console.log(`[monthlyRecords] Awaiting ${updatePromises.length} parallel updates`);
-    await Promise.all(updatePromises);
+  // Perform non-nested updates in small chunks to avoid pool exhaustion
+  if (updatesToPerform.length > 0) {
+    const CHUNK_SIZE = 5;
+    console.log(`[monthlyRecords] Performing ${updatesToPerform.length} updates in chunks of ${CHUNK_SIZE}`);
+    for (let i = 0; i < updatesToPerform.length; i += CHUNK_SIZE) {
+      const chunk = updatesToPerform.slice(i, i + CHUNK_SIZE);
+      await Promise.all(chunk.map(update => 
+        prisma.monthlyRecord.update({
+          where: { id: update.id },
+          data: update.data
+        })
+      ));
+    }
   }
 
   return records;

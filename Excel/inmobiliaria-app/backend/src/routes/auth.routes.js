@@ -52,8 +52,10 @@ router.get(
   async (req, res) => {
     try {
       const user = req.user;
+      console.log(`[auth] Google callback successful for user: ${user?.email || 'unknown'}`);
 
       if (!user) {
+        console.error('[auth] No user in request after passport authentication');
         return res.redirect(`${config.frontendUrl}/login?error=no_user`);
       }
 
@@ -68,6 +70,7 @@ router.get(
           expiresAt: getExpiryDate(7),
         },
       });
+      console.log('[auth] Refresh token created');
 
       // Get user groups
       const groups = await prisma.userGroup.findMany({
@@ -82,6 +85,7 @@ router.get(
           },
         },
       });
+      console.log(`[auth] User groups fetched: ${groups.length}`);
 
       // Redirect to frontend with tokens in URL params
       // Frontend will extract and store them
@@ -100,9 +104,10 @@ router.get(
         }))),
       });
 
+      console.log(`[auth] Redirecting to frontend: ${config.frontendUrl}/auth/callback`);
       res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
     } catch (error) {
-      console.error('Google callback error:', error);
+      console.error('[auth] Google callback fatal error:', error);
       res.redirect(`${config.frontendUrl}/login?error=callback_failed`);
     }
   }
