@@ -208,26 +208,32 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 const preloadDebtDependencies = async (debts) => {
   const contractIds = [...new Set(debts.map(d => d.contractId))];
   const years = [...new Set(debts.map(d => d.periodYear))];
+  const monthlyRecordIds = debts.filter(d => d.monthlyRecordId && d.amountPaid === 0).map(d => d.monthlyRecordId);
 
-  const [contracts, ...holidayArrays] = await Promise.all([
+  const [contracts, monthlyRecords, ...holidayArrays] = await Promise.all([
     prisma.contract.findMany({
       where: { id: { in: contractIds } },
       select: { id: true, punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true },
     }),
+    monthlyRecordIds.length > 0 ? prisma.monthlyRecord.findMany({
+      where: { id: { in: monthlyRecordIds } },
+      select: { id: true, servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
+    }) : Promise.resolve([]),
     ...years.map(year => getHolidaysForYear(year)),
   ]);
 
   const contractMap = new Map(contracts.map(c => [c.id, c]));
   const holidayMap = new Map(years.map((year, i) => [year, holidayArrays[i]]));
+  const monthlyRecordMap = new Map(monthlyRecords.map(m => [m.id, m]));
 
-  return { contractMap, holidayMap };
+  return { contractMap, holidayMap, monthlyRecordMap };
 };
 
 /**
  * Calcular punitorios acumulados para una deuda a una fecha dada.
  * Accepts optional pre-loaded contract and holidays to avoid DB queries (batch mode).
  */
-const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null) => {
+const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded = null, skipUpdate = false) => {
   let accumulatedPunitory = debt.accumulatedPunitory || 0;
 
   // Para deudas donde los montos impagos pueden estar mal calculados (legacy o corruptos),
@@ -235,10 +241,18 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
   let unpaidServicesAmount = debt.unpaidServicesAmount || 0;
   let unpaidRentAmount = debt.unpaidRentAmount || 0;
   if (debt.monthlyRecordId && debt.amountPaid === 0) {
-    const mr = await prisma.monthlyRecord.findUnique({
-      where: { id: debt.monthlyRecordId },
-      select: { servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
-    });
+    let mr = null;
+    if (preloaded?.monthlyRecordMap) {
+      mr = preloaded.monthlyRecordMap.get(debt.monthlyRecordId);
+    }
+    
+    if (!mr) {
+      mr = await prisma.monthlyRecord.findUnique({
+        where: { id: debt.monthlyRecordId },
+        select: { servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
+      });
+    }
+    
     if (mr) {
       const imputation = calculateImputation(mr);
       const correctUnpaidServices = imputation.unpaidServices;
@@ -265,7 +279,9 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
         
         // If everything is paid, we could close the debt, but we just set values.
         // The display will show $0.
-        await prisma.debt.update({ where: { id: debt.id }, data: updateData });
+        if (!skipUpdate) {
+          await prisma.debt.update({ where: { id: debt.id }, data: updateData });
+        }
       }
     }
   }
@@ -558,7 +574,7 @@ const getOpenDebts = async (groupId, contractId = null) => {
   const preloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
 
   return Promise.all(debts.map(async (debt) => {
-    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded, true);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
@@ -602,7 +618,7 @@ const getDebts = async (groupId, filters = {}) => {
   return Promise.all(debts.map(async (debt) => {
     if (debt.status === 'PAID') return { ...debt, liveCurrentTotal: 0, livePunitoryDays: 0, liveAccumulatedPunitory: 0, remainingDebt: 0, punitoryFromDate: null, punitoryToDate: null };
 
-    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } = await calculateDebtPunitory(debt, new Date(), preloaded, true);
     return {
       ...debt,
       liveAccumulatedPunitory: currentPunitory,
@@ -666,7 +682,7 @@ const canPayCurrentMonth = async (groupId, contractId) => {
   // Batch-load dependencies and recalculate punitorios
   const preloaded = await preloadDebtDependencies(openDebts);
   const debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
-    const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(), preloaded);
+    const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(), preloaded, true);
     return {
       id: debt.id,
       periodLabel: debt.periodLabel,

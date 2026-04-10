@@ -456,6 +456,20 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   });
   const contractsWithOpenDebt = new Set(openDebtsForContracts.map(d => d.contractId));
 
+  // --- BATCH 6: Preload all data needed for live debt/punitory calculations (Avoids N+1) ---
+  const allDebts = [...recordsByContractId.values()].map(r => r.debt).filter(Boolean);
+  const { preloadDebtDependencies } = require('./debtService');
+  const debtPreloaded = allDebts.length > 0 
+    ? await preloadDebtDependencies(allDebts) 
+    : { contractMap: new Map(), holidayMap: new Map(), monthlyRecordMap: new Map() };
+  
+  // Inject current period data into the preloaded maps
+  debtPreloaded.holidayMap.set(year, holidays);
+  for (const r of recordsByContractId.values()) {
+    debtPreloaded.monthlyRecordMap.set(r.id, r);
+  }
+
+  const updatePromises = [];
   const records = [];
 
   for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
@@ -526,26 +540,15 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           updateData.fullPaymentDate = null;
         }
 
-        record = await prisma.monthlyRecord.update({
+        // Optimize: Don't perform a heavy include on every update inside a loop.
+        // Parallelize updates to avoid sequential network roundtrips.
+        updatePromises.push(prisma.monthlyRecord.update({
           where: { id: record.id },
-          data: updateData,
-          include: {
-            services: {
-              include: {
-                conceptType: { select: { id: true, name: true, label: true, category: true } },
-              },
-            },
-            transactions: {
-              include: { concepts: true },
-              orderBy: { createdAt: 'asc' },
-            },
-            debt: {
-              include: {
-                payments: { orderBy: { createdAt: 'asc' } },
-              },
-            },
-          },
-        });
+          data: updateData
+        }));
+        
+        // Update in-memory record so subsequent logic uses correct values
+        Object.assign(record, updateData);
       }
     }
 
@@ -574,7 +577,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let debtInfo = null;
 
     if (record.debt && record.debt.status !== 'PAID') {
-      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, newPunitoryAmount } = await calculateDebtPunitory(record.debt);
+      // Optimize: skip individual debt updates and use preloaded data to avoid N+1 queries.
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, newPunitoryAmount } = await calculateDebtPunitory(record.debt, new Date(), debtPreloaded, true);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
@@ -806,6 +810,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       })(),
       isPenaltyRecord: !!isPenaltyRecord,
     });
+  }
+
+  // Wait for all non-nested updates to complete
+  if (updatePromises.length > 0) {
+    console.log(`[monthlyRecords] Awaiting ${updatePromises.length} parallel updates`);
+    await Promise.all(updatePromises);
   }
 
   return records;
