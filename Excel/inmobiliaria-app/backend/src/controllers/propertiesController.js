@@ -38,7 +38,9 @@ const getProperties = async (req, res, next) => {
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
         },
-        transferBeneficiary: { select: { id: true, name: true, dni: true } },
+        transferBeneficiary: {
+          select: { id: true, name: true, dni: true },
+        },
       },
       orderBy: { address: 'asc' },
       take: limit ? parseInt(limit) : 500,
@@ -64,7 +66,9 @@ const getPropertyById = async (req, res, next) => {
         },
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
-        transferBeneficiary: { select: { id: true, name: true, dni: true } },
+        },
+        transferBeneficiary: {
+          select: { id: true, name: true, dni: true },
         },
       },
     });
@@ -137,7 +141,6 @@ const createProperty = async (req, res, next) => {
         accountNumber,
         squareMeters: squareMeters ? parseFloat(squareMeters) : null,
         rooms: rooms ? parseInt(rooms, 10) : null,
-        transferBeneficiary: { select: { id: true, name: true, dni: true } },
         bathrooms: bathrooms ? parseInt(bathrooms, 10) : null,
         floor,
         apartment,
@@ -150,6 +153,9 @@ const createProperty = async (req, res, next) => {
         },
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
+        },
+        transferBeneficiary: {
+          select: { id: true, name: true, dni: true },
         },
       },
     });
@@ -216,7 +222,6 @@ const updateProperty = async (req, res, next) => {
       }
     }
 
-        transferBeneficiary: { select: { id: true, name: true, dni: true } },
     const updated = await prisma.property.update({
       where: { id },
       data: {
@@ -241,6 +246,9 @@ const updateProperty = async (req, res, next) => {
         },
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
+        },
+        transferBeneficiary: {
+          select: { id: true, name: true, dni: true },
         },
       },
     });

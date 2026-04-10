@@ -289,7 +289,6 @@ export const PropertyForm = () => {
             <p className="text-xs text-base-content/50 mt-1">
               * Si se deja vacío, se usará el beneficiario del dueño (o el dueño mismo).
             </p>
-          </div>
 
           {/* Actions */}
           <div className="flex gap-4">
