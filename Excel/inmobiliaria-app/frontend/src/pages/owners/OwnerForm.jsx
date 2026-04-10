@@ -34,7 +34,8 @@ export const OwnerForm = () => {
     name: '', dni: '',
     phones: [''], emails: [''],
     bankName: '', bankHolder: '', bankCuit: '', bankAccountType: '', bankAccountNumber: '', bankCbu: '', bankAlias: '',
-    transferBeneficiaryId: ''
+    transferBeneficiaryId: '',
+    propertyIdsForBeneficiary: []
   })
   const [errors, setErrors] = useState({})
 
@@ -53,6 +54,11 @@ export const OwnerForm = () => {
         bankCbu: owner.bankCbu || '',
         bankAlias: owner.bankAlias || '',
         transferBeneficiaryId: owner.transferBeneficiaryId || '',
+        propertyIdsForBeneficiary: (owner.properties || [])
+          .filter(p => p.transferBeneficiaryId && p.transferBeneficiaryId !== owner.transferBeneficiaryId)
+          .length > 0 
+            ? (owner.properties || []).filter(p => p.transferBeneficiaryId).map(p => p.id)
+            : (owner.properties || []).filter(p => p.transferBeneficiaryId === owner.transferBeneficiaryId && p.transferBeneficiaryId != null).map(p => p.id)
       })
     }
   }, [owner])
@@ -136,6 +142,7 @@ export const OwnerForm = () => {
       bankCbu: formData.bankCbu,
       bankAlias: formData.bankAlias,
       transferBeneficiaryId: formData.transferBeneficiaryId || null,
+      propertyIdsForBeneficiary: formData.propertyIdsForBeneficiary,
     }
 
     if (isEditing) {
@@ -260,6 +267,34 @@ export const OwnerForm = () => {
               }}
               placeholder="Seleccionar propietario beneficiario..."
             />
+
+            {formData.transferBeneficiaryId && owner?.properties?.length > 0 && (
+              <div className="bg-base-200 p-4 rounded-lg space-y-3">
+                <p className="text-sm font-medium">¿A qué propiedades aplica este beneficiario?</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {owner.properties.map((p) => (
+                    <label key={p.id} className="flex items-center gap-3 cursor-pointer hover:bg-base-300 p-2 rounded transition-colors">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-primary checkbox-sm"
+                        checked={formData.propertyIdsForBeneficiary.includes(p.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          const updated = checked
+                            ? [...formData.propertyIdsForBeneficiary, p.id]
+                            : formData.propertyIdsForBeneficiary.filter(id => id !== p.id)
+                          setFormData({ ...formData, propertyIdsForBeneficiary: updated })
+                        }}
+                      />
+                      <span className="text-sm">{p.address}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-base-content/50">
+                  * Si no se marca ninguna, se usará el dueño por defecto para todas sus propiedades (o el beneficiario global si se estableció arriba).
+                </p>
+              </div>
+            )}
           </div>
 
           {isEditing && owner?.properties?.length > 0 && (

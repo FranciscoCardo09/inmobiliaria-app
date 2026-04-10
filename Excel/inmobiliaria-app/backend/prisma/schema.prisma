@@ -235,6 +235,7 @@ model Owner {
   // Relations
   group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
   properties  Property[]
+  beneficiaryOfProperties Property[] @relation("PropertyBeneficiary")
 
   @@unique([groupId, dni])
   @@index([groupId])
@@ -267,8 +268,13 @@ model Property {
   owner           Owner?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   contracts       Contract[]
 
+  // Beneficiario de transferencia específico para esta propiedad (opcional, sobresale al del dueño)
+  transferBeneficiaryId String? @map("transfer_beneficiary_id")
+  transferBeneficiary   Owner?  @relation("PropertyBeneficiary", fields: [transferBeneficiaryId], references: [id], onDelete: SetNull)
+
   @@index([groupId])
   @@index([ownerId])
+  @@index([transferBeneficiaryId])
   @@index([categoryId])
   @@map("properties")
 }

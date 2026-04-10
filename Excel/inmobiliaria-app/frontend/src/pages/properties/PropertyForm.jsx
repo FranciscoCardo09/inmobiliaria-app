@@ -38,6 +38,7 @@ export const PropertyForm = () => {
     floor: '',
     apartment: '',
     observations: '',
+    transferBeneficiaryId: '',
   })
   const [errors, setErrors] = useState({})
 
@@ -57,6 +58,7 @@ export const PropertyForm = () => {
         floor: property.floor || '',
         apartment: property.apartment || '',
         observations: property.observations || '',
+        transferBeneficiaryId: property.transferBeneficiaryId || '',
       })
     }
   }, [property])
@@ -89,6 +91,7 @@ export const PropertyForm = () => {
       squareMeters: formData.squareMeters ? parseFloat(formData.squareMeters) : null,
       rooms: formData.rooms ? parseInt(formData.rooms, 10) : null,
       bathrooms: formData.bathrooms ? parseInt(formData.bathrooms, 10) : null,
+      transferBeneficiaryId: formData.transferBeneficiaryId || null,
     }
 
     if (isEditing) {
@@ -257,8 +260,6 @@ export const PropertyForm = () => {
                 placeholder="A, B, C, etc."
               />
             </div>
-
-            <div>
               <label className="label">
                 <span className="label-text">Observaciones</span>
               </label>
@@ -270,6 +271,24 @@ export const PropertyForm = () => {
                 placeholder="Notas adicionales sobre la propiedad..."
               />
             </div>
+
+            <SearchableSelect
+              label="Beneficiario de Transferencia (Opcional)"
+              name="transferBeneficiaryId"
+              options={owners.map((owner) => ({
+                value: owner.id,
+                label: `${owner.name} - DNI: ${owner.dni}`,
+              }))}
+              value={formData.transferBeneficiaryId}
+              onChange={(val) => {
+                const value = val?.target?.value ?? val ?? ''
+                setFormData({ ...formData, transferBeneficiaryId: value })
+              }}
+              placeholder="Seleccionar beneficiario para esta propiedad..."
+            />
+            <p className="text-xs text-base-content/50 mt-1">
+              * Si se deja vacío, se usará el beneficiario del dueño (o el dueño mismo).
+            </p>
           </div>
 
           {/* Actions */}

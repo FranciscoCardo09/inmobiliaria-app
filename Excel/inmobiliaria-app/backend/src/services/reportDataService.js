@@ -86,11 +86,13 @@ const getEmpresaData = async (groupId) => {
   };
 };
 
-// Helper: resolve bank data from owner or its transfer beneficiary
-const resolveOwnerBank = (owner) => {
-  const bankSource = owner?.transferBeneficiary?.bankName
-    ? owner.transferBeneficiary
-    : owner;
+// Helper: resolve bank data from property beneficiary, owner beneficiary, or owner itself
+const resolveOwnerBank = (owner, property) => {
+  // Priority: 1. Property specific beneficiary, 2. Owner default beneficiary, 3. Owner itself
+  const bankSource = property?.transferBeneficiary?.bankName
+    ? property.transferBeneficiary
+    : (owner?.transferBeneficiary?.bankName ? owner.transferBeneficiary : owner);
+
   if (!bankSource?.bankName) return null;
   return {
     nombre: bankSource.bankName,
@@ -124,7 +126,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
-            include: { owner: { include: { transferBeneficiary: true } } },
+            include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true },
           },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
         },
@@ -151,7 +153,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
             include: {
               tenant: true,
               contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-              property: { include: { owner: { include: { transferBeneficiary: true } } } },
+              property: { include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true } },
               rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
             },
           },
@@ -313,7 +315,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       ? { nombre: owner?.name || 'Propietario', dni: owner?.dni || '', email: owner?.email || '', telefono: owner?.phone || '', esPropietario: true }
       : { nombre: getTenantsName(contract), dni: (getPrimaryTenant(contract))?.dni || '', email: (getPrimaryTenant(contract))?.email || '', telefono: (getPrimaryTenant(contract))?.phone || '' },
     propiedad: { direccion: contract.property.address, piso: contract.property.floor, depto: contract.property.apartment },
-    propietario: { nombre: owner?.name || 'Sin propietario', dni: owner?.dni || '', banco: resolveOwnerBank(owner) },
+    propietario: { nombre: owner?.name || 'Sin propietario', dni: owner?.dni || '', banco: resolveOwnerBank(owner, contract.property) },
     periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}`, mesContrato: monthlyRecord.monthNumber, mesVencido, anioVencido, labelVencido: `${MONTH_NAMES[mesVencido]} ${anioVencido}` },
     conceptos,
     serviciosDisponibles,
@@ -385,7 +387,12 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         include: {
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-          property: { include: { owner: { include: { transferBeneficiary: true } } } },
+          property: { 
+            include: { 
+              owner: { include: { transferBeneficiary: true } },
+              transferBeneficiary: true 
+            } 
+          },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
         },
       },
@@ -680,7 +687,14 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
-            include: { owner: true },
+            include: { 
+              owner: {
+                select: { id: true, name: true, dni: true, phone: true },
+              },
+              transferBeneficiary: {
+                select: { id: true, name: true, dni: true },
+              },
+            },
           },
         },
       },
@@ -1105,5 +1119,6 @@ module.exports = {
   getControlMensualData,
   getImpuestosData,
   getVencimientosData,
+  resolveOwnerBank,
   MONTH_NAMES,
 };

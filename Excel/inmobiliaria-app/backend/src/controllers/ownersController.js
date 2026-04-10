@@ -48,7 +48,7 @@ const getOwnerById = async (req, res, next) => {
       where: { id },
       include: {
         properties: {
-          select: { id: true, address: true, isActive: true },
+          select: { id: true, address: true, isActive: true, transferBeneficiaryId: true },
           orderBy: { address: 'asc' },
         },
         transferBeneficiary: { select: { id: true, name: true } },
@@ -70,7 +70,7 @@ const getOwnerById = async (req, res, next) => {
 const createOwner = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId, propertyIdsForBeneficiary } = req.body;
 
     if (!name || !dni || !phone) {
       return ApiResponse.badRequest(res, 'Nombre, DNI y teléfono son requeridos');
@@ -107,7 +107,7 @@ const createOwner = async (req, res, next) => {
 const updateOwner = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId } = req.body;
+    const { name, dni, phone, email, bankName, bankHolder, bankCuit, bankAccountType, bankAccountNumber, bankCbu, bankAlias, transferBeneficiaryId, propertyIdsForBeneficiary } = req.body;
 
     const owner = await prisma.owner.findUnique({ where: { id } });
     if (!owner || owner.groupId !== groupId) {
@@ -152,6 +152,29 @@ const updateOwner = async (req, res, next) => {
       },
       include: { _count: { select: { properties: true } } },
     });
+
+    // Bulk update properties if provided
+    if (propertyIdsForBeneficiary && Array.isArray(propertyIdsForBeneficiary)) {
+      // 1. Set beneficiary for selected properties
+      await prisma.property.updateMany({
+        where: {
+          id: { in: propertyIdsForBeneficiary },
+          ownerId: id,
+          groupId,
+        },
+        data: { transferBeneficiaryId: transferBeneficiaryId || null },
+      });
+
+      // 2. Clear beneficiary for other properties of this owner
+      await prisma.property.updateMany({
+        where: {
+          id: { notIn: propertyIdsForBeneficiary },
+          ownerId: id,
+          groupId,
+        },
+        data: { transferBeneficiaryId: null },
+      });
+    }
 
     return ApiResponse.success(res, updated, 'Dueño actualizado');
   } catch (error) {

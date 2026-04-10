@@ -38,6 +38,7 @@ const getProperties = async (req, res, next) => {
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
         },
+        transferBeneficiary: { select: { id: true, name: true, dni: true } },
       },
       orderBy: { address: 'asc' },
       take: limit ? parseInt(limit) : 500,
@@ -63,6 +64,7 @@ const getPropertyById = async (req, res, next) => {
         },
         owner: {
           select: { id: true, name: true, dni: true, phone: true },
+        transferBeneficiary: { select: { id: true, name: true, dni: true } },
         },
       },
     });
@@ -94,6 +96,7 @@ const createProperty = async (req, res, next) => {
       floor,
       apartment,
       observations,
+      transferBeneficiaryId,
     } = req.body;
 
     // Verify category belongs to group if provided
@@ -115,6 +118,14 @@ const createProperty = async (req, res, next) => {
       }
     }
 
+    // Verify beneficiary belongs to group if provided
+    if (transferBeneficiaryId) {
+      const beneficiary = await prisma.owner.findUnique({ where: { id: transferBeneficiaryId } });
+      if (!beneficiary || beneficiary.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Beneficiario invalido');
+      }
+    }
+
     const property = await prisma.property.create({
       data: {
         groupId,
@@ -126,10 +137,12 @@ const createProperty = async (req, res, next) => {
         accountNumber,
         squareMeters: squareMeters ? parseFloat(squareMeters) : null,
         rooms: rooms ? parseInt(rooms, 10) : null,
+        transferBeneficiary: { select: { id: true, name: true, dni: true } },
         bathrooms: bathrooms ? parseInt(bathrooms, 10) : null,
         floor,
         apartment,
         observations,
+        transferBeneficiaryId: transferBeneficiaryId || null,
       },
       include: {
         category: {
@@ -165,6 +178,7 @@ const updateProperty = async (req, res, next) => {
       apartment,
       observations,
       isActive,
+      transferBeneficiaryId,
     } = req.body;
 
     // Verify property belongs to group
@@ -194,7 +208,15 @@ const updateProperty = async (req, res, next) => {
         return ApiResponse.badRequest(res, 'Dueño invalido');
       }
     }
+    // Verify beneficiary if provided
+    if (transferBeneficiaryId) {
+      const beneficiary = await prisma.owner.findUnique({ where: { id: transferBeneficiaryId } });
+      if (!beneficiary || beneficiary.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Beneficiario invalido');
+      }
+    }
 
+        transferBeneficiary: { select: { id: true, name: true, dni: true } },
     const updated = await prisma.property.update({
       where: { id },
       data: {
@@ -211,6 +233,7 @@ const updateProperty = async (req, res, next) => {
         ...(apartment !== undefined && { apartment }),
         ...(observations !== undefined && { observations }),
         ...(isActive !== undefined && { isActive }),
+        ...(transferBeneficiaryId !== undefined && { transferBeneficiaryId: transferBeneficiaryId || null }),
       },
       include: {
         category: {
