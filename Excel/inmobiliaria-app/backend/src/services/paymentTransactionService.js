@@ -156,10 +156,12 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   // 4. Punitorios (if any after rent is paid)
   if (punitoryAmount > 0 && remainingPayment > 0) {
     const paidToPunitory = Math.min(punitoryAmount, remainingPayment);
+    // Si los nuevos punitorios son 0 días pero hay acumulados (frozen), mostrar los días originales del record
+    const diasPunitorios = punitory.days > 0 ? punitory.days : (unpaidFrozenPunitory > 0 ? (record.punitoryDays || 0) : 0);
     concepts.push({
       type: 'PUNITORIOS',
       amount: paidToPunitory,
-      description: `${punitory.days} día(s) de atraso${forgivePunitorios ? ' (condonados)' : ''}`,
+      description: `${diasPunitorios} día(s) de atraso${forgivePunitorios ? ' (condonados)' : ''}`,
     });
     remainingPayment -= paidToPunitory;
   }
