@@ -144,8 +144,9 @@ function calculatePunitoryV2(
   // If there was a previous partial payment, punitorios count from that date
   if (lastPaymentDate) {
     const lastPayNorm = toLocalDate(lastPaymentDate);
-    // If new payment is on the same day or before the last payment, no additional punitorios
-    if (payDateNorm <= lastPayNorm) {
+    // If new payment is strictly before the last payment, no additional punitorios.
+    // Same-day payments count as 1 day (both endpoints inclusive).
+    if (payDateNorm < lastPayNorm) {
       return { amount: 0, days: 0, graceDate, fromDate: null, toDate: null };
     }
     // Count days from lastPaymentDate to paymentDate (both endpoints inclusive)
