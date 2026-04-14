@@ -365,7 +365,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
             {/* Punitorios */}
             <div className="flex justify-between">
               <span className={punitoryAmount > 0 ? 'text-error' : ''}>
-                Punitorios
+                Punitorios Total
                 {punitoryPreview?.days > 0 && !forgivePunitorios && (
                   <span className="text-xs text-base-content/50 ml-1">
                     ({punitoryPreview.days} días)
@@ -396,7 +396,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                 )}
                 {punitoryPreview.accumulatedPunitory > 0 && (
                   <div className="mt-0.5 text-error/80 space-y-0.5">
-                    <div>Punitorios anteriores impagos: <span className="font-semibold">{formatCurrency(punitoryPreview.accumulatedPunitory)}</span></div>
+                    <div>Punitorios acumulados: <span className="font-semibold">{formatCurrency(punitoryPreview.accumulatedPunitory)}</span></div>
                     <div>Punitorios nuevos ({punitoryPreview.days} día(s)): <span className="font-semibold">{formatCurrency(punitoryPreview.newPunitory)}</span></div>
                   </div>
                 )}
