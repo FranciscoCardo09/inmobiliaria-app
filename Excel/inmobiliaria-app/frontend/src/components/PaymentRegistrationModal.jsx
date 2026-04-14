@@ -365,7 +365,10 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
             {/* Punitorios */}
             <div className="flex justify-between">
               <span className={punitoryAmount > 0 ? 'text-error' : ''}>
-                Punitorios Total
+                {/* Label: "Punitorios Total" solo si hay tanto acumulados como nuevos */}
+                {punitoryPreview?.accumulatedPunitory > 0 && punitoryPreview?.newPunitory > 0
+                  ? 'Punitorios Total'
+                  : 'Punitorios'}
                 {punitoryPreview?.days > 0 && !forgivePunitorios && (
                   <span className="text-xs text-base-content/50 ml-1">
                     ({punitoryPreview.days} días)
@@ -391,13 +394,16 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                     )}
                   </>
                 )}
-                {punitoryPreview.days === 0 && (
+                {/* Solo mostrar "sin punitorios" si realmente NO hay ningún punitorio (ni acumulados) */}
+                {punitoryPreview.days === 0 && !(punitoryPreview.accumulatedPunitory > 0) && (
                   <div className="text-success">Pago dentro del plazo — sin punitorios</div>
                 )}
                 {punitoryPreview.accumulatedPunitory > 0 && (
                   <div className="mt-0.5 text-error/80 space-y-0.5">
                     <div>Punitorios acumulados: <span className="font-semibold">{formatCurrency(punitoryPreview.accumulatedPunitory)}</span></div>
-                    <div>Punitorios nuevos ({punitoryPreview.days} día(s)): <span className="font-semibold">{formatCurrency(punitoryPreview.newPunitory)}</span></div>
+                    {punitoryPreview.newPunitory > 0 && (
+                      <div>Punitorios nuevos ({punitoryPreview.days} día(s)): <span className="font-semibold">{formatCurrency(punitoryPreview.newPunitory)}</span></div>
+                    )}
                   </div>
                 )}
               </div>
