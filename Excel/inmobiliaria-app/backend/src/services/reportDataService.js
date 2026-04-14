@@ -682,7 +682,7 @@ const getEvolucionIngresosData = async (groupId, year) => {
 // PAGO EFECTIVO (from MonthlyRecord)
 // ============================================
 
-const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
+const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId = null) => {
   const record = await prisma.monthlyRecord.findFirst({
     where: { id: monthlyRecordId, groupId },
     include: {
@@ -706,6 +706,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
         include: { conceptType: true },
       },
       transactions: {
+        include: { concepts: true },
         orderBy: { paymentDate: 'asc' },
       },
     },
@@ -715,49 +716,78 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
 
   const empresa = await getEmpresaData(groupId);
   const { contract } = record;
-
-  // Build conceptos
-  const conceptos = [];
-  const mesLabel = MONTH_NAMES[record.periodMonth];
-  if (record.rentAmount > 0) {
-    conceptos.push({
-      concepto: `Alquiler ${mesLabel} (Mes ${record.monthNumber})`,
-      importe: record.rentAmount,
-    });
-  }
-
-  // Período a mes vencido para impuestos/servicios
-  const mesVencido = record.periodMonth === 1 ? 12 : record.periodMonth - 1;
-  const anioVencido = record.periodMonth === 1 ? record.periodYear - 1 : record.periodYear;
-  for (const svc of record.services) {
-    const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
-    const cat = svc.conceptType?.category;
-    const label = svc.conceptType?.label || svc.description || 'Servicio';
-    const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
-    conceptos.push({
-      concepto: showPeriodo ? `${label} | Período: ${MONTH_NAMES[mesVencido]} ${anioVencido}` : label,
-      importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
-    });
-  }
-
-  if (record.punitoryAmount > 0 && !record.punitoryForgiven) {
-    conceptos.push({
-      concepto: `Punitorios (${record.punitoryDays} días)`,
-      importe: record.punitoryAmount,
-    });
-  }
-
-  const total = record.totalDue;
   const txs = record.transactions || [];
-  const lastTransaction = txs[txs.length - 1];
 
-  // Generate receipt number from record
-  const receiptNumber = `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}`;
+  // ── Si se pide un recibo de una transacción específica (2°, 3° pago parcial), ──
+  // usar los concepts de esa transacción y su monto, NO los del record completo
+  const targetTx = transactionId ? txs.find(t => t.id === transactionId) : null;
+
+  let conceptos, total, fecha, paymentMethod, receiptNumber;
+
+  if (targetTx) {
+    // Recibo de UN pago específico
+    fecha = targetTx.paymentDate;
+    paymentMethod = targetTx.paymentMethod;
+    total = targetTx.amount;
+
+    // Usar concepto a los concepts guardados en esa transacción
+    const CONCEPT_LABELS = {
+      ALQUILER: 'Alquiler',
+      PUNITORIOS: 'Punitorios',
+      A_FAVOR: 'Saldo a favor',
+      SOBREPAGO: 'Pago en exceso',
+    };
+    conceptos = targetTx.concepts
+      .filter(c => c.amount > 0) // excluir créditos negativos del total visible
+      .map(c => ({
+        concepto: c.description || CONCEPT_LABELS[c.type] || c.type,
+        importe: c.amount,
+      }));
+
+    // Usar número de recibo de la transacción si lo tiene, sino generar uno
+    receiptNumber = targetTx.receiptNumber ||
+      `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}-P${txs.indexOf(targetTx) + 1}`;
+  } else {
+    // Recibo global del registro (comportamiento original)
+    fecha = txs[txs.length - 1]?.paymentDate || new Date();
+    paymentMethod = txs[txs.length - 1]?.paymentMethod || 'EFECTIVO';
+    total = record.totalDue;
+    receiptNumber = `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}`;
+
+    conceptos = [];
+    const mesLabel = MONTH_NAMES[record.periodMonth];
+    if (record.rentAmount > 0) {
+      conceptos.push({
+        concepto: `Alquiler ${mesLabel} (Mes ${record.monthNumber})`,
+        importe: record.rentAmount,
+      });
+    }
+
+    const mesVencido = record.periodMonth === 1 ? 12 : record.periodMonth - 1;
+    const anioVencido = record.periodMonth === 1 ? record.periodYear - 1 : record.periodYear;
+    for (const svc of record.services) {
+      const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
+      const cat = svc.conceptType?.category;
+      const label = svc.conceptType?.label || svc.description || 'Servicio';
+      const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
+      conceptos.push({
+        concepto: showPeriodo ? `${label} | Período: ${MONTH_NAMES[mesVencido]} ${anioVencido}` : label,
+        importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
+      });
+    }
+
+    if (record.punitoryAmount > 0 && !record.punitoryForgiven) {
+      conceptos.push({
+        concepto: `Punitorios (${record.punitoryDays} días)`,
+        importe: record.punitoryAmount,
+      });
+    }
+  }
 
   return {
     empresa,
     receiptNumber,
-    fecha: lastTransaction?.paymentDate || new Date(),
+    fecha,
     inquilino: {
       nombre: getTenantsName(contract),
       dni: (getPrimaryTenant(contract))?.dni || '',
@@ -777,7 +807,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId) => {
     conceptos,
     total,
     totalEnLetras: numeroATexto(total),
-    paymentMethod: lastTransaction?.paymentMethod || 'EFECTIVO',
+    paymentMethod,
     pagos: txs.map(t => ({
       fecha: t.paymentDate,
       monto: t.amount,

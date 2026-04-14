@@ -369,13 +369,13 @@ const downloadCartaDocumentoPDF = async (req, res, next) => {
 const downloadPagoEfectivoPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { monthlyRecordId } = req.query;
+    const { monthlyRecordId, transactionId } = req.query;
 
     if (!monthlyRecordId) {
       return ApiResponse.badRequest(res, 'Se requiere monthlyRecordId');
     }
 
-    const data = await getPagoEfectivoFromRecord(groupId, monthlyRecordId);
+    const data = await getPagoEfectivoFromRecord(groupId, monthlyRecordId, transactionId || null);
 
     if (!data) {
       return ApiResponse.notFound(res, 'No se encontró el registro mensual');
