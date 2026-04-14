@@ -135,7 +135,7 @@ export default function ReportsPage() {
 // ============================================
 
 // Helper: compute effective honorarios for a single contract given local gastos selections
-function computeHonorariosLocal(data, gastosState, honPct) {
+function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerState) {
   const sel = gastosState[data.contractId] || {}
   const selectedIds = sel.serviceIds || []
   const extras = sel.extras || []
@@ -154,8 +154,11 @@ function computeHonorariosLocal(data, gastosState, honPct) {
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Rent honorarios
-  const baseHonorarios = Math.max(0, data.total || 0)
+  // Rent honorarios: base = (alquiler - descuento manual) + punitorios
+  const descuento = parseFloat((descuentosAlquilerState || {})[data.contractId]) || 0
+  const rentBase = Math.max(0, (data.rentAmount || 0) - descuento)
+  const punitoryAmt = data.punitoryAmount || 0
+  const baseHonorarios = rentBase + punitoryAmt
   const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
@@ -172,6 +175,8 @@ function LiquidacionTab({ groupId }) {
   const [honorariosPercent, setHonorariosPercent] = useState('')
   // { [contractId]: { serviceIds: string[], extras: { id, concepto, importe }[] } }
   const [gastosAMiCargo, setGastosAMiCargo] = useState({})
+  // { [contractId]: number } — descuento manual sobre el alquiler para calcular honorarios
+  const [descuentosAlquiler, setDescuentosAlquiler] = useState({})
   const [soloConPago, setSoloConPago] = useState(true)
   const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
@@ -211,11 +216,12 @@ function LiquidacionTab({ groupId }) {
       const sel = gastosAMiCargo[data.contractId] || {}
       const selectedIds = sel.serviceIds || []
       const extras = sel.extras || []
-      if (selectedIds.length === 0 && extras.length === 0 && !honorariosPercent) return data
-      const honorarios = computeHonorariosLocal(data, gastosAMiCargo, honorariosPercent)
+      const hasDescuento = !!descuentosAlquiler[data.contractId]
+      if (selectedIds.length === 0 && extras.length === 0 && !honorariosPercent && !hasDescuento) return data
+      const honorarios = computeHonorariosLocal(data, gastosAMiCargo, honorariosPercent, descuentosAlquiler)
       return { ...data, honorarios }
     })
-  }, [filteredData, gastosAMiCargo, honorariosPercent])
+  }, [filteredData, gastosAMiCargo, honorariosPercent, descuentosAlquiler])
 
   const buildPostBody = () => {
     // Build gastosAMiCargo map for POST body
@@ -241,12 +247,19 @@ function LiquidacionTab({ groupId }) {
     }
     // Otherwise (owner selected, or soloConPago=false with no selection): no contractIds restriction
 
+    const descuentosBody = {}
+    for (const [contractId, val] of Object.entries(descuentosAlquiler)) {
+      const n = parseFloat(val)
+      if (n > 0) descuentosBody[contractId] = n
+    }
+
     return {
       month, year,
       honorariosPercent: honorariosPercent ? parseFloat(honorariosPercent) : undefined,
       contractIds: contractIdsForDownload,
       ownerId: selectedOwnerId || undefined,
       gastosAMiCargo: Object.keys(gastosBody).length > 0 ? gastosBody : undefined,
+      descuentosAlquiler: Object.keys(descuentosBody).length > 0 ? descuentosBody : undefined,
     }
   }
 
@@ -497,6 +510,25 @@ function LiquidacionTab({ groupId }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Descuento de alquiler para honorarios */}
+                  {honorariosPercent && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="text-xs text-base-content/70 whitespace-nowrap">Descuento alquiler (honorarios):</label>
+                      <input
+                        type="number"
+                        className="input input-bordered input-xs w-36"
+                        placeholder="0"
+                        min="0"
+                        step="0.01"
+                        value={descuentosAlquiler[data.contractId] || ''}
+                        onChange={e => {
+                          const val = e.target.value
+                          setDescuentosAlquiler(prev => ({ ...prev, [data.contractId]: val }))
+                        }}
+                      />
+                    </div>
+                  )}
 
                   {/* Gastos a mi cargo — always shown so extras can be added even without services */}
                   {(

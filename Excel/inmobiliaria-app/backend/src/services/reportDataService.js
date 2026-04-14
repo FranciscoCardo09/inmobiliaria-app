@@ -197,11 +197,10 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   let honorarios = null;
   if (options.honorariosPercent > 0 || hasGastos) {
     const pct = options.honorariosPercent || 0;
-    const bonificaciones = monthlyRecord.services
-      .filter(s => s.conceptType?.category === 'BONIFICACION' || s.conceptType?.category === 'DESCUENTO')
-      .reduce((sum, s) => sum + Math.abs(s.amount), 0);
     const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
-    const baseHonorarios = Math.max(0, monthlyRecord.rentAmount + punitoryAmt - bonificaciones);
+    const descuentoAlquiler = options.descuentosAlquiler || 0;
+    const rentBase = Math.max(0, monthlyRecord.rentAmount - descuentoAlquiler);
+    const baseHonorarios = rentBase + punitoryAmt;
     const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0;
 
     // Build gastos items from selected services (base cost only, no extra commission)
@@ -321,6 +320,8 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     serviciosDisponibles,
     total,
     totalEnLetras: numeroATexto(total),
+    rentAmount: monthlyRecord.rentAmount,
+    punitoryAmount: (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0,
     subtotalAlquileres,
     subtotalAlquileresEnLetras: numeroATexto(subtotalAlquileres),
     amountPaid: monthlyRecord.amountPaid,
@@ -407,6 +408,9 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     const contractOptions = { ...options };
     if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
       contractOptions.gastosAMiCargo = options.gastosAMiCargo[record.contractId] || null;
+    }
+    if (options.descuentosAlquiler && typeof options.descuentosAlquiler === 'object') {
+      contractOptions.descuentosAlquiler = options.descuentosAlquiler[record.contractId] || 0;
     }
     return buildLiquidacionFromRecord(record, empresa, month, year, contractOptions);
   });

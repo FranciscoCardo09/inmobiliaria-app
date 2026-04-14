@@ -734,7 +734,7 @@ const downloadLiquidacionAllDOCX = async (req, res, next) => {
 const downloadLiquidacionAllPDFPost = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo, descuentosAlquiler } = req.body;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -746,6 +746,9 @@ const downloadLiquidacionAllPDFPost = async (req, res, next) => {
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (descuentosAlquiler) {
+      options.descuentosAlquiler = descuentosAlquiler;
     }
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
@@ -775,7 +778,7 @@ const downloadLiquidacionAllPDFPost = async (req, res, next) => {
 const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo, descuentosAlquiler } = req.body;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -787,6 +790,9 @@ const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (descuentosAlquiler) {
+      options.descuentosAlquiler = descuentosAlquiler;
     }
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
@@ -816,7 +822,7 @@ const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
 const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo, descuentosAlquiler } = req.body;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -828,6 +834,9 @@ const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (descuentosAlquiler) {
+      options.descuentosAlquiler = descuentosAlquiler;
     }
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
@@ -856,7 +865,7 @@ const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
 const downloadLiquidacionAllExcelPost = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo } = req.body;
+    const { month, year, honorariosPercent, propertyIds, ownerId, contractIds, gastosAMiCargo, descuentosAlquiler } = req.body;
 
     if (!month || !year) {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
@@ -868,6 +877,9 @@ const downloadLiquidacionAllExcelPost = async (req, res, next) => {
     }
     if (gastosAMiCargo) {
       options.gastosAMiCargo = gastosAMiCargo;
+    }
+    if (descuentosAlquiler) {
+      options.descuentosAlquiler = descuentosAlquiler;
     }
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
