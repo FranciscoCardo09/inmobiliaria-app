@@ -67,6 +67,8 @@ const getPunitoryPreview = async (req, res, next) => {
 
     return ApiResponse.success(res, {
       amount: result.amount,
+      newPunitory: result.newPunitory,
+      accumulatedPunitory: result.accumulatedPunitory,
       days: result.days,
       graceDate: result.graceDate.toISOString(),
       fromDate: result.fromDate ? result.fromDate.toISOString() : null,
