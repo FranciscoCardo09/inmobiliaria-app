@@ -394,6 +394,12 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                 {punitoryPreview.days === 0 && (
                   <div className="text-success">Pago dentro del plazo — sin punitorios</div>
                 )}
+                {punitoryPreview.accumulatedPunitory > 0 && (
+                  <div className="mt-0.5 text-error/80 space-y-0.5">
+                    <div>Punitorios anteriores impagos: <span className="font-semibold">{formatCurrency(punitoryPreview.accumulatedPunitory)}</span></div>
+                    <div>Punitorios nuevos ({punitoryPreview.days} día(s)): <span className="font-semibold">{formatCurrency(punitoryPreview.newPunitory)}</span></div>
+                  </div>
+                )}
               </div>
             )}
 

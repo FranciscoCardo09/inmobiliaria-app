@@ -68,6 +68,11 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
+  // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
+  const frozenPunitory = record.punitoryAmount || 0;
+  const _crReg = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
+  const unpaidFrozenPunitory = Math.max(frozenPunitory - Math.min(_crReg, frozenPunitory), 0);
+
   // Get last payment date for this record (if partial payment was made)
   const lastTransaction = await prisma.paymentTransaction.findFirst({
     where: { monthlyRecordId },
@@ -87,7 +92,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     lastTransaction?.paymentDate || null
   );
 
-  const punitoryAmount = forgivePunitorios ? 0 : punitory.amount;
+  const punitoryAmount = forgivePunitorios ? 0 : round2(unpaidFrozenPunitory + punitory.amount);
 
   // Build transaction concepts breakdown
   // Concepts should reflect HOW THIS PAYMENT is distributed, not the total owed
@@ -230,7 +235,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
     select: {
       id: true, periodMonth: true, periodYear: true, rentAmount: true,
       servicesTotal: true, previousBalance: true, amountPaid: true,
-      punitoryAmount: true, punitoryDays: true, status: true,
+      punitoryAmount: true, punitoryDays: true, status: true, includeIva: true,
       contract: {
         select: {
           punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
@@ -257,6 +262,11 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
+  // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
+  const frozenPunitoryPreview = record.punitoryAmount || 0;
+  const _crPrev = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
+  const unpaidFrozenPunitoryPreview = Math.max(frozenPunitoryPreview - Math.min(_crPrev, frozenPunitoryPreview), 0);
+
   // Last payment date (transactions ordered desc, so [0] is most recent)
   const lastTx = record.transactions[0] || null;
 
@@ -274,6 +284,9 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
 
   return {
     ...result,
+    newPunitory: result.amount,
+    accumulatedPunitory: unpaidFrozenPunitoryPreview,
+    amount: round2(unpaidFrozenPunitoryPreview + result.amount),
     baseRent: record.rentAmount,
     unpaidRent,
     punitoryPercent: record.contract.punitoryPercent,
