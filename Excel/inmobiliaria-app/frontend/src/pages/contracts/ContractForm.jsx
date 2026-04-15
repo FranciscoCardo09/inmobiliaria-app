@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
-import { useContracts } from '../../hooks/useContracts'
+import { useContracts, useContract } from '../../hooks/useContracts'
 import { useTenants } from '../../hooks/useTenants'
 import { useProperties } from '../../hooks/useProperties'
 import { useAdjustmentIndices } from '../../hooks/useAdjustmentIndices'
@@ -26,12 +26,12 @@ export const ContractForm = () => {
   const { groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
-  const { createContract, updateContract, renewContract, isCreating, isUpdating, isRenewing: isRenewingPending, useContract } = useContracts(currentGroup?.id)
+  const { createContract, updateContract, renewContract, isCreating, isUpdating, isRenewing: isRenewingPending } = useContracts(currentGroup?.id)
   const { tenants } = useTenants(currentGroup?.id, { isActive: true })
   const { properties } = useProperties(currentGroup?.id, { isActive: true })
   const { indices } = useAdjustmentIndices(currentGroup?.id)
   const { conceptTypes, createConceptType, isCreating: isCreatingConcept } = useConceptTypes(currentGroup?.id)
-  const { data: contract, isLoading: isLoadingContract } = isEditing ? useContract(id) : { data: null, isLoading: false }
+  const { data: contract, isLoading: isLoadingContract } = useContract(currentGroup?.id, isEditing ? id : null)
 
   const [formData, setFormData] = useState({
     contractType: searchParams.get('contractType') || 'INQUILINO',

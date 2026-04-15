@@ -3,6 +3,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 
+export const useContract = (groupId, contractId) => {
+  return useQuery({
+    queryKey: ['contract', groupId, contractId],
+    queryFn: async () => {
+      const response = await api.get(`/groups/${groupId}/contracts/${contractId}`)
+      return response.data.data
+    },
+    enabled: !!groupId && !!contractId,
+    staleTime: 2 * 60 * 1000,
+  })
+}
+
 export const useContracts = (groupId, filters = {}) => {
   const queryClient = useQueryClient()
 
@@ -22,18 +34,6 @@ export const useContracts = (groupId, filters = {}) => {
     enabled: !!groupId,
     staleTime: 2 * 60 * 1000,
   })
-
-  const useContract = (contractId) => {
-    return useQuery({
-      queryKey: ['contract', groupId, contractId],
-      queryFn: async () => {
-        const response = await api.get(`/groups/${groupId}/contracts/${contractId}`)
-        return response.data.data
-      },
-      enabled: !!groupId && !!contractId,
-      staleTime: 2 * 60 * 1000,
-    })
-  }
 
   const expiringQuery = useQuery({
     queryKey: ['contracts', 'expiring', groupId],
@@ -152,7 +152,6 @@ export const useContracts = (groupId, filters = {}) => {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
     error: contractsQuery.error,
-    useContract,
     expiringContracts: expiringQuery.data || [],
     isLoadingExpiring: expiringQuery.isLoading,
     createContract: createMutation.mutate,
