@@ -51,10 +51,10 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Contrato creado')
     },
     onError: (error) => {
@@ -67,11 +67,12 @@ export const useContracts = (groupId, filters = {}) => {
       const response = await api.put(`/groups/${groupId}/contracts/${id}`, data)
       return response.data.data
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contract', groupId, id] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Contrato actualizado')
     },
     onError: (error) => {
@@ -85,11 +86,11 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['dashboard'])
-      queryClient.invalidateQueries(['monthlyRecords'])
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success(data.message || 'Contrato eliminado')
     },
     onError: (error) => {
@@ -103,10 +104,10 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Contrato rescindido exitosamente')
     },
     onError: (error) => {
@@ -120,10 +121,10 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Rescisión deshecha exitosamente')
     },
     onError: (error) => {
@@ -137,10 +138,10 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['contracts', 'expiring', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Contrato renovado exitosamente')
     },
     onError: (error) => {
