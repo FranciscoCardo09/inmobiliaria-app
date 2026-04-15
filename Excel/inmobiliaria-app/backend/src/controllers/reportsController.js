@@ -402,11 +402,8 @@ const downloadMultiPagoEfectivoPDF = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere monthlyRecordIds (array)');
     }
 
-    const dataArray = [];
-    for (const recordId of monthlyRecordIds) {
-      const data = await getPagoEfectivoFromRecord(groupId, recordId);
-      if (data) dataArray.push(data);
-    }
+    const results = await Promise.all(monthlyRecordIds.map(id => getPagoEfectivoFromRecord(groupId, id)));
+    const dataArray = results.filter(Boolean);
 
     if (dataArray.length === 0) {
       return ApiResponse.notFound(res, 'No se encontraron registros mensuales');

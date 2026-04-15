@@ -6,108 +6,10 @@ const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services
 
 const prisma = require('../lib/prisma');
 
-// Helper: parse a date string as noon UTC (avoids timezone shift issues)
-const parseLocalDate = (dateStr) => {
-  if (!dateStr) return null;
-  const parts = String(dateStr).replace(/T.*/, '').split('-');
-  // Use noon UTC to avoid any timezone-related day shift
-  return new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12, 0, 0));
-};
-
-// Helper: compute period label from startDate + currentMonth
-// startMonth maps to startDate, so offset = currentMonth - startMonth
-const getPeriodLabel = (startDate, currentMonth, startMonth = 1) => {
-  const start = new Date(startDate);
-  const date = new Date(start);
-  date.setMonth(date.getMonth() + currentMonth - startMonth);
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-  ];
-  return `${months[date.getMonth()]} ${date.getFullYear()}`;
-};
-
-// Helper: enrich contract with computed fields
-const enrichContract = (c) => {
-  const adjustmentIndex = c.adjustmentIndex;
-
-  // Dynamically compute currentMonth from startDate vs now
-  // When startMonth > 1, contract was loaded mid-way: current = startMonth + elapsed
-  const start = new Date(c.startDate);
-  const now = new Date();
-  const monthsDiff =
-    (now.getFullYear() - start.getFullYear()) * 12 +
-    (now.getMonth() - start.getMonth());
-  const sm = c.startMonth || 1;
-  const endMonth = sm + c.durationMonths - 1;
-  let computedCurrentMonth = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
-  // Safety net: never display a month number greater than durationMonths
-  // (can happen with legacy data where startMonth was set too high)
-  computedCurrentMonth = Math.min(computedCurrentMonth, c.durationMonths);
-
-  const currentPeriodLabel = getPeriodLabel(c.startDate, computedCurrentMonth, sm);
-
-  let nextAdjustmentLabel = null;
-  let nextAdjustmentIsThisMonth = false;
-
-  // Recalcular nextAdjustmentMonth si el valor de DB quedó en el pasado
-  let effectiveNextAdj = c.nextAdjustmentMonth;
-  if (adjustmentIndex && effectiveNextAdj && effectiveNextAdj < computedCurrentMonth) {
-    effectiveNextAdj = calculateNextAdjustmentMonth(
-      c.startMonth, computedCurrentMonth, adjustmentIndex.frequencyMonths, c.durationMonths
-    );
-  }
-
-  if (adjustmentIndex && effectiveNextAdj) {
-    nextAdjustmentIsThisMonth = computedCurrentMonth === effectiveNextAdj;
-    if (nextAdjustmentIsThisMonth) {
-      nextAdjustmentLabel = `Ajuste este mes (Mes ${computedCurrentMonth})`;
-    } else {
-      const adjLabel = getPeriodLabel(c.startDate, effectiveNextAdj, sm);
-      nextAdjustmentLabel = `${adjLabel} (${adjustmentIndex.name})`;
-    }
-  }
-
-  // Compute end date from startDate + durationMonths (last day of contract, not first day after)
-  const endDate = new Date(start);
-  endDate.setMonth(endDate.getMonth() + c.durationMonths);
-  endDate.setDate(endDate.getDate() - 1);
-
-  // Remaining months
-  const remainingMonths = Math.max(0, endMonth - computedCurrentMonth);
-
-  // Determine status string for frontend
-  let status;
-  if (!c.active) {
-    status = 'TERMINATED';
-  } else if (c.rescindedAt) {
-    status = 'RESCINDED';
-  } else if (now > endDate) {
-    status = 'EXPIRED';
-  } else {
-    status = 'ACTIVE';
-  }
-
-  // Is expiring soon (2 months or less remaining)
-  const isExpiringSoon = status === 'ACTIVE' && remainingMonths <= 2;
-
-  return {
-    ...c,
-    contractType: c.contractType || 'INQUILINO',
-    currentMonth: computedCurrentMonth,
-    nextAdjustmentMonth: effectiveNextAdj,
-    endDate,
-    status,
-    rentAmount: c.baseRent,
-    currentPeriodLabel,
-    remainingMonths,
-    isExpiringSoon,
-    nextAdjustmentIsThisMonth,
-    nextAdjustmentLabel,
-    rescindedAt: c.rescindedAt || null,
-    rescissionPenalty: c.rescissionPenalty || null,
-  };
-};
+const asyncHandler = require('../utils/asyncHandler');
+const { parseLocalDate } = require('../utils/dateUtils');
+const contractService = require('../services/contractService');
+const enrichContract = contractService.enrichContract;
 
 // GET /api/groups/:groupId/contracts
 const getContracts = async (req, res, next) => {
@@ -172,34 +74,7 @@ const getContracts = async (req, res, next) => {
 const getExpiringContracts = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-
-    const contracts = await prisma.contract.findMany({
-      where: { groupId, active: true },
-      include: {
-        tenant: { select: { id: true, name: true, dni: true, phone: true } },
-        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: {
-          select: {
-            id: true, address: true,
-            category: { select: { id: true, name: true, color: true } },
-          },
-        },
-        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
-      },
-      orderBy: { startDate: 'asc' },
-    });
-
-    // Filter: remaining months <= 2, ordered by nearest expiration first
-    const expiring = contracts
-      .map((c) => {
-        const tenants = c.contractTenants.length > 0
-          ? c.contractTenants.map((ct) => ct.tenant)
-          : c.tenant ? [c.tenant] : [];
-        return { ...enrichContract(c), tenants };
-      })
-      .filter((c) => c.isExpiringSoon)
-      .sort((a, b) => a.remainingMonths - b.remainingMonths || new Date(a.endDate) - new Date(b.endDate));
-
+    const expiring = await contractService.getExpiringContractsOptimized(groupId);
     return ApiResponse.success(res, expiring);
   } catch (error) {
     next(error);
@@ -316,10 +191,10 @@ const createContract = async (req, res, next) => {
       ? tenantIds
       : tenantId ? [tenantId] : [];
 
-    // Verify all tenants belong to group
-    for (const tid of resolvedTenantIds) {
-      const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
-      if (!tenant || tenant.groupId !== groupId) {
+    // Verify all tenants belong to group (batch query instead of N+1)
+    if (resolvedTenantIds.length > 0) {
+      const tenants = await prisma.tenant.findMany({ where: { id: { in: resolvedTenantIds }, groupId } });
+      if (tenants.length !== resolvedTenantIds.length) {
         return ApiResponse.badRequest(res, 'Inquilino invalido');
       }
     }
@@ -480,10 +355,10 @@ const updateContract = async (req, res, next) => {
 
     // Handle tenantIds update
     if (tenantIds !== undefined) {
-      // Verify all tenants belong to group
-      for (const tid of tenantIds) {
-        const t = await prisma.tenant.findUnique({ where: { id: tid } });
-        if (!t || t.groupId !== groupId) {
+      // Verify all tenants belong to group (batch query instead of N+1)
+      if (tenantIds.length > 0) {
+        const validTenants = await prisma.tenant.findMany({ where: { id: { in: tenantIds }, groupId } });
+        if (validTenants.length !== tenantIds.length) {
           return ApiResponse.badRequest(res, 'Inquilino invalido');
         }
       }
@@ -575,23 +450,27 @@ const updateContract = async (req, res, next) => {
     });
 
     // Sincronizar comprobantes con los MonthlyRecords existentes
+    // Use parallel transaction instead of sequential per-record updates
     if (comprobantes !== undefined) {
       const records = await prisma.monthlyRecord.findMany({
-        where: { contractId: id }
+        where: { contractId: id },
+        select: { id: true, comprobantesStatus: true },
       });
-      for (const record of records) {
-        const currentStatus = Array.isArray(record.comprobantesStatus) ? record.comprobantesStatus : [];
-        const statusMap = new Map(currentStatus.map(c => [c.id, c.presented]));
-        
-        const newStatus = comprobantes.map(c => ({
-          ...c,
-          presented: statusMap.has(c.id) ? statusMap.get(c.id) : false
-        }));
-
-        await prisma.monthlyRecord.update({
-          where: { id: record.id },
-          data: { comprobantesStatus: newStatus }
-        });
+      if (records.length > 0) {
+        await prisma.$transaction(
+          records.map((record) => {
+            const currentStatus = Array.isArray(record.comprobantesStatus) ? record.comprobantesStatus : [];
+            const statusMap = new Map(currentStatus.map(c => [c.id, c.presented]));
+            const newStatus = comprobantes.map(c => ({
+              ...c,
+              presented: statusMap.has(c.id) ? statusMap.get(c.id) : false,
+            }));
+            return prisma.monthlyRecord.update({
+              where: { id: record.id },
+              data: { comprobantesStatus: newStatus },
+            });
+          })
+        );
       }
     }
 
@@ -1041,17 +920,17 @@ const undoRescission = async (req, res, next) => {
 };
 
 module.exports = {
-  getContracts,
-  getExpiringContracts,
-  getContractAdjustments,
-  getContractById,
-  createContract,
-  updateContract,
-  deleteContract,
-  assignTenantToProperty,
-  getContractRentHistory,
-  getRescissionPreview,
-  rescindContract,
-  undoRescission,
-  renewContract,
+  getContracts: asyncHandler(getContracts),
+  getExpiringContracts: asyncHandler(getExpiringContracts),
+  getContractAdjustments: asyncHandler(getContractAdjustments),
+  getContractById: asyncHandler(getContractById),
+  createContract: asyncHandler(createContract),
+  updateContract: asyncHandler(updateContract),
+  deleteContract: asyncHandler(deleteContract),
+  assignTenantToProperty: asyncHandler(assignTenantToProperty),
+  getContractRentHistory: asyncHandler(getContractRentHistory),
+  getRescissionPreview: asyncHandler(getRescissionPreview),
+  rescindContract: asyncHandler(rescindContract),
+  undoRescission: asyncHandler(undoRescission),
+  renewContract: asyncHandler(renewContract),
 };

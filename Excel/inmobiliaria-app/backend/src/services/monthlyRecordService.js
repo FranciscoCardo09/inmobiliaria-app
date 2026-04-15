@@ -2,6 +2,7 @@
 const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
 const { calculateNextAdjustmentMonth } = require('./adjustmentService');
+const { MONTH_NAMES } = require('../utils/constants');
 
 const prisma = require('../lib/prisma');
 
@@ -443,11 +444,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     }
   }
 
-  const monthNames = [
-    '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-  ];
-
   // Batch: contratos con deudas abiertas (para marcar filas del mes actual)
   const contractIdsForDebt = activeContracts.map(({ contract }) => contract.id);
   const openDebtsForContracts = await prisma.debt.findMany({
@@ -570,7 +566,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
       if (effectiveNextAdj) {
         const adjPeriod = getCalendarPeriod(contract, effectiveNextAdj);
-        nextAdjustmentLabel = `${monthNames[adjPeriod.periodMonth]} ${adjPeriod.periodYear}`;
+        nextAdjustmentLabel = `${MONTH_NAMES[adjPeriod.periodMonth]} ${adjPeriod.periodYear}`;
       }
     }
 
@@ -755,7 +751,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           : contract.tenant ? [contract.tenant] : []),
       property: contract.property,
       owner: contract.property?.owner,
-      periodLabel: `${monthNames[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
+      periodLabel: `${MONTH_NAMES[month]} - Mes ${monthNumber - contract.startMonth + 1}`,
       nextAdjustmentLabel,
       // Ajuste de alquiler en este mes: comparar alquiler actual vs mes anterior
       ...(() => {

@@ -12,7 +12,7 @@
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio",
-    "test": "node --test tests/liquidacion.test.js"
+    "test": "node --test"
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",

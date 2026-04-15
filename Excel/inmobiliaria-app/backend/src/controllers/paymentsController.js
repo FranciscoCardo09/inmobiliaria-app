@@ -1,4 +1,5 @@
 // Payments Controller - Phase 4 v2
+const asyncHandler = require('../utils/asyncHandler');
 const ApiResponse = require('../utils/apiResponse');
 const {
   calculatePaymentConcepts,
@@ -584,15 +585,15 @@ const seedDefaultConceptTypes = async (req, res, next) => {
 };
 
 module.exports = {
-  calculatePayment,
-  getPayments,
-  getPaymentById,
-  createPayment,
-  updatePayment,
-  deletePayment,
-  getConceptTypes,
-  createConceptType,
-  updateConceptType,
-  deleteConceptType,
-  seedDefaultConceptTypes,
+  calculatePayment: asyncHandler(calculatePayment),
+  getPayments: asyncHandler(getPayments),
+  getPaymentById: asyncHandler(getPaymentById),
+  createPayment: asyncHandler(createPayment),
+  updatePayment: asyncHandler(updatePayment),
+  deletePayment: asyncHandler(deletePayment),
+  getConceptTypes: asyncHandler(getConceptTypes),
+  createConceptType: asyncHandler(createConceptType),
+  updateConceptType: asyncHandler(updateConceptType),
+  deleteConceptType: asyncHandler(deleteConceptType),
+  seedDefaultConceptTypes: asyncHandler(seedDefaultConceptTypes),
 };

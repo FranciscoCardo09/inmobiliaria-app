@@ -1,12 +1,8 @@
 // Report Data Service - Prisma queries for all report types
 const { numeroATexto } = require('../utils/helpers');
+const { MONTH_NAMES } = require('../utils/constants');
 
 const prisma = require('../lib/prisma');
-
-const MONTH_NAMES = [
-  '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-];
 
 // Helper: get tenant name(s) from contract (supports multi-tenant and PROPIETARIO)
 const getTenantsName = (contract) => {
@@ -1008,10 +1004,20 @@ const getControlMensualData = async (groupId, month, year) => {
 const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerId = null, contractIds = null) => {
   const empresa = await getEmpresaData(groupId);
 
-  // Build where clause
+  // Build where clause with all filters applied at DB level (avoids post-fetch in-memory filtering)
   const where = { groupId, periodMonth: month, periodYear: year };
 
-  let records = await prisma.monthlyRecord.findMany({
+  if (contractIds && contractIds.length > 0) {
+    where.contractId = { in: contractIds };
+  } else if (propertyIds && propertyIds.length > 0) {
+    where.contract = { propertyId: { in: propertyIds } };
+  }
+
+  if (ownerId) {
+    where.contract = { ...where.contract, property: { ownerId } };
+  }
+
+  const records = await prisma.monthlyRecord.findMany({
     where,
     include: {
       contract: {
@@ -1030,18 +1036,6 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       },
     },
   });
-
-  // Apply contract filter (takes priority over property filter)
-  if (contractIds && contractIds.length > 0) {
-    records = records.filter(r => contractIds.includes(r.contractId));
-  } else if (propertyIds && propertyIds.length > 0) {
-    records = records.filter(r => propertyIds.includes(r.contract.propertyId));
-  }
-
-  // Apply owner filter
-  if (ownerId) {
-    records = records.filter(r => r.contract.property?.ownerId === ownerId);
-  }
 
   // "Mes vencido" logic: the period displayed is the previous month
   const mesVencido = month === 1 ? 12 : month - 1;

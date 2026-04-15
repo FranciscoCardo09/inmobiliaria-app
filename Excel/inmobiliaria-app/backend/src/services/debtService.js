@@ -1,5 +1,6 @@
 // Debt Service - Gestión de deudas con punitorios acumulados
 const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
+const { MONTH_NAMES } = require('../utils/constants');
 
 const prisma = require('../lib/prisma');
 
@@ -14,10 +15,7 @@ const parseLocalDate = (dateStr) => {
   return new Date(dateStr);
 };
 
-const monthNames = [
-  '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-];
+
 
 /**
  * Calcular imputación de pagos parciales: servicios primero, luego alquiler.
@@ -166,7 +164,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   const initialStatus = 'OPEN'; // Siempre OPEN al crear, se actualizará cuando se pague
 
-  const periodLabel = `${monthNames[monthlyRecord.periodMonth]} ${monthlyRecord.periodYear}`;
+  const periodLabel = `${MONTH_NAMES[monthlyRecord.periodMonth]} ${monthlyRecord.periodYear}`;
 
   const debt = await prisma.debt.create({
     data: {
