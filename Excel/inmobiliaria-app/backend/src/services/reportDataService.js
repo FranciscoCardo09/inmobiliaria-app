@@ -293,6 +293,14 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // Subtotal alquileres = rent + punitorios (base for honorarios calculation)
   const subtotalAlquileres = monthlyRecord.rentAmount + punitoryAmt;
 
+  // isCancelled is the single source of truth for whether a rental was actually collected.
+  // It is set by both payment processing and debt settlement (debtService forces it when
+  // a Debt flips to PAID). We do NOT fall back to amountPaid/balance tolerance checks
+  // because those disagree with the writer's threshold and can include uncollected rent.
+  const isRentPaid = !!monthlyRecord.isCancelled;
+  const subtotalAlquileresCobrado = isRentPaid ? subtotalAlquileres : 0;
+  const honorariosCobrado = isRentPaid ? (honorarios?.monto ?? 0) : 0;
+
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
   const serviciosDisponibles = monthlyRecord.services
     .filter(s => s.conceptType?.category !== 'BONIFICACION' && s.conceptType?.category !== 'DESCUENTO')
@@ -320,11 +328,14 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     punitoryAmount: (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0,
     subtotalAlquileres,
     subtotalAlquileresEnLetras: numeroATexto(subtotalAlquileres),
+    subtotalAlquileresCobrado,
+    isRentPaid,
+    honorariosCobrado,
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
     estado: monthlyRecord.status,
-    isPaid: monthlyRecord.isPaid || (monthlyRecord.amountPaid > 0 && monthlyRecord.balance >= -1),
-    isCancelled: monthlyRecord.isCancelled || (monthlyRecord.amountPaid > 0 && monthlyRecord.balance >= -1),
+    isPaid: !!monthlyRecord.isPaid,
+    isCancelled: !!monthlyRecord.isCancelled,
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
     transacciones: monthlyRecord.transactions.map((t) => ({
@@ -335,6 +346,23 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     currency: empresa.currency,
     contractId: contract.id,
     monthlyRecordId: monthlyRecord.id,
+  };
+};
+
+/**
+ * Aggregates liquidacion rows into grand totals, counting only fully-paid rentals.
+ * Paid = isRentPaid === true (backed by MonthlyRecord.isCancelled).
+ */
+const computeGrandTotals = (dataArray) => {
+  const paidRows = dataArray.filter((d) => d.isRentPaid);
+  const unpaidRows = dataArray.filter((d) => !d.isRentPaid);
+  return {
+    grandSubtotalAlquileres: paidRows.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0),
+    grandSubtotalAlquileresUnpaid: unpaidRows.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0),
+    grandTotal: paidRows.reduce((s, d) => s + (d.total || 0), 0),
+    grandHonorarios: paidRows.reduce((s, d) => s + (d.honorariosCobrado || 0), 0),
+    paidCount: paidRows.length,
+    unpaidCount: unpaidRows.length,
   };
 };
 
@@ -1136,6 +1164,8 @@ const getVencimientosData = async (groupId) => {
 
 module.exports = {
   getEmpresaData,
+  buildLiquidacionFromRecord,
+  computeGrandTotals,
   getLiquidacionData,
   getLiquidacionesAllContracts,
   getEstadoCuentasData,

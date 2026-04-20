@@ -1,6 +1,6 @@
 // Excel Templates - ExcelJS generators for reports
 const ExcelJS = require('exceljs');
-const { MONTH_NAMES } = require('./reportDataService');
+const { MONTH_NAMES, computeGrandTotals } = require('./reportDataService');
 
 const formatDocumento = (value) => {
   if (!value) return { label: 'DNI', formatted: '' };
@@ -129,12 +129,14 @@ const generateLiquidacionExcel = async (dataArray) => {
     { width: 12 },
   ];
 
-  let grandTotal = 0;
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
 
   dataArray.forEach((data, i) => {
     const serviciosTotal = data.conceptos
       .filter((c) => c.concepto !== 'Alquiler')
       .reduce((sum, c) => sum + c.importe, 0);
+
+    const estadoLabel = data.isRentPaid ? 'Cobrado' : data.estado === 'PARTIAL' ? 'Parcial (no cobrado)' : 'Pendiente';
 
     const row = summarySheet.addRow([
       data.inquilino.nombre,
@@ -142,29 +144,39 @@ const generateLiquidacionExcel = async (dataArray) => {
       data.conceptos.find((c) => c.concepto === 'Alquiler')?.importe || 0,
       serviciosTotal,
       data.total,
-      data.isPaid ? 'Pagado' : data.estado === 'PARTIAL' ? 'Parcial' : 'Pendiente',
+      estadoLabel,
     ]);
 
     applyDataRowStyle(row, i);
+
+    // Highlight unpaid rows in the Excel summary
+    if (!data.isRentPaid) {
+      row.getCell(6).font = { bold: true, color: { argb: 'FFCC0000' } };
+    }
 
     // Currency format for numeric columns
     row.getCell(3).numFmt = CURRENCY_FORMAT;
     row.getCell(4).numFmt = CURRENCY_FORMAT;
     row.getCell(5).numFmt = CURRENCY_FORMAT;
-
-    grandTotal += data.total;
   });
 
-  // Total row
-  const totalRow = summarySheet.addRow(['', 'TOTAL GENERAL', '', '', grandTotal, '']);
+  // Total row (paid only)
+  const totalRow = summarySheet.addRow(['', 'TOTAL COBRADO', '', '', grandTotal, '']);
   applyTotalRowStyle(totalRow);
   totalRow.getCell(5).numFmt = CURRENCY_FORMAT;
 
-  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
   if (grandSubtotalAlquileres > 0 && grandSubtotalAlquileres !== grandTotal) {
-    const alqSummaryRow = summarySheet.addRow(['', 'Alquileres', '', '', grandSubtotalAlquileres, '']);
+    const alqSummaryRow = summarySheet.addRow(['', 'Alquileres cobrados', '', '', grandSubtotalAlquileres, '']);
     alqSummaryRow.getCell(2).font = { bold: true };
     alqSummaryRow.getCell(5).numFmt = CURRENCY_FORMAT;
+  }
+
+  if (grandSubtotalAlquileresUnpaid > 0) {
+    const unpaidRow = summarySheet.addRow(['', `Pendiente de cobro (${unpaidCount})`, '', '', grandSubtotalAlquileresUnpaid, 'NO COBRADO']);
+    unpaidRow.getCell(2).font = { italic: true, color: { argb: 'FFCC0000' } };
+    unpaidRow.getCell(5).numFmt = CURRENCY_FORMAT;
+    unpaidRow.getCell(5).font = { color: { argb: 'FFCC0000' } };
+    unpaidRow.getCell(6).font = { bold: true, color: { argb: 'FFCC0000' } };
   }
 
   // Individual sheets per tenant

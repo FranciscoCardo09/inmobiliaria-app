@@ -1,6 +1,6 @@
 // PDF Templates - Professional minimalist design (black/gray)
 const PDFDocument = require('pdfkit');
-const { MONTH_NAMES } = require('./reportDataService');
+const { MONTH_NAMES, computeGrandTotals } = require('./reportDataService');
 
 const formatDocumento = (value) => {
   if (!value) return { label: '', formatted: '' };
@@ -1223,14 +1223,13 @@ const generateLiquidacionAllPDF = (dataArray) => {
     y = drawTitle(doc, y, 'Liquidación General',
       `${periodo.label}`);
 
-    // Grand total pre-calc
-    let grandTotal = 0;
-    for (const d of dataArray) grandTotal += d.total;
+    // Grand total pre-calc: only paid (isCancelled) rentals count
+    const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, paidCount, unpaidCount } = computeGrandTotals(dataArray);
 
     // Metric cards
     y = drawMetrics(doc, y, [
       { label: 'Propiedades', value: String(dataArray.length) },
-      { label: 'Total Liquidación', value: fmt(grandTotal, currency) },
+      { label: 'Cobrado', value: fmt(grandTotal, currency) },
     ]);
 
     const checkNewPage = (need) => {
@@ -1264,9 +1263,16 @@ const generateLiquidacionAllPDF = (dataArray) => {
       doc.font(F.r).fontSize(8).fillColor(C.medium)
         .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.6 });
 
-      // Subtotal on right
-      doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text(fmt(data.total, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+      // Subtotal on right; mark unpaid rentals clearly
+      if (!data.isRentPaid) {
+        doc.font(F.b).fontSize(7.5).fillColor('#CC0000')
+          .text('NO COBRADO', PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+        doc.font(F.b).fontSize(10).fillColor('#CC0000')
+          .text(fmt(data.total, currency), PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
+      } else {
+        doc.font(F.b).fontSize(10).fillColor(C.black)
+          .text(fmt(data.total, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+      }
 
       let iy = y + 38;
 
@@ -1290,9 +1296,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
     const totalH = 34;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
-    const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
     doc.font(F.b).fontSize(11).fillColor(C.white)
-      .text('TOTAL ALQUILERES', PAGE.margin + 14, y + 10);
+      .text('TOTAL ALQUILERES COBRADOS', PAGE.margin + 14, y + 10);
     doc.text(fmt(grandSubtotalAlquileres, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
@@ -1301,6 +1306,14 @@ const generateLiquidacionAllPDF = (dataArray) => {
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${alquilerLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 18;
+
+    // Pending / not collected summary
+    if (grandSubtotalAlquileresUnpaid > 0) {
+      checkNewPage(20);
+      doc.font(F.r).fontSize(8).fillColor('#CC0000')
+        .text(`Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
+      y += 14;
+    }
 
     // TOTAL box
     checkNewPage(60);
@@ -1320,9 +1333,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
     if (firstHon) {
-      // Aggregate gastos across all contracts
-      const allGastos = dataArray.flatMap(d => d.honorarios?.gastosAMiCargo || []);
-      // Group gastos by concepto label, summing amounts
+      // Only aggregate gastos from paid rows (honorarios on uncollected rent = 0)
+      const allGastos = dataArray.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || []);
       const gastosGrouped = [];
       for (const g of allGastos) {
         const existing = gastosGrouped.find(x => x.concepto === g.concepto);
@@ -1333,7 +1345,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
         }
       }
 
-      const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+      const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
       const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
       const rowH = 16;
       const honPct = firstHon.honorarios.porcentaje;
@@ -1350,7 +1362,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       hy += 12;
 
       if (honPct > 0) {
-        const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
+        const totalAlquiler = dataArray.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0);
         doc.font(F.r).fontSize(9).fillColor(C.dark)
           .text(`Honorarios alquiler (${honPct}%)`, PAGE.margin + 12, hy);
         doc.font(F.b).fontSize(9).fillColor(C.black)

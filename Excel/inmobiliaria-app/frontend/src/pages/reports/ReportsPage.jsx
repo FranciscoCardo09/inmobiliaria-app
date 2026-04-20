@@ -25,6 +25,7 @@ import Button from '../../components/ui/Button'
 import { LoadingPage } from '../../components/ui/Loading'
 import EmptyState from '../../components/ui/EmptyState'
 import { useNotifications } from '../../hooks/useNotifications'
+import { computeGrandTotals } from '../../utils/reportTotals'
 import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import {
   DocumentTextIcon,
@@ -202,12 +203,9 @@ function LiquidacionTab({ groupId }) {
     })
   }, [contracts])
 
-  const filteredData = useMemo(() => {
-    const base = allData || []
-    // When specific contracts or owner are selected, show all — don't filter by payment status
-    if (selectedContractIds.length > 0 || selectedOwnerId) return base
-    return soloConPago ? base.filter((d) => d.isCancelled) : base
-  }, [allData, soloConPago, selectedContractIds, selectedOwnerId])
+  // Always include all rows from the server — grand totals are computed via computeGrandTotals
+  // which counts only paid rows. soloConPago now controls UI visibility of unpaid rows only.
+  const filteredData = useMemo(() => allData || [], [allData])
 
   // Build effective data applying local gastos selections for preview
   // Services stay in conceptos and total unchanged — gastos only affect honorarios section
@@ -235,17 +233,13 @@ function LiquidacionTab({ groupId }) {
         }
       }
     }
-    // Determine which contractIds to send, matching what the preview shows
+    // When contracts are explicitly selected, restrict to those only.
+    // Otherwise let the backend return all contracts for the period/owner —
+    // the export templates now handle the paid/unpaid split visually.
     let contractIdsForDownload
     if (selectedContractIds.length > 0) {
-      // Explicit selection always wins — send all selected contracts
       contractIdsForDownload = selectedContractIds
-    } else if (soloConPago && !selectedOwnerId) {
-      // No explicit selection and no owner filter: restrict to paid contracts only
-      contractIdsForDownload = filteredData.map((d) => d.contractId)
-      if (contractIdsForDownload.length === 0) contractIdsForDownload = undefined
     }
-    // Otherwise (owner selected, or soloConPago=false with no selection): no contractIds restriction
 
     const descuentosBody = {}
     for (const [contractId, val] of Object.entries(descuentosAlquiler)) {
@@ -311,8 +305,12 @@ function LiquidacionTab({ groupId }) {
     return txns
   }, [effectiveData])
 
-  const grandTotal = useMemo(() => effectiveData.reduce((s, d) => s + d.total, 0), [effectiveData])
-  const grandSubtotalAlquileres = useMemo(() => effectiveData.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0), [effectiveData])
+  const {
+    grandTotal,
+    grandSubtotalAlquileres,
+    grandSubtotalAlquileresUnpaid,
+    unpaidCount,
+  } = useMemo(() => computeGrandTotals(effectiveData), [effectiveData])
   const totalPagado = useMemo(() => allTransactions.reduce((s, t) => s + t.monto, 0), [allTransactions])
   const saldo = grandTotal - totalPagado
 
@@ -480,14 +478,21 @@ function LiquidacionTab({ groupId }) {
           </Card>
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
-            {effectiveData.map((data, idx) => {
+            {effectiveData
+              .filter((d) => !soloConPago || d.isRentPaid)
+              .map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
               const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
               const disponibles = data.serviciosDisponibles || []
 
               return (
                 <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
-                  <h3 className="font-semibold text-sm mb-2">{addr} - {data.inquilino.nombre}</h3>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
+                    {!data.isRentPaid && (
+                      <span className="badge badge-error badge-sm text-white font-bold">NO COBRADO</span>
+                    )}
+                  </div>
 
                   {/* Conceptos table */}
                   <div className="overflow-x-auto">
@@ -632,22 +637,27 @@ function LiquidacionTab({ groupId }) {
                 </div>
               </div>
 
-              {/* Grand Total Alquileres */}
+              {/* Grand Total Alquileres — paid only */}
               <div>
                 <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
-                  <span className="font-bold text-lg uppercase">Total Alquileres</span>
+                  <span className="font-bold text-lg uppercase">Total Alquileres Cobrados</span>
                   <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
                 </div>
                 <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
                   Son: {numeroATexto(grandSubtotalAlquileres)}
                 </div>
+                {grandSubtotalAlquileresUnpaid > 0 && (
+                  <div className="px-4 py-1 text-xs text-error rounded-b border-x border-b border-base-300">
+                    Pendiente de cobro ({unpaidCount} alquiler{unpaidCount !== 1 ? 'es' : ''}): {formatCurrency(grandSubtotalAlquileresUnpaid)}
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Honorarios summary (all contracts) */}
             {effectiveData.some(d => d.honorarios) && (() => {
-              const totalHon = effectiveData.reduce((s, d) => s + (d.honorarios?.monto || 0), 0)
-              const allGastos = effectiveData.flatMap(d => d.honorarios?.gastosAMiCargo || [])
+              const totalHon = effectiveData.reduce((s, d) => s + (d.honorariosCobrado || 0), 0)
+              const allGastos = effectiveData.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || [])
               const gastosGrouped = []
               for (const g of allGastos) {
                 const ex = gastosGrouped.find(x => x.concepto === g.concepto)
@@ -655,7 +665,7 @@ function LiquidacionTab({ groupId }) {
                 else gastosGrouped.push({ ...g })
               }
               const honPct = effectiveData.find(d => d.honorarios)?.honorarios.porcentaje
-              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0)
+              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0)
               return (
                 <div className="mt-3 p-3 bg-base-200 rounded-lg">
                   <p className="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Honorarios totales</p>

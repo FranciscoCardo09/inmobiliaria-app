@@ -1,5 +1,5 @@
 // HTML Templates - Editable HTML for copy/paste into Word
-const { MONTH_NAMES } = require('./reportDataService');
+const { MONTH_NAMES, computeGrandTotals } = require('./reportDataService');
 const { numeroATexto } = require('../utils/helpers');
 
 const fmt = (amount, currency = 'ARS') => {
@@ -167,8 +167,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
   const emp = dataArray[0].empresa;
   const currency = dataArray[0].currency;
   const periodo = dataArray[0].periodo;
-  let grandTotal = 0;
-  for (const d of dataArray) grandTotal += d.total;
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
 
   const propertyBlocks = dataArray.map((data) => {
     const conceptosFiltered = data.conceptos.filter(c => !(c.concepto.includes('Punitorios') && c.importe === 0));
@@ -180,14 +179,16 @@ const generateLiquidacionAllHTML = (dataArray) => {
       return `<tr><td style="padding:3px 20px;font-family:Arial;font-size:9pt;color:#666;${boldStyle}">${escHtml(label)}</td><td style="padding:3px 10px;font-family:Arial;font-size:9pt;color:#333;text-align:right;${boldStyle}">${fmt(c.importe, currency)}</td></tr>`;
     }).join('');
 
+    const noCobradoBadge = data.isRentPaid ? '' : '<span style="font-family:Arial;font-size:8pt;font-weight:bold;color:#CC0000;margin-left:8px">NO COBRADO</span>';
+
     return `
-    <div style="margin-bottom:12px;padding:10px;background:#FAFAFA;border:1px solid #E0E0E0">
+    <div style="margin-bottom:12px;padding:10px;background:#FAFAFA;border:1px solid ${data.isRentPaid ? '#E0E0E0' : '#FFCCCC'}">
       <div style="display:flex;justify-content:space-between">
         <div>
-          <strong style="font-family:Arial;font-size:10pt;color:#000">${escHtml(addr)}</strong><br>
+          <strong style="font-family:Arial;font-size:10pt;color:#000">${escHtml(addr)}</strong>${noCobradoBadge}<br>
           <span style="font-family:Arial;font-size:9pt;color:#666">${escHtml(data.inquilino.nombre)}</span>
         </div>
-        <strong style="font-family:Arial;font-size:11pt;color:#000">${fmt(data.total, currency)}</strong>
+        <strong style="font-family:Arial;font-size:11pt;color:${data.isRentPaid ? '#000' : '#CC0000'}">${fmt(data.total, currency)}</strong>
       </div>
       <table style="width:100%;margin-top:6px">${rows}</table>
     </div>`;
@@ -206,10 +207,11 @@ const generateLiquidacionAllHTML = (dataArray) => {
   <hr style="border:none;border-top:1px solid #000;margin-bottom:15px">
   ${propertyBlocks}
   <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
-    <strong style="font-family:Arial;font-size:13pt">TOTAL ALQUILERES</strong>
+    <strong style="font-family:Arial;font-size:13pt">TOTAL ALQUILERES COBRADOS</strong>
     <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandSubtotalAlquileres, currency)}</strong>
   </div>
   <p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:6px 0 2px 0">Son: ${escHtml(numeroATexto(grandSubtotalAlquileres))}</p>
+  ${grandSubtotalAlquileresUnpaid > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#CC0000;font-style:italic;margin:4px 0 8px 0">Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}</p>` : ''}
 
   <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
     <strong style="font-family:Arial;font-size:13pt">TOTAL</strong>
@@ -219,13 +221,13 @@ const generateLiquidacionAllHTML = (dataArray) => {
   ${(() => {
     const firstHon = dataArray.find(d => d.honorarios);
     if (!firstHon) return '';
-    const totalHon = dataArray.reduce((s, d) => s + (d.honorarios?.monto || 0), 0);
+    const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
     const totalHonLetras = numeroATexto(totalHon);
     const honPct = firstHon.honorarios.porcentaje;
-    const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
+    const totalAlquiler = dataArray.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0);
 
-    // Aggregate gastos across contracts
-    const allGastos = dataArray.flatMap(d => d.honorarios?.gastosAMiCargo || []);
+    // Only aggregate gastos from paid rows
+    const allGastos = dataArray.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || []);
     const gastosGrouped = [];
     for (const g of allGastos) {
       const ex = gastosGrouped.find(x => x.concepto === g.concepto);

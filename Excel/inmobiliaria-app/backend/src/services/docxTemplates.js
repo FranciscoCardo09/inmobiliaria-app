@@ -4,7 +4,7 @@ const {
   WidthType, AlignmentType, BorderStyle, HeadingLevel, ShadingType,
   PageBreak, Header, Footer,
 } = require('docx');
-const { MONTH_NAMES } = require('./reportDataService');
+const { MONTH_NAMES, computeGrandTotals } = require('./reportDataService');
 
 const fmt = (amount, currency = 'ARS') => {
   if (amount == null) return '-';
@@ -330,8 +330,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   const currency = dataArray[0].currency;
   const periodo = dataArray[0].periodo;
 
-  let grandTotal = 0;
-  for (const d of dataArray) grandTotal += d.total;
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
 
   const children = [];
 
@@ -365,7 +364,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   children.push(new Paragraph({
     children: [
       new TextRun({ text: `Propiedades: ${dataArray.length}`, size: 18, font: 'Arial', color: DARK }),
-      new TextRun({ text: `     Total: ${fmt(grandTotal, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
+      new TextRun({ text: `     Cobrado: ${fmt(grandTotal, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
     ],
     spacing: { after: 160 },
   }));
@@ -381,6 +380,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       children: [
         new TextRun({ text: addr, bold: true, size: 18, font: 'Arial', color: BLACK }),
         new TextRun({ text: ` — ${data.inquilino.nombre}`, size: 18, font: 'Arial', color: MEDIUM }),
+        ...(data.isRentPaid ? [] : [new TextRun({ text: '  [NO COBRADO]', bold: true, size: 16, font: 'Arial', color: 'CC0000' })]),
       ],
       spacing: { before: 80, after: 40 },
     }));
@@ -408,8 +408,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
     children.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { after: 80 } }));
   }
 
-  // TOTAL ALQUILERES
-  const grandSubtotalAlquileres = dataArray.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0);
+  // TOTAL ALQUILERES (paid only)
   children.push(new Paragraph({ spacing: { before: 160 } }));
   children.push(new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -417,7 +416,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       new TableRow({
         children: [
           new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL ALQUILERES', bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL ALQUILERES COBRADOS', bold: true, size: 26, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
             shading: { type: ShadingType.SOLID, color: BLACK },
             borders: THIN_BORDER,
           }),
@@ -434,8 +433,15 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
   children.push(new Paragraph({
     children: [new TextRun({ text: `Son: ${alquilerLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
-    spacing: { before: 60, after: 160 },
+    spacing: { before: 60, after: grandSubtotalAlquileresUnpaid > 0 ? 40 : 160 },
   }));
+
+  if (grandSubtotalAlquileresUnpaid > 0) {
+    children.push(new Paragraph({
+      children: [new TextRun({ text: `Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, size: 16, font: 'Arial', color: 'CC0000', italics: true })],
+      spacing: { after: 160 },
+    }));
+  }
 
   // Grand Total
   children.push(new Table({
