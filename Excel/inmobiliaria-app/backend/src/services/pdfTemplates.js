@@ -1223,8 +1223,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
     y = drawTitle(doc, y, 'Liquidación General',
       `${periodo.label}`);
 
-    // Grand total pre-calc: only paid (isCancelled) rentals count
-    const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, paidCount, unpaidCount } = computeGrandTotals(dataArray);
+    // Grand total pre-calc: includes fully-paid + partially-paid rentals
+    const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, paidCount, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
     // Metric cards
     y = drawMetrics(doc, y, [
@@ -1248,33 +1248,52 @@ const generateLiquidacionAllPDF = (dataArray) => {
         return true;
       });
 
-      const cardRows = conceptosFiltered.length;
-      const cardH = cardRows * 18 + 46;
-      checkNewPage(cardH + 10);
+      // Calculate breakdown rows to determine card height
+      const amtPaid = data.amountPaid || 0;
+      const hasBreakdown = amtPaid > 0;
+      const breakdownLines = hasBreakdown ? [
+        amtPaid > 0, // "Pagado" line
+        (data.pendingAmount || 0) > 0, // "Pendiente" line
+        (data.paidServicios || 0) > 0,
+        (data.paidPunitorios || 0) > 0,
+        (data.paidAlquiler || 0) > 0,
+        (data.saldoAFavor || 0) > 0,
+      ].filter(Boolean).length : 0;
 
-      // Property card - thin border, no color accent
+      const cardRows = conceptosFiltered.length;
+      const breakdownH = hasBreakdown ? 10 + breakdownLines * 13 + 6 : 0; // padding + rows + separator
+      const cardH = 42 + cardRows * 15 + breakdownH;
+      checkNewPage(cardH + 8);
+
+      // Property card - thin border; colored by status
+      const borderColor = data.paymentStatus === 'NO COBRADO' ? '#FFCCCC'
+        : data.paymentStatus === 'PAGO PARCIAL' ? '#FFE0A0'
+        : data.paymentStatus === 'SALDO A FAVOR' ? '#A0D0FF' : C.line;
       fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
-      strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
+      strokeR(doc, PAGE.margin, y, W, cardH, borderColor, 0.5, 0);
 
       // Property address + tenant
       const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
       doc.font(F.b).fontSize(9).fillColor(C.black)
-        .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.6 });
+        .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.55 });
       doc.font(F.r).fontSize(8).fillColor(C.medium)
-        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.6 });
+        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.55 });
 
-      // Subtotal on right; mark unpaid rentals clearly
-      if (!data.isRentPaid) {
-        doc.font(F.b).fontSize(7.5).fillColor('#CC0000')
-          .text('NO COBRADO', PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
-        doc.font(F.b).fontSize(10).fillColor('#CC0000')
-          .text(fmt(data.total, currency), PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
-      } else {
-        doc.font(F.b).fontSize(10).fillColor(C.black)
-          .text(fmt(data.total, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
-      }
+      // Status label + total on right
+      const statusLabels = {
+        'PAGADO': { label: 'PAGADO', color: '#228B22' },
+        'PAGO PARCIAL': { label: 'PAGO PARCIAL', color: C.amber },
+        'NO COBRADO': { label: 'NO COBRADO', color: '#CC0000' },
+        'SALDO A FAVOR': { label: 'SALDO A FAVOR', color: '#0066CC' },
+      };
+      const sl = statusLabels[data.paymentStatus] || { label: data.paymentStatus, color: C.dark };
 
-      let iy = y + 38;
+      doc.font(F.b).fontSize(7).fillColor(sl.color)
+        .text(sl.label, PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+      doc.font(F.b).fontSize(10).fillColor(data.paymentStatus === 'NO COBRADO' ? '#CC0000' : C.black)
+        .text(fmt(data.total, currency), PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
+
+      let iy = y + 34;
 
       // Conceptos
       for (const c of conceptosFiltered) {
@@ -1284,14 +1303,64 @@ const generateLiquidacionAllPDF = (dataArray) => {
           .text(label, PAGE.margin + 24, iy, { width: W * 0.55 });
         doc.font(conceptFont).fontSize(8).fillColor(C.dark)
           .text(fmt(c.importe, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-        iy += 18;
+        iy += 15;
       }
 
-      y += cardH + 10;
+      // Payment breakdown (inside the card)
+      if (hasBreakdown) {
+        iy += 2;
+        // Thin separator line
+        doc.strokeColor(C.line).lineWidth(0.3)
+          .moveTo(PAGE.margin + 18, iy).lineTo(PAGE.width - PAGE.margin - 18, iy).stroke();
+        iy += 6;
+
+        const bx = PAGE.margin + 24;
+        const bw = W - 48;
+
+        if (amtPaid > 0) {
+          doc.font(F.b).fontSize(7.5).fillColor(C.dark).text('Pagado', bx, iy);
+          doc.font(F.b).fontSize(7.5).fillColor(C.black).text(fmt(amtPaid, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+        if ((data.pendingAmount || 0) > 0) {
+          doc.font(F.r).fontSize(7.5).fillColor('#CC0000').text('Pendiente', bx, iy);
+          doc.font(F.b).fontSize(7.5).fillColor('#CC0000').text(fmt(data.pendingAmount, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+
+        // Allocation detail
+        if ((data.paidServicios || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Servicios', bx + 8, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidServicios, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+        if ((data.paidPunitorios || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Punitorios', bx + 8, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidPunitorios, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+        if ((data.paidAlquiler || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Alquiler', bx + 8, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidAlquiler, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+        if ((data.saldoAFavor || 0) > 0) {
+          doc.font(F.b).fontSize(7).fillColor('#0066CC').text('Saldo a favor', bx, iy);
+          doc.font(F.b).fontSize(7).fillColor('#0066CC').text(fmt(data.saldoAFavor, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 13;
+        }
+      }
+
+      y += cardH + 8;
     }
 
-    // TOTAL ALQUILERES box
-    checkNewPage(60);
+    // ── TOTALS SECTION ──
+    // Calculate required height for the entire totals block so it stays together
+    const pendingLines = (grandSubtotalAlquileresPartial > 0 ? 1 : 0) + (grandSubtotalAlquileresUnpaid > 0 ? 1 : 0);
+    const totalsBlockH = 34 + 20 + (pendingLines * 16) + 12 + 34 + 20 + 12; // two total bars + words + pending lines + spacing
+    checkNewPage(totalsBlockH);
+
+    // TOTAL ALQUILERES COBRADOS box
     y += 4;
     const totalH = 34;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
@@ -1299,98 +1368,114 @@ const generateLiquidacionAllPDF = (dataArray) => {
     doc.font(F.b).fontSize(11).fillColor(C.white)
       .text('TOTAL ALQUILERES COBRADOS', PAGE.margin + 14, y + 10);
     doc.text(fmt(grandSubtotalAlquileres, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
-    y += totalH + 10;
+    y += totalH + 4;
 
-    // Amount in words for Alquileres
+    // Amount in words
     const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${alquilerLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-    y += 18;
+    y += 16;
 
-    // Pending / not collected summary
+    // Pending / partial summary
+    if (grandSubtotalAlquileresPartial > 0) {
+      doc.font(F.r).fontSize(8).fillColor(C.amber)
+        .text(`Pendiente de cobro parcial (${partialCount} alquiler${partialCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresPartial, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
+      y += 14;
+    }
     if (grandSubtotalAlquileresUnpaid > 0) {
-      checkNewPage(20);
       doc.font(F.r).fontSize(8).fillColor('#CC0000')
-        .text(`Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
+        .text(`No cobrado (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
       y += 14;
     }
 
-    // TOTAL box
-    checkNewPage(60);
+    // TOTAL COBRADO box
+    y += 6;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
     doc.font(F.b).fontSize(11).fillColor(C.white)
-      .text('TOTAL', PAGE.margin + 14, y + 10);
+      .text('TOTAL COBRADO', PAGE.margin + 14, y + 10);
     doc.text(fmt(grandTotal, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
-    y += totalH + 10;
+    y += totalH + 4;
 
-    // Amount in words for Total
     const totalLetras = numeroATexto(grandTotal);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 14;
+
+    // Grand pending total
+    const grandPendingTotal = dataArray.reduce((s, d) => s + (d.pendingAmount || 0), 0);
+    if (grandPendingTotal > 0) {
+      y += 2;
+      fillR(doc, PAGE.margin, y, W, 26, '#FFF0F0', 0);
+      strokeR(doc, PAGE.margin, y, W, 26, '#FFCCCC', 0.5, 0);
+      doc.font(F.b).fontSize(9).fillColor('#CC0000')
+        .text('TOTAL PENDIENTE', PAGE.margin + 14, y + 7);
+      doc.text(fmt(grandPendingTotal, currency), PAGE.margin + 14, y + 7, { width: W - 28, align: 'right' });
+      y += 32;
+    }
+
+    // Grand saldo a favor
+    const grandSaldoFavor = dataArray.reduce((s, d) => s + (d.saldoAFavor || 0), 0);
+    if (grandSaldoFavor > 0) {
+      fillR(doc, PAGE.margin, y, W, 26, '#F0F8FF', 0);
+      strokeR(doc, PAGE.margin, y, W, 26, '#A0D0FF', 0.5, 0);
+      doc.font(F.b).fontSize(9).fillColor('#0066CC')
+        .text('TOTAL SALDO A FAVOR', PAGE.margin + 14, y + 7);
+      doc.text(fmt(grandSaldoFavor, currency), PAGE.margin + 14, y + 7, { width: W - 28, align: 'right' });
+      y += 32;
+    }
+
     y += 10;
 
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
     if (firstHon) {
-      // Only aggregate gastos from paid rows (honorarios on uncollected rent = 0)
-      const allGastos = dataArray.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || []);
+      const allGastos = dataArray.filter(d => d.paymentStatus !== 'NO COBRADO').flatMap(d => d.honorarios?.gastosAMiCargo || []);
       const gastosGrouped = [];
       for (const g of allGastos) {
         const existing = gastosGrouped.find(x => x.concepto === g.concepto);
-        if (existing) {
-          existing.importe += g.importe;
-        } else {
-          gastosGrouped.push({ ...g });
-        }
+        if (existing) { existing.importe += g.importe; }
+        else gastosGrouped.push({ ...g });
       }
 
       const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
       const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
       const rowH = 16;
       const honPct = firstHon.honorarios.porcentaje;
-      const alquilerLines = honPct > 0 ? 1 : 0;
-      const honH = 14 + rowH * (alquilerLines + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 34;
+      const alquilerLinesHon = honPct > 0 ? 1 : 0;
+      const honH = 14 + rowH * (alquilerLinesHon + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 34;
       checkNewPage(honH + 20);
 
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
       let hy = y + 8;
-      doc.font(F.b).fontSize(9).fillColor(C.medium)
-        .text('HONORARIOS', PAGE.margin + 12, hy);
+      doc.font(F.b).fontSize(9).fillColor(C.medium).text('HONORARIOS', PAGE.margin + 12, hy);
       hy += 12;
 
       if (honPct > 0) {
-        const totalAlquiler = dataArray.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0);
-        doc.font(F.r).fontSize(9).fillColor(C.dark)
-          .text(`Honorarios alquiler (${honPct}%)`, PAGE.margin + 12, hy);
-        doc.font(F.b).fontSize(9).fillColor(C.black)
-          .text(fmt(totalAlquiler, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        const totalAlquilerHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
+        doc.font(F.r).fontSize(9).fillColor(C.dark).text(`Honorarios alquiler (${honPct}%)`, PAGE.margin + 12, hy);
+        doc.font(F.b).fontSize(9).fillColor(C.black).text(fmt(totalAlquilerHon, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
         hy += rowH;
       }
 
       for (const g of gastosGrouped) {
         doc.font(F.r).fontSize(8.5).fillColor(C.dark).text(`  ${g.concepto}`, PAGE.margin + 12, hy, { width: W * 0.65 });
-        doc.font(F.b).fontSize(8.5).fillColor(C.black)
-          .text(fmt(g.importe, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
+        doc.font(F.b).fontSize(8.5).fillColor(C.black).text(fmt(g.importe, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
         hy += rowH;
       }
 
       if (gastosGrouped.length > 0) {
-        doc.strokeColor(C.line).lineWidth(0.4)
-          .moveTo(PAGE.margin + 12, hy).lineTo(PAGE.width - PAGE.margin - 12, hy).stroke();
+        doc.strokeColor(C.line).lineWidth(0.4).moveTo(PAGE.margin + 12, hy).lineTo(PAGE.width - PAGE.margin - 12, hy).stroke();
         hy += 6;
       }
 
-      doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text('TOTAL HONORARIOS', PAGE.margin + 12, hy);
+      doc.font(F.b).fontSize(10).fillColor(C.black).text('TOTAL HONORARIOS', PAGE.margin + 12, hy);
       doc.text(fmt(totalHon, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
       hy += 14;
 
       if (totalHonLetras) {
-        doc.font(F.r).fontSize(7.5).fillColor(C.dark)
-          .text(`Son: ${totalHonLetras}`, PAGE.margin + 12, hy, { width: W - 24 });
+        doc.font(F.r).fontSize(7.5).fillColor(C.dark).text(`Son: ${totalHonLetras}`, PAGE.margin + 12, hy, { width: W - 24 });
       }
 
       y += honH + 10;
@@ -1408,9 +1493,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       checkNewPage(80);
       y = drawSection(doc, y, 'Pagos Registrados');
 
-      // Sort by date
       allTransactions.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-
       const payRows = allTransactions.map(t => {
         const metodo = t.metodo === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo';
         return [fmtDate(t.fecha), t.inquilino || '-', metodo, fmt(t.monto, currency)];
@@ -1418,31 +1501,34 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
       y = drawTable(doc, y, ['Fecha', 'Inquilino', 'Medio', 'Monto'], payRows, {
         colWidths: [W * 0.18, W * 0.34, W * 0.2, W * 0.28],
-        fontSize: 8,
-        headerFontSize: 7,
+        fontSize: 8, headerFontSize: 7,
         colAligns: ['left', 'left', 'left', 'right'],
       });
 
       // Payment summary card
       const totalPagado = allTransactions.reduce((s, t) => s + t.monto, 0);
-      const saldo = grandTotal - totalPagado;
+      const summaryLineCount = 1 + (grandPendingTotal > 0 ? 1 : 0) + (grandSaldoFavor > 0 ? 1 : 0);
+      const summaryH = 10 + summaryLineCount * 18;
+      checkNewPage(summaryH + 12);
 
-      y += 12;
-      const summaryH = Math.abs(saldo) > 0.01 ? 50 : 34;
+      y += 8;
       fillR(doc, PAGE.margin, y, W, summaryH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, summaryH, C.line, 0.5, 0);
 
-      doc.font(F.b).fontSize(9).fillColor(C.black)
-        .text('Total Pagado:', PAGE.margin + 12, y + 10);
-      doc.text(fmt(totalPagado, currency), PAGE.margin + 12, y + 10, { width: W - 24, align: 'right' });
+      let sy = y + 8;
+      doc.font(F.b).fontSize(9).fillColor(C.black).text('Total Pagado:', PAGE.margin + 12, sy);
+      doc.text(fmt(totalPagado, currency), PAGE.margin + 12, sy, { width: W - 24, align: 'right' });
+      sy += 18;
 
-      if (Math.abs(saldo) > 0.01) {
-        const balLabel = saldo > 0 ? 'Saldo Pendiente:' : 'Saldo a Favor:';
-
-        doc.fillColor(C.dark)
-          .text(balLabel, PAGE.margin + 12, y + 28);
-        doc.font(F.b).fillColor(C.black)
-          .text(fmt(Math.abs(saldo), currency), PAGE.margin + 12, y + 28, { width: W - 24, align: 'right' });
+      if (grandPendingTotal > 0) {
+        doc.font(F.r).fontSize(9).fillColor('#CC0000').text('Total Pendiente:', PAGE.margin + 12, sy);
+        doc.font(F.b).fontSize(9).fillColor('#CC0000').text(fmt(grandPendingTotal, currency), PAGE.margin + 12, sy, { width: W - 24, align: 'right' });
+        sy += 18;
+      }
+      if (grandSaldoFavor > 0) {
+        doc.font(F.r).fontSize(9).fillColor('#0066CC').text('Saldo a Favor:', PAGE.margin + 12, sy);
+        doc.font(F.b).fontSize(9).fillColor('#0066CC').text(fmt(grandSaldoFavor, currency), PAGE.margin + 12, sy, { width: W - 24, align: 'right' });
+        sy += 18;
       }
 
       y += summaryH + 10;

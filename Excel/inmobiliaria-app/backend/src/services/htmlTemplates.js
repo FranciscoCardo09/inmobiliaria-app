@@ -167,7 +167,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
   const emp = dataArray[0].empresa;
   const currency = dataArray[0].currency;
   const periodo = dataArray[0].periodo;
-  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
   const propertyBlocks = dataArray.map((data) => {
     const conceptosFiltered = data.conceptos.filter(c => !(c.concepto.includes('Punitorios') && c.importe === 0));
@@ -179,18 +179,51 @@ const generateLiquidacionAllHTML = (dataArray) => {
       return `<tr><td style="padding:3px 20px;font-family:Arial;font-size:9pt;color:#666;${boldStyle}">${escHtml(label)}</td><td style="padding:3px 10px;font-family:Arial;font-size:9pt;color:#333;text-align:right;${boldStyle}">${fmt(c.importe, currency)}</td></tr>`;
     }).join('');
 
-    const noCobradoBadge = data.isRentPaid ? '' : '<span style="font-family:Arial;font-size:8pt;font-weight:bold;color:#CC0000;margin-left:8px">NO COBRADO</span>';
+    const statusColors = {
+      'PAGADO': '#228B22', 'PAGO PARCIAL': '#8B6914',
+      'NO COBRADO': '#CC0000', 'SALDO A FAVOR': '#0066CC',
+    };
+    const statusColor = statusColors[data.paymentStatus] || '#666';
+    const statusBadge = `<span style="font-family:Arial;font-size:8pt;font-weight:bold;color:${statusColor};margin-left:8px">${data.paymentStatus}</span>`;
+
+    const borderColor = data.paymentStatus === 'NO COBRADO' ? '#FFCCCC'
+      : data.paymentStatus === 'PAGO PARCIAL' ? '#FFE0A0'
+      : data.paymentStatus === 'SALDO A FAVOR' ? '#A0D0FF' : '#E0E0E0';
+
+    // Payment breakdown rows (only where value > 0)
+    const amtPaid = data.amountPaid || 0;
+    let breakdownHtml = '';
+    if (amtPaid > 0) {
+      const bRows = [];
+      bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333">Pagado</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333;text-align:right">${fmt(amtPaid, currency)}</td></tr>`);
+      if ((data.pendingAmount || 0) > 0) {
+        bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;color:#CC0000">Pendiente</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#CC0000;text-align:right">${fmt(data.pendingAmount, currency)}</td></tr>`);
+      }
+      if ((data.paidServicios || 0) > 0) {
+        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Servicios</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidServicios, currency)}</td></tr>`);
+      }
+      if ((data.paidPunitorios || 0) > 0) {
+        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Punitorios</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidPunitorios, currency)}</td></tr>`);
+      }
+      if ((data.paidAlquiler || 0) > 0) {
+        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Alquiler</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidAlquiler, currency)}</td></tr>`);
+      }
+      if ((data.saldoAFavor || 0) > 0) {
+        bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC">Saldo a favor</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC;text-align:right">${fmt(data.saldoAFavor, currency)}</td></tr>`);
+      }
+      breakdownHtml = `<table style="width:100%;margin-top:4px;border-top:1px solid #E0E0E0;padding-top:4px">${bRows.join('')}</table>`;
+    }
 
     return `
-    <div style="margin-bottom:12px;padding:10px;background:#FAFAFA;border:1px solid ${data.isRentPaid ? '#E0E0E0' : '#FFCCCC'}">
+    <div style="margin-bottom:10px;padding:10px;background:#FAFAFA;border:1px solid ${borderColor};page-break-inside:avoid;break-inside:avoid">
       <div style="display:flex;justify-content:space-between">
         <div>
-          <strong style="font-family:Arial;font-size:10pt;color:#000">${escHtml(addr)}</strong>${noCobradoBadge}<br>
+          <strong style="font-family:Arial;font-size:10pt;color:#000">${escHtml(addr)}</strong>${statusBadge}<br>
           <span style="font-family:Arial;font-size:9pt;color:#666">${escHtml(data.inquilino.nombre)}</span>
         </div>
-        <strong style="font-family:Arial;font-size:11pt;color:${data.isRentPaid ? '#000' : '#CC0000'}">${fmt(data.total, currency)}</strong>
+        <strong style="font-family:Arial;font-size:11pt;color:#000">${fmt(data.total, currency)}</strong>
       </div>
-      <table style="width:100%;margin-top:6px">${rows}</table>
+      <table style="width:100%;margin-top:6px">${rows}</table>${breakdownHtml}
     </div>`;
   }).join('');
 
@@ -211,7 +244,8 @@ const generateLiquidacionAllHTML = (dataArray) => {
     <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandSubtotalAlquileres, currency)}</strong>
   </div>
   <p style="font-family:Arial;font-size:8pt;color:#333;font-style:italic;margin:6px 0 2px 0">Son: ${escHtml(numeroATexto(grandSubtotalAlquileres))}</p>
-  ${grandSubtotalAlquileresUnpaid > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#CC0000;font-style:italic;margin:4px 0 8px 0">Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}</p>` : ''}
+  ${grandSubtotalAlquileresPartial > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#8B6914;font-style:italic;margin:4px 0 4px 0">Pendiente de cobro parcial (${partialCount} alquiler${partialCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresPartial, currency)}</p>` : ''}
+  ${grandSubtotalAlquileresUnpaid > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#CC0000;font-style:italic;margin:4px 0 8px 0">No cobrado (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}</p>` : ''}
 
   <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
     <strong style="font-family:Arial;font-size:13pt">TOTAL</strong>
@@ -224,10 +258,10 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
     const totalHonLetras = numeroATexto(totalHon);
     const honPct = firstHon.honorarios.porcentaje;
-    const totalAlquiler = dataArray.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0);
+    const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
 
-    // Only aggregate gastos from paid rows
-    const allGastos = dataArray.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || []);
+    // Aggregate gastos from paid + partial rows
+    const allGastos = dataArray.filter(d => d.paymentStatus !== 'NO COBRADO').flatMap(d => d.honorarios?.gastosAMiCargo || []);
     const gastosGrouped = [];
     for (const g of allGastos) {
       const ex = gastosGrouped.find(x => x.concepto === g.concepto);

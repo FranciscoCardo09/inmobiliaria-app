@@ -1023,7 +1023,7 @@ const recalculateMultipleRecords = async (recordIds, tx = null) => {
   if (tx) {
     return _recalculateCore(recordIds, tx);
   }
-  return prisma.$transaction((t) => _recalculateCore(recordIds, t));
+  return prisma.$transaction((t) => _recalculateCore(recordIds, t), { timeout: 30000 });
 };
 
 /**

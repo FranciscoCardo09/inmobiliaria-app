@@ -163,7 +163,7 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
   if (tx) {
     return await execute(tx);
   } else {
-    return await prisma.$transaction(async (newTx) => await execute(newTx));
+    return await prisma.$transaction(async (newTx) => await execute(newTx), { timeout: 30000 });
   }
 };
 
