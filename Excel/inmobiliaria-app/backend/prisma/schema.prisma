@@ -557,6 +557,8 @@ model MonthlyRecord {
   @@index([groupId])
   @@index([groupId, periodMonth, periodYear])
   @@index([contractId])
+  @@index([groupId, contractId, periodYear])
+  @@index([contractId, periodYear, periodMonth])
   @@index([status])
   @@map("monthly_records")
 }

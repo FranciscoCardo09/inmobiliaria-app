@@ -831,96 +831,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
  * Recalculate a MonthlyRecord's totals after services or payment changes
  */
 const recalculateMonthlyRecord = async (monthlyRecordId) => {
-  const record = await prisma.monthlyRecord.findUnique({
+  // Leverage the gap-free downstream batch calculation to guarantee rolling balance consistency
+  await recalculateMultipleRecords([monthlyRecordId]);
+
+  // Return the fully updated record with expected payload footprint for legacy compatibility
+  return prisma.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
-    include: {
-      services: true,
-      transactions: true,
-    },
-  });
-
-  if (!record) return null;
-
-  // Sum services (DESCUENTO types subtract)
-  const services = await prisma.monthlyService.findMany({
-    where: { monthlyRecordId },
-    include: { conceptType: { select: { category: true } } },
-  });
-
-  let servicesTotal = 0;
-  for (const s of services) {
-    if (s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION') {
-      servicesTotal -= Math.abs(s.amount);
-    } else {
-      servicesTotal += s.amount;
-    }
-  }
-
-  // Sum payments
-  const amountPaid = record.transactions.reduce((sum, t) => sum + t.amount, 0);
-
-  // Get latest punitory info from most recent transaction.
-  // punitoryForgiven defaults to false: it is only true while an active transaction carries forgiveness.
-  let punitoryAmount = record.punitoryAmount;
-  let punitoryDays = record.punitoryDays;
-  let punitoryForgiven = false;
-  if (record.transactions.length > 0) {
-    const lastTx = record.transactions[record.transactions.length - 1];
-    punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
-    punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
-    punitoryForgiven = lastTx.punitoryForgiven;
-  } else {
-    // No transactions remain: reset so the live punitory calculation takes over
-    punitoryAmount = 0;
-    punitoryDays = 0;
-  }
-
-  const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
-  const totalDue = record.rentAmount + servicesTotal + punitoryAmount + ivaAmount - record.previousBalance;
-  const balance = Math.round((amountPaid - Math.max(totalDue, 0)) * 100) / 100;
-  // Considerar saldo condonado para determinar status
-  const effectiveBalance = balance + (record.balanceForgiven || 0);
-
-  // Check if there's an open debt for this record
-  const openDebt = await prisma.debt.findFirst({
-    where: {
-      monthlyRecordId,
-      status: { in: ['OPEN', 'PARTIAL'] },
-    },
-  });
-
-  // Determine status: COMPLETE only if ALL is paid (rent + services + punitorios)
-  let status = 'PENDING';
-  if (openDebt) {
-    // Si hay deuda abierta, NUNCA marcar como COMPLETE
-    status = amountPaid > 0 ? 'PARTIAL' : 'PENDING';
-  } else if (effectiveBalance >= -1 && amountPaid > 0) {
-    // Paid enough (or forgiven enough) to cover everything (allow up to 1 peso rounding error)
-    status = 'COMPLETE';
-  } else if (amountPaid > 0) {
-    status = 'PARTIAL';
-  }
-
-  const isPaid = status === 'COMPLETE';
-  const fullPaymentDate = isPaid && !record.fullPaymentDate
-    ? new Date()
-    : (isPaid ? record.fullPaymentDate : null);
-
-  return prisma.monthlyRecord.update({
-    where: { id: monthlyRecordId },
-    data: {
-      servicesTotal,
-      punitoryAmount,
-      punitoryDays,
-      punitoryForgiven,
-      totalDue: Math.max(totalDue, 0),
-      amountPaid,
-      balance,
-      status,
-      isPaid,
-      isCancelled: isPaid,
-      fullPaymentDate,
-    },
     include: {
       services: {
         include: {
@@ -933,6 +849,181 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
       },
     },
   });
+};
+
+/**
+ * Helper to safely compare floats to 2 decimal places
+ */
+const _floatsDiffer = (a, b) => Math.abs((a || 0) - (b || 0)) >= 0.01;
+
+/**
+ * Core cascading recalculation logic (must run inside a valid transaction)
+ */
+const _recalculateCore = async (recordIds, tx) => {
+  if (!recordIds || (Array.isArray(recordIds) && recordIds.length === 0)) return 0;
+  
+  const ids = Array.from(new Set(recordIds));
+  
+  // 1. Find the earliest affected monthNumber per contract to ensure downstream continuity
+  const initialRecords = await tx.monthlyRecord.findMany({
+    where: { id: { in: ids } },
+    select: { contractId: true, monthNumber: true, periodYear: true } 
+  });
+
+  const minMonthsByContract = new Map();
+  for (const r of initialRecords) {
+    if (!minMonthsByContract.has(r.contractId) || r.monthNumber < minMonthsByContract.get(r.contractId).monthNumber) {
+      minMonthsByContract.set(r.contractId, { monthNumber: r.monthNumber, periodYear: r.periodYear });
+    }
+  }
+
+  const orConditions = Array.from(minMonthsByContract.entries()).map(([contractId, data]) => ({
+    contractId,
+    monthNumber: { gte: data.monthNumber },
+    periodYear: data.periodYear // Strictly bound the cascade to the same calendar year
+  }));
+
+  if (orConditions.length === 0) return 0;
+
+  // DB-BASED DISTRIBUTED LOCKING: Apply Postgres Advisory Transaction Locks
+  // Protects identically against race conditions across multiple server instances (horizontally scaled)
+  const sortedContractIds = Array.from(minMonthsByContract.keys()).sort();
+  for (const contractId of sortedContractIds) {
+    // hashtext is natively available in postgres to convert uuid to a lockable 32-bit int
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('${contractId}'))`);
+  }
+
+  // 2. Pre-fetch records with services and transactions, sorted chronologically for rolling balances
+  // This guarantees we process every month after the earliest modification point sequentially.
+  const records = await tx.monthlyRecord.findMany({
+    where: { OR: orConditions },
+    include: {
+      services: { include: { conceptType: { select: { category: true } } } },
+      transactions: true,
+    },
+    orderBy: [
+      { contractId: 'asc' },
+      { monthNumber: 'asc' }
+    ]
+  });
+
+  let numUpdated = 0;
+  let currentContractId = null;
+  let expectedNextMonthNumber = null;
+  let runningPreviousBalance = null;
+
+  for (const record of records) {
+    let servicesTotal = 0;
+    for (const s of record.services) {
+      if (s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION') {
+        servicesTotal -= Math.abs(s.amount);
+      } else {
+        servicesTotal += s.amount;
+      }
+    }
+
+    const amountPaid = record.transactions.reduce((sum, t) => sum + t.amount, 0);
+
+    let punitoryAmount = record.punitoryAmount;
+    let punitoryDays = record.punitoryDays;
+    let punitoryForgiven = false;
+    if (record.transactions.length > 0) {
+      const lastTx = record.transactions[record.transactions.length - 1];
+      punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
+      punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
+      punitoryForgiven = lastTx.punitoryForgiven;
+    } else {
+      punitoryAmount = 0;
+      punitoryDays = 0;
+    }
+
+    // Determine the active previous balance
+    const isNewContract = currentContractId !== record.contractId;
+    const isGap = !isNewContract && record.monthNumber !== expectedNextMonthNumber;
+
+    if (isGap) {
+      throw new Error(`[Integridad] Secuencia rota para el contrato ${record.contractId}: salto del mes esperado ${expectedNextMonthNumber} al ${record.monthNumber}. Recalculo abortado.`);
+    }
+
+    const activePreviousBalance = isNewContract 
+      ? record.previousBalance 
+      : runningPreviousBalance;
+
+    const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
+    const totalDue = record.rentAmount + servicesTotal + punitoryAmount + ivaAmount - activePreviousBalance;
+    const balance = Math.round((amountPaid - Math.max(totalDue, 0)) * 100) / 100;
+    const effectiveBalance = balance + (record.balanceForgiven || 0);
+
+    // Update tracking variables for the next iteration
+    currentContractId = record.contractId;
+    expectedNextMonthNumber = record.monthNumber + 1;
+    runningPreviousBalance = effectiveBalance;
+
+    // Simple check for open debt
+    const openDebt = await tx.debt.findFirst({
+      where: { monthlyRecordId: record.id, status: { in: ['OPEN', 'PARTIAL'] } },
+    });
+
+    let status = 'PENDING';
+    if (openDebt) {
+      status = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
+    } else if (effectiveBalance >= -1 && amountPaid > 0) {
+      status = 'COMPLETE';
+    } else if (amountPaid > 0) {
+      status = 'PARTIAL';
+    }
+
+    const isPaid = status === 'COMPLETE';
+    const fullPaymentDate = isPaid && !record.fullPaymentDate ? new Date() : (isPaid ? record.fullPaymentDate : null);
+
+    // Early break calculation: Don't write to DB if absolutely nothing financially changed
+    // Safe float precision matching
+    const shouldUpdate = 
+      _floatsDiffer(record.servicesTotal, servicesTotal) ||
+      _floatsDiffer(record.punitoryAmount, punitoryAmount) ||
+      record.punitoryDays !== punitoryDays ||
+      record.punitoryForgiven !== punitoryForgiven ||
+      _floatsDiffer(record.previousBalance, activePreviousBalance) ||
+      _floatsDiffer(record.totalDue, Math.max(totalDue, 0)) ||
+      _floatsDiffer(record.amountPaid, amountPaid) ||
+      _floatsDiffer(record.balance, balance) ||
+      record.status !== status ||
+      record.isPaid !== isPaid ||
+      record.isCancelled !== isPaid;
+
+    if (shouldUpdate || ids.includes(record.id)) {
+      await tx.monthlyRecord.update({
+        where: { id: record.id },
+        data: {
+          servicesTotal,
+          punitoryAmount,
+          punitoryDays,
+          punitoryForgiven,
+          previousBalance: activePreviousBalance,
+          totalDue: Math.max(totalDue, 0),
+          amountPaid,
+          balance,
+          status,
+          isPaid,
+          isCancelled: isPaid,
+          fullPaymentDate,
+        }
+      });
+      numUpdated++;
+    }
+  }
+  return numUpdated;
+};
+
+/**
+ * Recalculate multiple MonthlyRecords' totals in batch to minimize DB roundtrips.
+ * Automatically wraps logic in a transaction to safely acquire pg_advisory_xact_locks.
+ */
+const recalculateMultipleRecords = async (recordIds, tx = null) => {
+  if (tx) {
+    return _recalculateCore(recordIds, tx);
+  }
+  return prisma.$transaction((t) => _recalculateCore(recordIds, t));
 };
 
 /**
@@ -976,6 +1067,7 @@ const getMonthlyRecordById = async (groupId, id) => {
 module.exports = {
   getOrCreateMonthlyRecords,
   recalculateMonthlyRecord,
+  recalculateMultipleRecords,
   getMonthlyRecordById,
   getCalendarPeriod,
   getMonthNumber,

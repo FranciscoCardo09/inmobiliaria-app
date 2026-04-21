@@ -1,5 +1,5 @@
 // Monthly Service Service - Manage services/extras for monthly records
-const { recalculateMonthlyRecord } = require('./monthlyRecordService');
+const { recalculateMonthlyRecord, recalculateMultipleRecords } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
 
@@ -75,118 +75,140 @@ const getServicesForRecord = async (monthlyRecordId) => {
  * Bulk assign a service to multiple months for a contract.
  * Creates MonthlyRecords if they don't exist.
  */
-const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null) => {
-  const results = [];
+const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null, tx = null) => {
+  const execute = async (client) => {
+    const results = [];
+    const affectedRecordIds = new Set();
 
-  for (const { month, year } of months) {
-    // Find or create the monthly record
-    let record = await prisma.monthlyRecord.findUnique({
-      where: {
-        contractId_periodMonth_periodYear: {
-          contractId,
-          periodMonth: parseInt(month),
-          periodYear: parseInt(year),
-        },
-      },
-    });
-
-    if (!record) {
-      // Need to calculate monthNumber
-      const contract = await prisma.contract.findUnique({ where: { id: contractId } });
-      if (!contract) continue;
-
-      const startDate = new Date(contract.startDate);
-      const totalMonthsDiff = (parseInt(year) - startDate.getFullYear()) * 12 + (parseInt(month) - (startDate.getMonth() + 1));
-      const monthNumber = contract.startMonth + totalMonthsDiff;
-
-      const endMonth = contract.startMonth + contract.durationMonths - 1;
-      if (monthNumber < contract.startMonth || monthNumber > endMonth) continue;
-
-      record = await prisma.monthlyRecord.create({
-        data: {
-          groupId,
-          contractId,
-          monthNumber,
-          periodMonth: parseInt(month),
-          periodYear: parseInt(year),
-          rentAmount: contract.baseRent,
-          totalDue: contract.baseRent,
-          balance: -contract.baseRent,
-        },
-      });
-    }
-
-    // Upsert the service
-    try {
-      const service = await prisma.monthlyService.upsert({
+    for (const { month, year } of months) {
+      // Find or create the monthly record
+      let record = await client.monthlyRecord.findUnique({
         where: {
-          monthlyRecordId_conceptTypeId: {
-            monthlyRecordId: record.id,
-            conceptTypeId,
+          contractId_periodMonth_periodYear: {
+            contractId,
+            periodMonth: parseInt(month),
+            periodYear: parseInt(year),
           },
         },
-        update: { amount, description },
-        create: {
-          monthlyRecordId: record.id,
-          conceptTypeId,
-          amount,
-          description,
-        },
-        include: {
-          conceptType: { select: { id: true, name: true, label: true, category: true } },
-        },
       });
 
-      await recalculateMonthlyRecord(record.id);
-      results.push(service);
-    } catch (e) {
-      // Skip errors
-    }
-  }
+      if (!record) {
+        // Need to calculate monthNumber
+        const contract = await client.contract.findUnique({ where: { id: contractId } });
+        if (!contract) continue;
 
-  return results;
+        const startDate = new Date(contract.startDate);
+        const totalMonthsDiff = (parseInt(year) - startDate.getFullYear()) * 12 + (parseInt(month) - (startDate.getMonth() + 1));
+        const monthNumber = contract.startMonth + totalMonthsDiff;
+
+        // MINIMAL SAFE FIX: Prevent creation strictly before the start date or if explicitly inactive
+        if (monthNumber < contract.startMonth) continue;
+        if (!contract.active) continue;
+
+        if (contract.rescindedAt) {
+          const rescDate = new Date(contract.rescindedAt);
+          const rescMonthNumber = contract.startMonth + ((rescDate.getFullYear() - startDate.getFullYear()) * 12) + (rescDate.getMonth() + 1 - (startDate.getMonth() + 1));
+          if (monthNumber > rescMonthNumber) continue;
+        }
+
+        record = await client.monthlyRecord.create({
+          data: {
+            groupId,
+            contractId,
+            monthNumber,
+            periodMonth: parseInt(month),
+            periodYear: parseInt(year),
+            rentAmount: contract.baseRent,
+            totalDue: contract.baseRent,
+            balance: -contract.baseRent,
+          },
+        });
+      }
+
+      // Upsert the service
+      try {
+        const service = await client.monthlyService.upsert({
+          where: {
+            monthlyRecordId_conceptTypeId: {
+              monthlyRecordId: record.id,
+              conceptTypeId,
+            },
+          },
+          update: { amount, description },
+          create: {
+            monthlyRecordId: record.id,
+            conceptTypeId,
+            amount,
+            description,
+          },
+          include: {
+            conceptType: { select: { id: true, name: true, label: true, category: true } },
+          },
+        });
+
+        results.push(service);
+        affectedRecordIds.add(record.id);
+      } catch (e) {
+        console.error(`[bulkAssign] Error upserting service for record ${record.id}:`, e.message);
+      }
+    }
+
+    if (affectedRecordIds.size > 0) {
+      await recalculateMultipleRecords(Array.from(affectedRecordIds), client);
+    }
+
+    return results;
+  };
+
+  if (tx) {
+    return await execute(tx);
+  } else {
+    return await prisma.$transaction(async (newTx) => await execute(newTx));
+  }
 };
 
 /**
  * Copy service configuration from one month to target months
  */
 const copyConfig = async (groupId, contractId, sourceMonth, sourceYear, targetMonths) => {
-  // Get source monthly record with services
-  const sourceRecord = await prisma.monthlyRecord.findUnique({
-    where: {
-      contractId_periodMonth_periodYear: {
-        contractId,
-        periodMonth: parseInt(sourceMonth),
-        periodYear: parseInt(sourceYear),
+  return await prisma.$transaction(async (tx) => {
+    // Get source services
+    const sourceRecord = await tx.monthlyRecord.findUnique({
+      where: {
+        contractId_periodMonth_periodYear: {
+          contractId,
+          periodMonth: parseInt(sourceMonth),
+          periodYear: parseInt(sourceYear),
+        },
       },
-    },
-    include: {
-      services: {
-        include: { conceptType: true },
+      include: {
+        services: {
+          include: { conceptType: true },
+        },
       },
-    },
-  });
+    });
 
-  if (!sourceRecord || sourceRecord.services.length === 0) {
-    return [];
-  }
+    if (!sourceRecord || sourceRecord.services.length === 0) {
+      return [];
+    }
 
-  const results = [];
-  for (const { month, year } of targetMonths) {
+    const results = [];
+    // Efficiency fix: Group months by service, not service by month
     for (const service of sourceRecord.services) {
       const assigned = await bulkAssign(
         groupId,
         contractId,
         service.conceptTypeId,
         service.amount,
-        [{ month, year }],
-        service.description
+        targetMonths,
+        service.description,
+        tx
       );
       results.push(...assigned);
     }
-  }
 
-  return results;
+    return results;
+  });
 };
 
 /**
@@ -197,6 +219,8 @@ const batchAddServices = async (distributions, conceptTypeId, description = null
   const results = [];
 
   await prisma.$transaction(async (tx) => {
+    const recordIds = distributions.map(d => d.recordId);
+    
     for (const { recordId, amount } of distributions) {
       const service = await tx.monthlyService.create({
         data: {
@@ -211,12 +235,9 @@ const batchAddServices = async (distributions, conceptTypeId, description = null
       });
       results.push(service);
     }
-  });
 
-  // Recalculate all affected records outside the transaction
-  for (const { recordId } of distributions) {
-    await recalculateMonthlyRecord(recordId);
-  }
+    await recalculateMultipleRecords(recordIds, tx);
+  });
 
   return results;
 };
@@ -244,12 +265,26 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
   let totalAssigned = 0;
   const errors = [];
 
-  for (const contractId of contractIds) {
+  // Implement Safe Chunking
+  const CHUNK_SIZE = 50;
+  for (let i = 0; i < contractIds.length; i += CHUNK_SIZE) {
+    const chunkIds = contractIds.slice(i, i + CHUNK_SIZE);
+    
     try {
-      const results = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description);
-      totalAssigned += results.length;
-    } catch (e) {
-      errors.push({ contractId, error: e.message });
+      await prisma.$transaction(async (tx) => {
+        for (const contractId of chunkIds) {
+          try {
+            const results = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx);
+            totalAssigned += results.length;
+          } catch (e) {
+            errors.push({ contractId, error: e.message });
+          }
+        }
+      });
+    } catch (chunkError) {
+      for (const contractId of chunkIds) {
+        errors.push({ contractId, error: `Error en lote: ${chunkError.message}` });
+      }
     }
   }
 
@@ -262,9 +297,14 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
  */
 const propagateServiceForward = async (groupId, contractId, conceptTypeId, amount, fromMonth, fromYear, description = null) => {
   const months = [];
-  for (let m = fromMonth; m <= 12; m++) {
-    months.push({ month: m, year: fromYear });
+  const startM = parseInt(fromMonth);
+  const fixedY = parseInt(fromYear);
+
+  // Generate strictly up to month 12 of the SAME year
+  for (let m = startM; m <= 12; m++) {
+    months.push({ month: m, year: fixedY });
   }
+
   return bulkAssign(groupId, contractId, conceptTypeId, amount, months, description);
 };
 
@@ -272,30 +312,30 @@ const propagateServiceForward = async (groupId, contractId, conceptTypeId, amoun
  * Remove a service for a contract from a given month through December of the same year.
  */
 const removeServiceForward = async (groupId, contractId, conceptTypeId, fromMonth, fromYear) => {
-  // Find all monthly records for this contract in the given range
-  const records = await prisma.monthlyRecord.findMany({
-    where: {
-      groupId,
-      contractId,
-      periodYear: fromYear,
-      periodMonth: { gte: fromMonth },
-    },
-    select: { id: true },
+  return await prisma.$transaction(async (tx) => {
+    // Find all monthly records for this contract strictly in the same year from fromMonth
+    const records = await tx.monthlyRecord.findMany({
+      where: {
+        groupId,
+        contractId,
+        periodYear: parseInt(fromYear),
+        periodMonth: { gte: parseInt(fromMonth) },
+      },
+      select: { id: true },
+    });
+
+    const recordIds = records.map((r) => r.id);
+    if (recordIds.length === 0) return;
+
+    await tx.monthlyService.deleteMany({
+      where: {
+        monthlyRecordId: { in: recordIds },
+        conceptTypeId,
+      },
+    });
+
+    await recalculateMultipleRecords(recordIds, tx);
   });
-
-  const recordIds = records.map((r) => r.id);
-  if (recordIds.length === 0) return;
-
-  await prisma.monthlyService.deleteMany({
-    where: {
-      monthlyRecordId: { in: recordIds },
-      conceptTypeId,
-    },
-  });
-
-  for (const id of recordIds) {
-    await recalculateMonthlyRecord(id);
-  }
 };
 
 module.exports = {
