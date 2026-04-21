@@ -1,4 +1,4 @@
-// useMonthlyRecords Hook - Phase 5
+import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -13,6 +13,9 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
   if (filters.search) params.append('search', filters.search)
   if (filters.categoryId) params.append('categoryId', filters.categoryId)
 
+  // Backoff ref to prevent aggressive polling indefinitely
+  const pollCountRef = useRef(0)
+
   const recordsQuery = useQuery({
     queryKey: ['monthlyRecords', groupId, periodMonth, periodYear, filters],
     queryFn: async () => {
@@ -23,6 +26,17 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     },
     enabled: !!groupId && !!periodMonth && !!periodYear,
     staleTime: 10 * 60 * 1000,
+    refetchInterval: (query) => {
+      const isDirty = query.state?.data?.records?.some(r => r.needsRecalculation)
+      if (!isDirty) {
+        pollCountRef.current = 0
+        return false
+      }
+      // Progressive backoff: 2s, 3s, 4.5s ... max 10s
+      const delay = Math.min(2000 * Math.pow(1.5, pollCountRef.current), 10000)
+      pollCountRef.current += 1
+      return delay
+    }
   })
 
   const updateMutation = useMutation({

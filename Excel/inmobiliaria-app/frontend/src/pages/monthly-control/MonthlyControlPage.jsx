@@ -323,6 +323,16 @@ export default function MonthlyControlPage() {
         </div>
       </div>
 
+      {/* Dirty records syncing banner */}
+      {allRecords.some(r => r.needsRecalculation) && (
+        <div className="alert alert-info shadow-sm py-2 px-4 rounded-xl flex">
+          <span className="loading loading-spinner w-4 h-4 shrink-0 text-info-content opacity-70"></span>
+          <span className="text-sm">
+            <strong>Sincronizando:</strong> Se están recalculando saldos en segundo plano. Los montos podrían actualizarse brevemente...
+          </span>
+        </div>
+      )}
+
       {/* Month Selector + Summary Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Month Navigation */}

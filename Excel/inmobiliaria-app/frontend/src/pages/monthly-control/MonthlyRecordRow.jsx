@@ -350,7 +350,11 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
         </td>
         <td className="text-center">
           <div className="flex items-center justify-center gap-1">
-          {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
+          {record.needsRecalculation ? (
+            <span className="tooltip tooltip-left" data-tip="Sincronizando mes...">
+              <span className="loading loading-spinner loading-xs text-primary"></span>
+            </span>
+          ) : record.debtInfo && record.debtInfo.status !== 'PAID' ? (
             <>
               <button
                 className="btn btn-xs btn-error"
@@ -382,7 +386,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
               <CurrencyDollarIcon className="w-3 h-3" />
             </button>
           )}
-          {record.amountPaid > 0 && (
+          {record.amountPaid > 0 && !record.needsRecalculation && (
             <button
               className="btn btn-xs btn-ghost"
               onClick={() => onTxHistory(record)}
@@ -391,7 +395,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
               <EyeIcon className="w-3 h-3" />
             </button>
           )}
-          {record.balanceForgiven > 0 ? (
+          {record.balanceForgiven > 0 && !record.needsRecalculation ? (
             <button
               className="btn btn-xs btn-warning btn-outline"
               onClick={() => {
@@ -402,7 +406,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
             >
               <NoSymbolIcon className="w-3 h-3" />
             </button>
-          ) : record.status === 'PARTIAL' && !record.debtInfo && record.balance < 0 ? (
+          ) : record.status === 'PARTIAL' && !record.debtInfo && record.balance < 0 && !record.needsRecalculation ? (
             <button
               className="btn btn-xs btn-warning btn-outline"
               onClick={() => {
@@ -414,7 +418,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
               <CheckCircleIcon className="w-3 h-3" />
             </button>
           ) : null}
-          {!isPropietario && (
+          {!isPropietario && !record.needsRecalculation && (
             <button
               className="btn btn-xs btn-ghost"
               onClick={() => onNotify(record)}
