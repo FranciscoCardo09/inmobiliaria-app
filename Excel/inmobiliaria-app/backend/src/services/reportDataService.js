@@ -332,11 +332,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // 4-STATE PAYMENT CLASSIFICATION
   // ================================================================
   let paymentStatus;
-  // Use the full amounts (cash + credits) to determine if it's paid
-  const totalCovered = amtPaid + previousBalance;
   if (total <= 0) {
     paymentStatus = 'SALDO A FAVOR';
-  } else if (totalCovered >= total - 0.01) { // 1 cent tolerance
+  } else if (amtPaid >= total - 0.01) { // 1 cent tolerance
     paymentStatus = saldoAFavor > 0 ? 'SALDO A FAVOR' : 'PAGADO';
   } else if (amtPaid > 0) {
     paymentStatus = 'PAGO PARCIAL';
@@ -345,7 +343,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   }
 
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
-  const pendingAmount = isRentPaid ? 0 : Math.max(0, total - (amtPaid + previousBalance));
+  const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
   // DISPLAY TOTALS: The user wants "Total Alquileres" to mean ONLY the Rent portion.
   const subtotalAlquileresCobrado = paidAlquiler;
