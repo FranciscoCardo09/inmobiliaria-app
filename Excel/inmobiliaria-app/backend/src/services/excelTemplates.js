@@ -129,14 +129,14 @@ const generateLiquidacionExcel = async (dataArray) => {
     { width: 12 },
   ];
 
-  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
   dataArray.forEach((data, i) => {
     const serviciosTotal = data.conceptos
       .filter((c) => c.concepto !== 'Alquiler')
       .reduce((sum, c) => sum + c.importe, 0);
 
-    const estadoLabel = data.isRentPaid ? 'Cobrado' : data.estado === 'PARTIAL' ? 'Parcial (no cobrado)' : 'Pendiente';
+    const estadoLabel = data.paymentStatus === 'PAGADO' ? 'Cobrado' : data.paymentStatus === 'SALDO A FAVOR' ? 'Saldo a Favor' : data.paymentStatus === 'PAGO PARCIAL' ? 'Parcial' : 'Pendiente';
 
     const row = summarySheet.addRow([
       data.inquilino.nombre,
@@ -149,9 +149,13 @@ const generateLiquidacionExcel = async (dataArray) => {
 
     applyDataRowStyle(row, i);
 
-    // Highlight unpaid rows in the Excel summary
-    if (!data.isRentPaid) {
+    // Highlight unpaid/partial rows in the Excel summary
+    if (data.paymentStatus === 'NO COBRADO') {
       row.getCell(6).font = { bold: true, color: { argb: 'FFCC0000' } };
+    } else if (data.paymentStatus === 'PAGO PARCIAL') {
+      row.getCell(6).font = { bold: true, color: { argb: 'FF8B6914' } };
+    } else if (data.paymentStatus === 'SALDO A FAVOR') {
+      row.getCell(6).font = { bold: true, color: { argb: 'FF0066CC' } };
     }
 
     // Currency format for numeric columns
@@ -171,8 +175,16 @@ const generateLiquidacionExcel = async (dataArray) => {
     alqSummaryRow.getCell(5).numFmt = CURRENCY_FORMAT;
   }
 
+  if (grandSubtotalAlquileresPartial > 0) {
+    const partialRow = summarySheet.addRow(['', `Pendiente parcial (${partialCount})`, '', '', grandSubtotalAlquileresPartial, 'PARCIAL']);
+    partialRow.getCell(2).font = { italic: true, color: { argb: 'FF8B6914' } };
+    partialRow.getCell(5).numFmt = CURRENCY_FORMAT;
+    partialRow.getCell(5).font = { color: { argb: 'FF8B6914' } };
+    partialRow.getCell(6).font = { bold: true, color: { argb: 'FF8B6914' } };
+  }
+
   if (grandSubtotalAlquileresUnpaid > 0) {
-    const unpaidRow = summarySheet.addRow(['', `Pendiente de cobro (${unpaidCount})`, '', '', grandSubtotalAlquileresUnpaid, 'NO COBRADO']);
+    const unpaidRow = summarySheet.addRow(['', `No cobrado (${unpaidCount})`, '', '', grandSubtotalAlquileresUnpaid, 'NO COBRADO']);
     unpaidRow.getCell(2).font = { italic: true, color: { argb: 'FFCC0000' } };
     unpaidRow.getCell(5).numFmt = CURRENCY_FORMAT;
     unpaidRow.getCell(5).font = { color: { argb: 'FFCC0000' } };

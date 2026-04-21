@@ -656,9 +656,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           punitoriosAnteriores = unpaidFrozenPunitory;
           punitoriosActuales = liveResult.amount;
         } else {
-          livePunitoryAmount = unpaidFrozenPunitory;
+          // punitoryBase = 0: all base costs (rent + services + IVA) are covered by payments.
+          // Display the full frozen punitorios amount (what was charged at payment time),
+          // NOT just the tiny uncovered remainder (unpaidFrozenPunitory).
+          livePunitoryAmount = frozenPunitory;
           livePunitoryDays = record.punitoryDays || 0;
-          punitoriosAnteriores = unpaidFrozenPunitory;
+          punitoriosAnteriores = frozenPunitory;
           punitoriosActuales = 0;
         }
 

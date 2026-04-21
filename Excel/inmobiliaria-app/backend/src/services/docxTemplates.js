@@ -330,7 +330,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   const currency = dataArray[0].currency;
   const periodo = dataArray[0].periodo;
 
-  const { grandSubtotalAlquileres, grandSubtotalAlquileresUnpaid, grandTotal, unpaidCount } = computeGrandTotals(dataArray);
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
   const children = [];
 
@@ -380,7 +380,9 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       children: [
         new TextRun({ text: addr, bold: true, size: 18, font: 'Arial', color: BLACK }),
         new TextRun({ text: ` — ${data.inquilino.nombre}`, size: 18, font: 'Arial', color: MEDIUM }),
-        ...(data.isRentPaid ? [] : [new TextRun({ text: '  [NO COBRADO]', bold: true, size: 16, font: 'Arial', color: 'CC0000' })]),
+        ...(data.paymentStatus === 'NO COBRADO' ? [new TextRun({ text: '  [NO COBRADO]', bold: true, size: 16, font: 'Arial', color: 'CC0000' })] : []),
+        ...(data.paymentStatus === 'PAGO PARCIAL' ? [new TextRun({ text: `  [PARCIAL ${fmt(data.amountPaid, currency)} / ${fmt(data.total, currency)}]`, bold: true, size: 16, font: 'Arial', color: '8B6914' })] : []),
+        ...(data.paymentStatus === 'SALDO A FAVOR' ? [new TextRun({ text: `  [SALDO A FAVOR: ${fmt(data.saldoAFavor || 0, currency)}]`, bold: true, size: 16, font: 'Arial', color: '0066CC' })] : []),
       ],
       spacing: { before: 80, after: 40 },
     }));
@@ -433,12 +435,19 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
   const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
   children.push(new Paragraph({
     children: [new TextRun({ text: `Son: ${alquilerLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
-    spacing: { before: 60, after: grandSubtotalAlquileresUnpaid > 0 ? 40 : 160 },
+    spacing: { before: 60, after: (grandSubtotalAlquileresPartial > 0 || grandSubtotalAlquileresUnpaid > 0) ? 40 : 160 },
   }));
+
+  if (grandSubtotalAlquileresPartial > 0) {
+    children.push(new Paragraph({
+      children: [new TextRun({ text: `Pendiente de cobro parcial (${partialCount} alquiler${partialCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresPartial, currency)}`, size: 16, font: 'Arial', color: '8B6914', italics: true })],
+      spacing: { after: 40 },
+    }));
+  }
 
   if (grandSubtotalAlquileresUnpaid > 0) {
     children.push(new Paragraph({
-      children: [new TextRun({ text: `Pendiente de cobro (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, size: 16, font: 'Arial', color: 'CC0000', italics: true })],
+      children: [new TextRun({ text: `No cobrado (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, size: 16, font: 'Arial', color: 'CC0000', italics: true })],
       spacing: { after: 160 },
     }));
   }

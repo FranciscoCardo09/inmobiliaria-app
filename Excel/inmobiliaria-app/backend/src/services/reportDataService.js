@@ -293,13 +293,66 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // Subtotal alquileres = rent + punitorios (base for honorarios calculation)
   const subtotalAlquileres = monthlyRecord.rentAmount + punitoryAmt;
 
-  // isCancelled is the single source of truth for whether a rental was actually collected.
-  // It is set by both payment processing and debt settlement (debtService forces it when
-  // a Debt flips to PAID). We do NOT fall back to amountPaid/balance tolerance checks
-  // because those disagree with the writer's threshold and can include uncollected rent.
-  const isRentPaid = !!monthlyRecord.isCancelled;
-  const subtotalAlquileresCobrado = isRentPaid ? subtotalAlquileres : 0;
-  const honorariosCobrado = isRentPaid ? (honorarios?.monto ?? 0) : 0;
+  // ================================================================
+  // SEQUENTIAL PAYMENT ALLOCATION (strict order)
+  // 1. Services + IVA first
+  // 2. Punitorios second
+  // 3. Rent (Alquiler) LAST
+  // ================================================================
+  const amtPaid = monthlyRecord.amountPaid || 0;
+
+  // Calculate gross amounts for each bucket
+  const serviciosTotal = conceptos
+    .filter(c => c.isService)
+    .reduce((s, c) => s + c.importe, 0);
+  const ivaTotal = (monthlyRecord.includeIva && monthlyRecord.ivaAmount > 0) ? monthlyRecord.ivaAmount : 0;
+  const serviciosIvaTotal = Math.max(0, serviciosTotal + ivaTotal);
+  const alquilerTotal = monthlyRecord.rentAmount;
+
+  let remaining = amtPaid;
+
+  // Step 1: Services + IVA
+  const paidServicios = Math.min(remaining, serviciosIvaTotal);
+  remaining -= paidServicios;
+
+  // Step 2: Punitorios
+  const paidPunitorios = Math.min(remaining, punitoryAmt);
+  remaining -= paidPunitorios;
+
+  // Step 3: Rent
+  const paidAlquiler = Math.min(remaining, alquilerTotal);
+  remaining -= paidAlquiler;
+
+  // Overpayment / saldo a favor
+  const saldoAFavor = remaining > 0 ? remaining : 0;
+
+  // ================================================================
+  // 4-STATE PAYMENT CLASSIFICATION
+  // ================================================================
+  let paymentStatus;
+  if (total <= 0) {
+    paymentStatus = 'SALDO A FAVOR';
+  } else if (amtPaid >= total) {
+    paymentStatus = saldoAFavor > 0 ? 'SALDO A FAVOR' : 'PAGADO';
+  } else if (amtPaid > 0) {
+    paymentStatus = 'PAGO PARCIAL';
+  } else {
+    paymentStatus = 'NO COBRADO';
+  }
+
+  const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
+  const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
+
+  // Collected rent subtotal: use actual allocated paidAlquiler + paidPunitorios
+  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios;
+
+  // Honorarios: full when fully paid, proportional to collected rent when partial, 0 when unpaid
+  const honorariosBase = honorarios?.monto ?? 0;
+  const honorariosCobrado = isRentPaid
+    ? honorariosBase
+    : (amtPaid > 0 && subtotalAlquileres > 0
+      ? Math.round(honorariosBase * (subtotalAlquileresCobrado / subtotalAlquileres) * 100) / 100
+      : 0);
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
   const serviciosDisponibles = monthlyRecord.services
@@ -329,7 +382,14 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     subtotalAlquileres,
     subtotalAlquileresEnLetras: numeroATexto(subtotalAlquileres),
     subtotalAlquileresCobrado,
+    pendingAmount,
     isRentPaid,
+    paymentStatus,
+    saldoAFavor,
+    // Payment allocation breakdown
+    paidServicios,
+    paidPunitorios,
+    paidAlquiler,
     honorariosCobrado,
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
@@ -349,19 +409,29 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   };
 };
 
-/**
- * Aggregates liquidacion rows into grand totals, counting only fully-paid rentals.
- * Paid = isRentPaid === true (backed by MonthlyRecord.isCancelled).
- */
 const computeGrandTotals = (dataArray) => {
-  const paidRows = dataArray.filter((d) => d.isRentPaid);
-  const unpaidRows = dataArray.filter((d) => !d.isRentPaid);
+  const paidRows = dataArray.filter((d) => d.paymentStatus === 'PAGADO');
+  const saldoRows = dataArray.filter((d) => d.paymentStatus === 'SALDO A FAVOR');
+  const partialRows = dataArray.filter((d) => d.paymentStatus === 'PAGO PARCIAL');
+  const unpaidRows = dataArray.filter((d) => d.paymentStatus === 'NO COBRADO');
+
   return {
-    grandSubtotalAlquileres: paidRows.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0),
-    grandSubtotalAlquileresUnpaid: unpaidRows.reduce((s, d) => s + (d.subtotalAlquileres || 0), 0),
-    grandTotal: paidRows.reduce((s, d) => s + (d.total || 0), 0),
-    grandHonorarios: paidRows.reduce((s, d) => s + (d.honorariosCobrado || 0), 0),
+    // Grand totals
+    grandSubtotalAlquileres: dataArray.reduce((s, d) => s + (d.subtotalAlquileresCobrado || 0), 0),
+    grandSubtotalAlquileresPartial: partialRows.reduce((s, d) => s + (d.pendingAmount || 0), 0),
+    grandSubtotalAlquileresUnpaid: unpaidRows.reduce((s, d) => s + (d.pendingAmount || 0), 0),
+    grandTotal: dataArray.reduce((s, d) => s + (d.amountPaid || 0), 0),
+    grandPending: dataArray.reduce((s, d) => s + (d.pendingAmount || 0), 0),
+    grandHonorarios: dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0),
+    // Allocation breakdown totals
+    grandServiciosCobrado: dataArray.reduce((s, d) => s + (d.paidServicios || 0), 0),
+    grandPunitoriosCobrado: dataArray.reduce((s, d) => s + (d.paidPunitorios || 0), 0),
+    grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquiler || 0), 0),
+    grandSaldoAFavor: dataArray.reduce((s, d) => s + (d.saldoAFavor || 0), 0),
+    // Counts
     paidCount: paidRows.length,
+    saldoCount: saldoRows.length,
+    partialCount: partialRows.length,
     unpaidCount: unpaidRows.length,
   };
 };

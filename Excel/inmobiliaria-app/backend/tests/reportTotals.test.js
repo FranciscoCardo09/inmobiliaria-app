@@ -125,7 +125,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.ok(Array.isArray(result.conceptos) && result.conceptos.length > 0, 'conceptos present');
   });
 
-  test('3. partial payment treated as unpaid: cobrado fields are 0', () => {
+  test('3. partial payment: cobrado reflects allocated amounts, paymentStatus=PAGO PARCIAL', () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 60000,
@@ -137,9 +137,10 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
 
     const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
-    assert.strictEqual(result.isRentPaid, false, 'partial → not paid per strict rule');
-    assert.strictEqual(result.subtotalAlquileresCobrado, 0, 'partial contributes 0 to cobrado');
-    assert.strictEqual(result.honorariosCobrado, 0, 'no fees on partial payment');
+    assert.strictEqual(result.paymentStatus, 'PAGO PARCIAL', 'partial payment → PAGO PARCIAL');
+    assert.strictEqual(result.isRentPaid, false, 'partial → not fully paid');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 60000, 'partial allocates paid amount to rent');
+    assert.ok(result.pendingAmount > 0, 'pending amount should be > 0');
   });
 
   test('4. debt cleared → record settled: isCancelled=true counts as paid', () => {
@@ -215,7 +216,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.strictEqual(result.subtotalAlquileres, 0);
   });
 
-  test('7b. manual admin settle (isCancelled=true, amountPaid=0) treated as paid', () => {
+  test('7b. admin cancelled with amountPaid=0: paymentStatus=NO COBRADO (amountPaid drives status)', () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 0,
@@ -227,14 +228,13 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
 
     const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
-    // isCancelled is the sole source of truth
-    assert.strictEqual(result.isRentPaid, true, 'isCancelled=true is authoritative');
-    assert.strictEqual(result.subtotalAlquileresCobrado, 100000);
+    // paymentStatus is driven by amountPaid, not isCancelled
+    assert.strictEqual(result.paymentStatus, 'NO COBRADO', 'amountPaid=0 → NO COBRADO regardless of isCancelled');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 0);
   });
 
-  test('7c. amountPaid >= totalDue but isCancelled=false: treated as unpaid (no tolerance fallback)', () => {
-    // Regression: old code had `amountPaid > 0 && balance >= -1` fallback that could
-    // contradict the writer's -0.01 threshold. Now isCancelled is the only truth.
+  test('7c. amountPaid >= totalDue but isCancelled=false: classified by amountPaid vs total', () => {
+    // paymentStatus is now driven by amountPaid vs total, not by isCancelled
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 100000,
@@ -246,13 +246,11 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
 
     const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
-    assert.strictEqual(
-      result.isRentPaid,
-      false,
-      'isCancelled=false means unpaid — no amountPaid tolerance fallback'
-    );
-    assert.strictEqual(result.subtotalAlquileresCobrado, 0);
-    // Also verify isPaid / isCancelled on the returned object match the DB column
+    // amountPaid (100000) >= total (100000) → PAGADO
+    assert.strictEqual(result.paymentStatus, 'PAGADO', 'amountPaid >= total → PAGADO');
+    assert.strictEqual(result.isRentPaid, true, 'fully paid by amount');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 100000);
+    // DB columns are passed through as-is
     assert.strictEqual(result.isPaid, false);
     assert.strictEqual(result.isCancelled, false);
   });
@@ -293,38 +291,49 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
 
 describe('computeGrandTotals', () => {
 
-  const row = (isCancelled, rentAmount, punitoryAmount = 0, honorariosMonto = 0, total = null) => ({
-    isRentPaid: !!isCancelled,
-    subtotalAlquileres: rentAmount + punitoryAmount,
-    subtotalAlquileresCobrado: isCancelled ? rentAmount + punitoryAmount : 0,
-    total: total ?? rentAmount + punitoryAmount,
-    honorarios: { monto: honorariosMonto },
-    honorariosCobrado: isCancelled ? honorariosMonto : 0,
-  });
+  // Helper: creates a row for computeGrandTotals with the 4-state payment model
+  const row = (status, rentAmount, punitoryAmount = 0, honorariosMonto = 0, total = null, amountPaid = null) => {
+    const isPaid = status === 'PAGADO' || status === 'SALDO A FAVOR';
+    const isPartial = status === 'PAGO PARCIAL';
+    const effectiveAmountPaid = amountPaid ?? (isPaid ? (total ?? rentAmount + punitoryAmount) : (isPartial ? Math.round((total ?? rentAmount + punitoryAmount) * 0.6) : 0));
+    return {
+      paymentStatus: status,
+      isRentPaid: isPaid,
+      subtotalAlquileres: rentAmount + punitoryAmount,
+      subtotalAlquileresCobrado: isPaid ? rentAmount + punitoryAmount : (isPartial ? effectiveAmountPaid : 0),
+      total: total ?? rentAmount + punitoryAmount,
+      amountPaid: effectiveAmountPaid,
+      pendingAmount: isPaid ? 0 : Math.max(0, (total ?? rentAmount + punitoryAmount) - effectiveAmountPaid),
+      honorarios: { monto: honorariosMonto },
+      honorariosCobrado: isPaid ? honorariosMonto : (isPartial ? Math.round(honorariosMonto * 0.6) : 0),
+    };
+  };
 
-  test('8. mixed array: grand totals sum only paid rows', () => {
+  test('8. mixed array: grand totals sum all rows for subtotalAlquileresCobrado', () => {
     const data = [
-      row(true,  100000),           // paid
-      row(true,  150000),           // paid
-      row(true,  200000),           // paid
-      row(false, 80000),            // unpaid
-      row(false, 120000),           // unpaid
-      row(false, 90000),            // partial (also unpaid per strict rule)
+      row('PAGADO',      100000),                    // paid
+      row('PAGADO',      150000),                    // paid
+      row('PAGADO',      200000),                    // paid
+      row('NO COBRADO',  80000),                     // unpaid
+      row('NO COBRADO',  120000),                    // unpaid
+      row('PAGO PARCIAL', 90000, 0, 0, null, 54000), // partial: paid 54000
     ];
 
     const result = computeGrandTotals(data);
 
-    assert.strictEqual(result.grandSubtotalAlquileres, 450000, '3 paid rows summed');
-    assert.strictEqual(result.grandSubtotalAlquileresUnpaid, 290000, '3 unpaid rows summed');
+    // grandSubtotalAlquileres sums ALL rows' subtotalAlquileresCobrado
+    assert.strictEqual(result.grandSubtotalAlquileres, 450000 + 54000, 'paid + partial cobrado summed');
+    assert.strictEqual(result.grandSubtotalAlquileresUnpaid, 200000, '2 unpaid rows pending summed');
     assert.strictEqual(result.paidCount, 3);
-    assert.strictEqual(result.unpaidCount, 3);
+    assert.strictEqual(result.unpaidCount, 2);
+    assert.strictEqual(result.partialCount, 1);
   });
 
   test('9. grand honorarios excludes unpaid rows', () => {
     const data = [
-      row(true,  100000, 0, 10000),   // paid, honorarios 10000
-      row(true,  150000, 0, 15000),   // paid, honorarios 15000
-      row(false, 100000, 0, 10000),   // unpaid — should be excluded
+      row('PAGADO',      100000, 0, 10000),   // paid, honorarios 10000
+      row('PAGADO',      150000, 0, 15000),   // paid, honorarios 15000
+      row('NO COBRADO',  100000, 0, 10000),   // unpaid — should be excluded
     ];
 
     const result = computeGrandTotals(data);
@@ -332,15 +341,15 @@ describe('computeGrandTotals', () => {
     assert.strictEqual(result.grandHonorarios, 25000, 'only paid rows honorarios');
   });
 
-  test('grand total sums paid rows total field only', () => {
+  test('grand total sums amountPaid from ALL rows', () => {
     const data = [
-      row(true,  100000, 5000, 0, 110000),   // paid, total=110000
-      row(false, 80000, 0, 0, 80000),        // unpaid
+      row('PAGADO',     100000, 5000, 0, 110000, 110000), // paid, amountPaid=110000
+      row('NO COBRADO', 80000, 0, 0, 80000, 0),           // unpaid, amountPaid=0
     ];
 
     const result = computeGrandTotals(data);
 
-    assert.strictEqual(result.grandTotal, 110000, 'only paid row total');
+    assert.strictEqual(result.grandTotal, 110000, 'sum of all amountPaid');
   });
 
   test('empty array returns zeroed object', () => {
@@ -354,17 +363,18 @@ describe('computeGrandTotals', () => {
   });
 
   test('all paid: unpaid total is 0', () => {
-    const data = [row(true, 100000), row(true, 200000)];
+    const data = [row('PAGADO', 100000), row('PAGADO', 200000)];
     const result = computeGrandTotals(data);
     assert.strictEqual(result.grandSubtotalAlquileresUnpaid, 0);
     assert.strictEqual(result.paidCount, 2);
     assert.strictEqual(result.unpaidCount, 0);
   });
 
-  test('all unpaid: paid total is 0', () => {
-    const data = [row(false, 100000), row(false, 200000)];
+  test('all unpaid: cobrado total is 0', () => {
+    const data = [row('NO COBRADO', 100000), row('NO COBRADO', 200000)];
     const result = computeGrandTotals(data);
-    assert.strictEqual(result.grandSubtotalAlquileres, 0);
+    // grandSubtotalAlquileres sums subtotalAlquileresCobrado which is 0 for NO COBRADO
+    assert.strictEqual(result.grandSubtotalAlquileres, 0, 'no cobrado → 0 collected');
     assert.strictEqual(result.paidCount, 0);
     assert.strictEqual(result.unpaidCount, 2);
   });

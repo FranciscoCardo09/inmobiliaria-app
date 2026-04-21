@@ -307,12 +307,19 @@ function LiquidacionTab({ groupId }) {
 
   const {
     grandTotal,
+    grandPending,
     grandSubtotalAlquileres,
+    grandSubtotalAlquileresPartial,
     grandSubtotalAlquileresUnpaid,
+    grandServiciosCobrado,
+    grandPunitoriosCobrado,
+    grandAlquilerCobrado,
+    grandSaldoAFavor,
+    paidCount,
+    saldoCount,
+    partialCount,
     unpaidCount,
   } = useMemo(() => computeGrandTotals(effectiveData), [effectiveData])
-  const totalPagado = useMemo(() => allTransactions.reduce((s, t) => s + t.monto, 0), [allTransactions])
-  const saldo = grandTotal - totalPagado
 
   return (
     <div className="space-y-4">
@@ -461,37 +468,52 @@ function LiquidacionTab({ groupId }) {
       {effectiveData.length > 0 && (
         <>
           <Card title="Resumen">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-base-content/60 mb-1">Total Facturado</p>
-                <p className="text-xl font-bold">{formatCurrency(grandTotal)}</p>
-              </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <p className="text-xs text-base-content/60 mb-1">Total Cobrado</p>
-                <p className="text-xl font-bold">{formatCurrency(totalPagado)}</p>
+                <p className="text-xl font-bold text-success">{formatCurrency(grandTotal)}</p>
               </div>
               <div>
-                <p className="text-xs text-base-content/60 mb-1">{saldo > 0 ? 'Saldo Pendiente' : 'Saldo a Favor'}</p>
-                <p className="text-xl font-bold">{formatCurrency(Math.abs(saldo))}</p>
+                <p className="text-xs text-base-content/60 mb-1">Total Pendiente</p>
+                <p className="text-xl font-bold text-error">{formatCurrency(grandPending)}</p>
               </div>
+              <div>
+                <p className="text-xs text-base-content/60 mb-1">Contratos</p>
+                <p className="text-sm">
+                  <span className="text-success font-bold">{paidCount + saldoCount}</span> pagados
+                  {partialCount > 0 && <>, <span className="text-warning font-bold">{partialCount}</span> parciales</>}
+                  {unpaidCount > 0 && <>, <span className="text-error font-bold">{unpaidCount}</span> pendientes</>}
+                </p>
+              </div>
+              {grandSaldoAFavor > 0 && (
+                <div>
+                  <p className="text-xs text-base-content/60 mb-1">Saldo a Favor</p>
+                  <p className="text-xl font-bold text-info">{formatCurrency(grandSaldoAFavor)}</p>
+                </div>
+              )}
             </div>
           </Card>
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
             {effectiveData
-              .filter((d) => !soloConPago || d.isRentPaid)
+              .filter((d) => !soloConPago || d.paymentStatus !== 'NO COBRADO')
               .map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
               const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
               const disponibles = data.serviciosDisponibles || []
 
+              const statusBadge = {
+                'PAGADO':       { cls: 'badge-success', label: 'PAGADO' },
+                'SALDO A FAVOR': { cls: 'badge-info',   label: 'SALDO A FAVOR' },
+                'PAGO PARCIAL': { cls: 'badge-warning',  label: 'PAGO PARCIAL' },
+                'NO COBRADO':   { cls: 'badge-error',   label: 'NO COBRADO' },
+              }[data.paymentStatus] || { cls: 'badge-ghost', label: data.paymentStatus || '?' }
+
               return (
                 <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
                   <div className="flex items-center gap-2 mb-2">
                     <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
-                    {!data.isRentPaid && (
-                      <span className="badge badge-error badge-sm text-white font-bold">NO COBRADO</span>
-                    )}
+                    <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>
                   </div>
 
                   {/* Conceptos table */}
@@ -515,6 +537,48 @@ function LiquidacionTab({ groupId }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Payment breakdown */}
+                  {(data.amountPaid > 0) && (
+                    <div className="mt-2 p-2 bg-base-200/50 rounded-lg text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-base-content/60">Pagado</span>
+                        <span className="font-bold">{formatCurrency(data.amountPaid)}</span>
+                      </div>
+                      {data.pendingAmount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-base-content/60">Pendiente</span>
+                          <span className="font-bold text-error">{formatCurrency(data.pendingAmount)}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-base-300 pt-1 mt-1 space-y-0.5">
+                        {data.paidServicios > 0 && (
+                          <div className="flex justify-between text-base-content/70">
+                            <span>→ Servicios pagados</span>
+                            <span>{formatCurrency(data.paidServicios)}</span>
+                          </div>
+                        )}
+                        {data.paidPunitorios > 0 && (
+                          <div className="flex justify-between text-base-content/70">
+                            <span>→ Punitorios pagados</span>
+                            <span>{formatCurrency(data.paidPunitorios)}</span>
+                          </div>
+                        )}
+                        {data.paidAlquiler > 0 && (
+                          <div className="flex justify-between text-base-content/70">
+                            <span>→ Alquiler pagado</span>
+                            <span>{formatCurrency(data.paidAlquiler)}</span>
+                          </div>
+                        )}
+                      </div>
+                      {data.saldoAFavor > 0 && (
+                        <div className="flex justify-between text-info font-bold border-t border-base-300 pt-1 mt-1">
+                          <span>Saldo a favor</span>
+                          <span>{formatCurrency(data.saldoAFavor)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Descuento de alquiler para honorarios */}
                   {honorariosPercent && (
@@ -643,12 +707,25 @@ function LiquidacionTab({ groupId }) {
                   <span className="font-bold text-lg uppercase">Total Alquileres Cobrados</span>
                   <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
                 </div>
-                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 rounded-b-lg border-x border-b border-base-300">
+                <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 border-x border-b border-base-300">
                   Son: {numeroATexto(grandSubtotalAlquileres)}
                 </div>
-                {grandSubtotalAlquileresUnpaid > 0 && (
+                {/* Allocation breakdown */}
+                <div className="bg-base-200/50 px-4 py-2 text-xs space-y-0.5 border-x border-b border-base-300">
+                  {grandServiciosCobrado > 0 && (
+                    <div className="flex justify-between text-base-content/70"><span>Servicios cobrados</span><span>{formatCurrency(grandServiciosCobrado)}</span></div>
+                  )}
+                  {grandPunitoriosCobrado > 0 && (
+                    <div className="flex justify-between text-base-content/70"><span>Punitorios cobrados</span><span>{formatCurrency(grandPunitoriosCobrado)}</span></div>
+                  )}
+                  {grandAlquilerCobrado > 0 && (
+                    <div className="flex justify-between text-base-content/70"><span>Alquiler cobrado</span><span>{formatCurrency(grandAlquilerCobrado)}</span></div>
+                  )}
+                </div>
+                {(grandSubtotalAlquileresPartial > 0 || grandSubtotalAlquileresUnpaid > 0) && (
                   <div className="px-4 py-1 text-xs text-error rounded-b border-x border-b border-base-300">
-                    Pendiente de cobro ({unpaidCount} alquiler{unpaidCount !== 1 ? 'es' : ''}): {formatCurrency(grandSubtotalAlquileresUnpaid)}
+                    {grandSubtotalAlquileresPartial > 0 && <span>Parcial ({partialCount}): {formatCurrency(grandSubtotalAlquileresPartial)} </span>}
+                    {grandSubtotalAlquileresUnpaid > 0 && <span>Pendiente ({unpaidCount}): {formatCurrency(grandSubtotalAlquileresUnpaid)}</span>}
                   </div>
                 )}
               </div>
@@ -657,15 +734,15 @@ function LiquidacionTab({ groupId }) {
             {/* Honorarios summary (all contracts) */}
             {effectiveData.some(d => d.honorarios) && (() => {
               const totalHon = effectiveData.reduce((s, d) => s + (d.honorariosCobrado || 0), 0)
-              const allGastos = effectiveData.filter(d => d.isRentPaid).flatMap(d => d.honorarios?.gastosAMiCargo || [])
+              const allGastos = effectiveData.filter(d => d.paymentStatus !== 'NO COBRADO').flatMap(d => d.honorarios?.gastosAMiCargo || [])
               const gastosGrouped = []
               for (const g of allGastos) {
                 const ex = gastosGrouped.find(x => x.concepto === g.concepto)
                 if (ex) { ex.importe += g.importe }
                 else gastosGrouped.push({ ...g })
               }
-              const honPct = effectiveData.find(d => d.honorarios)?.honorarios.porcentaje
-              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.isRentPaid ? (d.honorarios?.montoAlquiler || 0) : 0), 0)
+              const honPct = effectiveData.find(d => d.honorarios)?.honorarios?.porcentaje
+              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.honorariosCobrado || 0), 0)
               return (
                 <div className="mt-3 p-3 bg-base-200 rounded-lg">
                   <p className="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Honorarios totales</p>
@@ -733,12 +810,18 @@ function LiquidacionTab({ groupId }) {
                   <tfoot>
                     <tr className="font-semibold">
                       <td colSpan="3">Total Pagado</td>
-                      <td className="text-right">{formatCurrency(totalPagado)}</td>
+                      <td className="text-right">{formatCurrency(grandTotal)}</td>
                     </tr>
-                    {Math.abs(saldo) > 0.01 && (
+                    {grandPending > 0 && (
                       <tr className="font-semibold">
-                        <td colSpan="3">{saldo > 0 ? 'Saldo Pendiente' : 'Saldo a Favor'}</td>
-                        <td className="text-right">{formatCurrency(Math.abs(saldo))}</td>
+                        <td colSpan="3">Saldo Pendiente</td>
+                        <td className="text-right">{formatCurrency(grandPending)}</td>
+                      </tr>
+                    )}
+                    {grandSaldoAFavor > 0 && (
+                      <tr className="font-semibold text-info">
+                        <td colSpan="3">Saldo a Favor</td>
+                        <td className="text-right">{formatCurrency(grandSaldoAFavor)}</td>
                       </tr>
                     )}
                   </tfoot>
