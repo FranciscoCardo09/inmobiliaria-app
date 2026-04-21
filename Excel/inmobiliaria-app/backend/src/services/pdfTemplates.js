@@ -1290,8 +1290,13 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
       doc.font(F.b).fontSize(7).fillColor(sl.color)
         .text(sl.label, PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+        
+      const totalDisplay = data.paymentStatus === 'PAGO PARCIAL' 
+        ? `${fmt(data.amountPaid || 0, currency)} / ${fmt(data.total, currency)}` 
+        : fmt(data.total, currency);
+
       doc.font(F.b).fontSize(10).fillColor(data.paymentStatus === 'NO COBRADO' ? '#CC0000' : C.black)
-        .text(fmt(data.total, currency), PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
+        .text(totalDisplay, PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
 
       let iy = y + 34;
 
@@ -1318,7 +1323,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
         const bw = W - 48;
 
         if (amtPaid > 0) {
-          doc.font(F.b).fontSize(7.5).fillColor(C.dark).text('Pagado', bx, iy);
+          doc.font(F.b).fontSize(7.5).fillColor(C.dark).text('Abonado', bx, iy);
           doc.font(F.b).fontSize(7.5).fillColor(C.black).text(fmt(amtPaid, currency), bx, iy, { width: bw, align: 'right' });
           iy += 13;
         }
@@ -1328,22 +1333,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
           iy += 13;
         }
 
-        // Allocation detail
-        if ((data.paidServicios || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Servicios', bx + 8, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidServicios, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
-        if ((data.paidPunitorios || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Punitorios', bx + 8, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidPunitorios, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
-        if ((data.paidAlquiler || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Alquiler', bx + 8, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidAlquiler, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
+        // Allocation detail (simplified)
         if ((data.saldoAFavor || 0) > 0) {
           doc.font(F.b).fontSize(7).fillColor('#0066CC').text('Saldo a favor', bx, iy);
           doc.font(F.b).fontSize(7).fillColor('#0066CC').text(fmt(data.saldoAFavor, currency), bx, iy, { width: bw, align: 'right' });

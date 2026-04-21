@@ -195,18 +195,9 @@ const generateLiquidacionAllHTML = (dataArray) => {
     let breakdownHtml = '';
     if (amtPaid > 0) {
       const bRows = [];
-      bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333">Pagado</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333;text-align:right">${fmt(amtPaid, currency)}</td></tr>`);
+      bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333">Abonado</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333;text-align:right">${fmt(amtPaid, currency)}</td></tr>`);
       if ((data.pendingAmount || 0) > 0) {
         bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;color:#CC0000">Pendiente</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#CC0000;text-align:right">${fmt(data.pendingAmount, currency)}</td></tr>`);
-      }
-      if ((data.paidServicios || 0) > 0) {
-        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Servicios</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidServicios, currency)}</td></tr>`);
-      }
-      if ((data.paidPunitorios || 0) > 0) {
-        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Punitorios</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidPunitorios, currency)}</td></tr>`);
-      }
-      if ((data.paidAlquiler || 0) > 0) {
-        bRows.push(`<tr><td style="padding:1px 28px;font-family:Arial;font-size:7.5pt;color:#888">→ Alquiler</td><td style="padding:1px 10px;font-family:Arial;font-size:7.5pt;color:#555;text-align:right">${fmt(data.paidAlquiler, currency)}</td></tr>`);
       }
       if ((data.saldoAFavor || 0) > 0) {
         bRows.push(`<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC">Saldo a favor</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC;text-align:right">${fmt(data.saldoAFavor, currency)}</td></tr>`);
@@ -221,7 +212,9 @@ const generateLiquidacionAllHTML = (dataArray) => {
           <strong style="font-family:Arial;font-size:10pt;color:#000">${escHtml(addr)}</strong>${statusBadge}<br>
           <span style="font-family:Arial;font-size:9pt;color:#666">${escHtml(data.inquilino.nombre)}</span>
         </div>
-        <strong style="font-family:Arial;font-size:11pt;color:#000">${fmt(data.total, currency)}</strong>
+        <strong style="font-family:Arial;font-size:11pt;color:${data.paymentStatus === 'NO COBRADO' ? '#CC0000' : '#000'}">
+          ${data.paymentStatus === 'PAGO PARCIAL' ? `${fmt(data.amountPaid || 0, currency)} <span style="font-weight:normal;font-size:9pt;color:#666">/ ${fmt(data.total, currency)}</span>` : fmt(data.total, currency)}
+        </strong>
       </div>
       <table style="width:100%;margin-top:6px">${rows}</table>${breakdownHtml}
     </div>`;
