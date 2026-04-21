@@ -496,7 +496,7 @@ function LiquidacionTab({ groupId }) {
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
             {effectiveData
-              .filter((d) => !soloConPago || d.paymentStatus !== 'NO COBRADO')
+              .filter((d) => !soloConPago || d.paymentStatus === 'PAGADO' || d.paymentStatus === 'SALDO A FAVOR')
               .map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
               const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
