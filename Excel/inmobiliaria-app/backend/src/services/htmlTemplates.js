@@ -240,6 +240,12 @@ const generateLiquidacionAllHTML = (dataArray) => {
   ${grandSubtotalAlquileresPartial > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#8B6914;font-style:italic;margin:4px 0 4px 0">Pendiente de cobro parcial (${partialCount} alquiler${partialCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresPartial, currency)}</p>` : ''}
   ${grandSubtotalAlquileresUnpaid > 0 ? `<p style="font-family:Arial;font-size:8pt;color:#CC0000;font-style:italic;margin:4px 0 8px 0">No cobrado (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}</p>` : ''}
 
+  <div style="text-align:right;margin-top:10px;font-family:Arial;font-size:8pt;color:#666">
+    <p style="margin:2px 0">Servicios cobrados: ${fmt(grandServiciosCobrado, currency)}</p>
+    <p style="margin:2px 0">Punitorios cobrados: ${fmt(grandPunitoriosCobrado, currency)}</p>
+    <p style="margin:2px 0">Alquiler cobrado: ${fmt(grandAlquilerCobrado, currency)}</p>
+  </div>
+
   <div style="background:#000;color:#FFF;padding:10px;margin-top:15px">
     <strong style="font-family:Arial;font-size:13pt">TOTAL</strong>
     <strong style="font-family:Arial;font-size:13pt;float:right">${fmt(grandTotal, currency)}</strong>

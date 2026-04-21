@@ -98,11 +98,11 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.strictEqual(result.isRentPaid, true, 'isRentPaid should be true when isCancelled');
     assert.strictEqual(
       result.subtotalAlquileresCobrado,
-      105000,
-      'subtotalAlquileresCobrado = rentAmount + punitoryAmount for paid record'
+      100000,
+      'subtotalAlquileresCobrado = ONLY rentAmount for paid record'
     );
     assert.ok(result.honorariosCobrado >= 0, 'honorariosCobrado present on paid record');
-    assert.strictEqual(result.subtotalAlquileres, 105000, 'subtotalAlquileres (due) unchanged');
+    assert.strictEqual(result.subtotalAlquileres, 100000, 'subtotalAlquileres (due) is now only rent');
   });
 
   test('2. unpaid rental: isRentPaid=false, cobrado fields are 0, due fields intact', () => {

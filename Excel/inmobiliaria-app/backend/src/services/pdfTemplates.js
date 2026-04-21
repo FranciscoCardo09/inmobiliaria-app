@@ -1378,6 +1378,15 @@ const generateLiquidacionAllPDF = (dataArray) => {
       y += 14;
     }
 
+    // Grand sub-breakdowns (text only)
+    doc.font(F.r).fontSize(8).fillColor(C.medium)
+      .text(`Servicios cobrados: ${fmt(grandServiciosCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
+    y += 12;
+    doc.text(`Punitorios cobrados: ${fmt(grandPunitoriosCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
+    y += 12;
+    doc.text(`Alquiler cobrado: ${fmt(grandAlquilerCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
+    y += 12;
+
     // TOTAL COBRADO box
     y += 6;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);

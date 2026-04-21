@@ -290,16 +290,20 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // Total from visible conceptos only (gastos/mantenimiento excluded)
   const total = conceptos.reduce((sum, c) => sum + c.importe, 0);
 
-  // Subtotal alquileres = rent + punitorios (base for honorarios calculation)
-  const subtotalAlquileres = monthlyRecord.rentAmount + punitoryAmt;
+  // Subtotal alquileres = ONLY rent (as requested by user for the main totals)
+  const subtotalAlquileres = monthlyRecord.rentAmount;
 
   // ================================================================
   // SEQUENTIAL PAYMENT ALLOCATION (strict order)
   // 1. Services + IVA first
   // 2. Punitorios second
-  // 3. Rent (Alquiler) LAST
   // ================================================================
+  // 3. Rent (Alquiler) and Punitorios Allocation
+  // ================================================================
+  // We use current payment + previous credit as the "purchasing power"
   const amtPaid = monthlyRecord.amountPaid || 0;
+  const previousBalance = monthlyRecord.previousBalance || 0;
+  let remaining = amtPaid + previousBalance;
 
   // Calculate gross amounts for each bucket
   const serviciosTotal = conceptos
@@ -309,19 +313,17 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const serviciosIvaTotal = Math.max(0, serviciosTotal + ivaTotal);
   const alquilerTotal = monthlyRecord.rentAmount;
 
-  let remaining = amtPaid;
-
-  // Step 1: Services + IVA
+  // Step 1: Services + IVA (Highest priority)
   const paidServicios = Math.min(remaining, serviciosIvaTotal);
   remaining -= paidServicios;
 
-  // Step 2: Punitorios
-  const paidPunitorios = Math.min(remaining, punitoryAmt);
-  remaining -= paidPunitorios;
-
-  // Step 3: Rent
+  // Step 2: Rent (Prioritized over Punitorios)
   const paidAlquiler = Math.min(remaining, alquilerTotal);
   remaining -= paidAlquiler;
+
+  // Step 3: Punitorios (Late fees)
+  const paidPunitorios = Math.min(remaining, punitoryAmt);
+  remaining -= paidPunitorios;
 
   // Overpayment / saldo a favor
   const saldoAFavor = remaining > 0 ? remaining : 0;
@@ -330,9 +332,11 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // 4-STATE PAYMENT CLASSIFICATION
   // ================================================================
   let paymentStatus;
+  // Use the full amounts (cash + credits) to determine if it's paid
+  const totalCovered = amtPaid + previousBalance;
   if (total <= 0) {
     paymentStatus = 'SALDO A FAVOR';
-  } else if (amtPaid >= total) {
+  } else if (totalCovered >= total - 0.01) { // 1 cent tolerance
     paymentStatus = saldoAFavor > 0 ? 'SALDO A FAVOR' : 'PAGADO';
   } else if (amtPaid > 0) {
     paymentStatus = 'PAGO PARCIAL';
@@ -341,17 +345,20 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   }
 
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
-  const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
+  const pendingAmount = isRentPaid ? 0 : Math.max(0, total - (amtPaid + previousBalance));
 
-  // Collected rent subtotal: use actual allocated paidAlquiler + paidPunitorios
-  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios;
+  // DISPLAY TOTALS: The user wants "Total Alquileres" to mean ONLY the Rent portion.
+  const subtotalAlquileresCobrado = paidAlquiler;
 
-  // Honorarios: full when fully paid, proportional to collected rent when partial, 0 when unpaid
+  // COMMISSION BASE (Honorarios): Usually calculated on Rent + Punitorios
+  const commissionBase = monthlyRecord.rentAmount + punitoryAmt;
+  const commissionCollected = paidAlquiler + paidPunitorios;
+
   const honorariosBase = honorarios?.monto ?? 0;
   const honorariosCobrado = isRentPaid
     ? honorariosBase
-    : (amtPaid > 0 && subtotalAlquileres > 0
-      ? Math.round(honorariosBase * (subtotalAlquileresCobrado / subtotalAlquileres) * 100) / 100
+    : (amtPaid > 0 && commissionBase > 0
+      ? Math.round(honorariosBase * (commissionCollected / commissionBase) * 100) / 100
       : 0);
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
