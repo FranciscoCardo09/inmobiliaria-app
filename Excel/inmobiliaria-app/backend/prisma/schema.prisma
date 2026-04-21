@@ -542,6 +542,7 @@ model MonthlyRecord {
 
   observations        String?
   comprobantesStatus  Json?     @default("[]") // Estado de comprobantes en este mes [{ id: string, name: string, presented: boolean }]
+  needsRecalculation  Boolean   @default(false) @map("needs_recalculation")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

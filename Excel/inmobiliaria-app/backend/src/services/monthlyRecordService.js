@@ -1015,15 +1015,109 @@ const _recalculateCore = async (recordIds, tx) => {
   return numUpdated;
 };
 
-/**
- * Recalculate multiple MonthlyRecords' totals in batch to minimize DB roundtrips.
- * Automatically wraps logic in a transaction to safely acquire pg_advisory_xact_locks.
- */
-const recalculateMultipleRecords = async (recordIds, tx = null) => {
-  if (tx) {
-    return _recalculateCore(recordIds, tx);
+let isProcessingDirtyRecords = false;
+
+const processDirtyRecords = async () => {
+  if (isProcessingDirtyRecords) return;
+  isProcessingDirtyRecords = true;
+
+  try {
+    let hasMore = true;
+    while (hasMore) {
+      // Find the first contract with dirty records
+      const dirtyRecord = await prisma.monthlyRecord.findFirst({
+        where: { needsRecalculation: true },
+        select: { contractId: true },
+      });
+
+      if (!dirtyRecord) {
+        hasMore = false;
+        break;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // Simple advisory lock mapping the contract UUID to an integer
+        const lockValue = Array.from(dirtyRecord.contractId).reduce((h, c) => Math.imul(31, h) + c.charCodeAt(0) | 0, 0);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockValue})`;
+
+        const dirtyRecords = await tx.monthlyRecord.findMany({
+          where: { contractId: dirtyRecord.contractId, needsRecalculation: true },
+          select: { id: true },
+          orderBy: { monthNumber: 'asc' }
+        });
+
+        if (dirtyRecords.length > 0) {
+          const ids = dirtyRecords.map(r => r.id);
+          
+          await _recalculateCore(ids, tx);
+
+          await tx.monthlyRecord.updateMany({
+            where: { contractId: dirtyRecord.contractId, needsRecalculation: true },
+            data: { needsRecalculation: false }
+          });
+        }
+      }, { timeout: 30000 });
+    }
+  } catch (error) {
+    console.error('[AsyncRecalculation] Error processing dirty records:', error);
+  } finally {
+    isProcessingDirtyRecords = false;
   }
-  return prisma.$transaction((t) => _recalculateCore(recordIds, t), { timeout: 30000 });
+};
+
+const _markRecordsDirty = async (recordIds, txClient) => {
+  const records = await txClient.monthlyRecord.findMany({
+    where: { id: { in: recordIds } },
+    select: { contractId: true, periodYear: true, periodMonth: true }
+  });
+
+  if (records.length === 0) return;
+
+  const minMonthsByContractAndYear = new Map();
+  for (const r of records) {
+    const key = `${r.contractId}_${r.periodYear}`;
+    if (!minMonthsByContractAndYear.has(key) || r.periodMonth < minMonthsByContractAndYear.get(key).periodMonth) {
+      minMonthsByContractAndYear.set(key, { contractId: r.contractId, periodYear: r.periodYear, periodMonth: r.periodMonth });
+    }
+  }
+
+  const orConditions = Array.from(minMonthsByContractAndYear.values()).map(r => ({
+    contractId: r.contractId,
+    periodYear: r.periodYear,
+    periodMonth: { gte: r.periodMonth }
+  }));
+
+  if (orConditions.length > 0) {
+    await txClient.monthlyRecord.updateMany({
+      where: { OR: orConditions },
+      data: { needsRecalculation: true }
+    });
+  }
+};
+
+/**
+ * Recalculate multiple MonthlyRecords' totals.
+ * Defaults to async dirty marking. Pass inline=true to force sync recalculation.
+ */
+const recalculateMultipleRecords = async (recordIds, tx = null, inline = false) => {
+  if (!recordIds || recordIds.length === 0) return 0;
+
+  if (inline) {
+    if (tx) return _recalculateCore(recordIds, tx);
+    return prisma.$transaction((t) => _recalculateCore(recordIds, t), { timeout: 30000 });
+  }
+
+  if (tx) {
+    await _markRecordsDirty(recordIds, tx);
+    setImmediate(processDirtyRecords);
+    return 0;
+  } else {
+    await prisma.$transaction(async (t) => {
+      await _markRecordsDirty(recordIds, t);
+    });
+    setImmediate(processDirtyRecords);
+    return 0;
+  }
 };
 
 /**
@@ -1068,6 +1162,7 @@ module.exports = {
   getOrCreateMonthlyRecords,
   recalculateMonthlyRecord,
   recalculateMultipleRecords,
+  processDirtyRecords,
   getMonthlyRecordById,
   getCalendarPeriod,
   getMonthNumber,
