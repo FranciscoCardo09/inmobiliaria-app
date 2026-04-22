@@ -170,7 +170,7 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
 
-  return { porcentaje: pct, baseHonorarios: paidAlquiler, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
+  return { porcentaje: pct, baseHonorarios: rentForHonorarios, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
 }
 
 function LiquidacionTab({ groupId }) {
