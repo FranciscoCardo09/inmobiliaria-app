@@ -348,16 +348,20 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // DISPLAY TOTALS: The user wants "Total Alquileres" to mean ONLY the Rent portion.
   const subtotalAlquileresCobrado = paidAlquiler;
 
-  // COMMISSION BASE (Honorarios): Usually calculated on Rent + Punitorios
-  const commissionBase = monthlyRecord.rentAmount + punitoryAmt;
-  const commissionCollected = paidAlquiler + paidPunitorios;
+  // HONORARIOS: calculated as pct% of the actual rent collected (paidAlquiler)
+  const honPct = options.honorariosPercent || 0;
+  const honorariosAlquilerCobrado = honPct > 0
+    ? Math.round(paidAlquiler * honPct / 100 * 100) / 100
+    : 0;
+  const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
+  const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;
 
-  const honorariosBase = honorarios?.monto ?? 0;
-  const honorariosCobrado = isRentPaid
-    ? honorariosBase
-    : (amtPaid > 0 && commissionBase > 0
-      ? Math.round(honorariosBase * (commissionCollected / commissionBase) * 100) / 100
-      : 0);
+  // Update per-contract honorarios display to reflect collected amounts
+  if (honorarios) {
+    honorarios.montoAlquiler = honorariosAlquilerCobrado;
+    honorarios.monto = honorariosCobrado;
+    honorarios.montoEnLetras = require('../utils/helpers').numeroATexto(honorariosCobrado);
+  }
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
   const serviciosDisponibles = monthlyRecord.services
