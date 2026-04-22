@@ -155,16 +155,13 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Rent honorarios: base = (alquiler - descuento manual) + punitorios
-  const descuento = parseFloat((descuentosAlquilerState || {})[data.contractId]) || 0
-  const rentBase = Math.max(0, (data.rentAmount || 0) - descuento)
-  const punitoryAmt = data.punitoryAmount || 0
-  const baseHonorarios = rentBase + punitoryAmt
-  const montoAlquiler = pct > 0 ? Math.round(baseHonorarios * pct / 100 * 100) / 100 : 0
+  // Rent honorarios: based on COLLECTED rent only (paidAlquiler)
+  const paidAlquiler = data.paidAlquiler || 0
+  const montoAlquiler = pct > 0 ? Math.round(paidAlquiler * pct / 100 * 100) / 100 : 0
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
 
-  return { porcentaje: pct, baseHonorarios, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
+  return { porcentaje: pct, baseHonorarios: paidAlquiler, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
 }
 
 function LiquidacionTab({ groupId }) {
@@ -217,7 +214,7 @@ function LiquidacionTab({ groupId }) {
       const hasDescuento = !!descuentosAlquiler[data.contractId]
       if (selectedIds.length === 0 && extras.length === 0 && !honorariosPercent && !hasDescuento) return data
       const honorarios = computeHonorariosLocal(data, gastosAMiCargo, honorariosPercent, descuentosAlquiler)
-      return { ...data, honorarios }
+      return { ...data, honorarios, honorariosCobrado: honorarios ? honorarios.monto : 0 }
     })
   }, [filteredData, gastosAMiCargo, honorariosPercent, descuentosAlquiler])
 
