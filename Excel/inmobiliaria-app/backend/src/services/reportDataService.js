@@ -360,7 +360,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   if (honorarios) {
     honorarios.montoAlquiler = honorariosAlquilerCobrado;
     honorarios.monto = honorariosCobrado;
-    honorarios.montoEnLetras = require('../utils/helpers').numeroATexto(honorariosCobrado);
+    honorarios.montoEnLetras = numeroATexto(honorariosCobrado);
   }
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
