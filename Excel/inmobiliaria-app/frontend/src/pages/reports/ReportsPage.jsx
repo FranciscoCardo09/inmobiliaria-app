@@ -164,9 +164,11 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
   const punitoryAmt = data.punitoryAmount || 0
   let honRemaining = amtPaid + previousCredit
   honRemaining -= Math.min(honRemaining, serviciosIva)
-  honRemaining -= Math.min(honRemaining, punitoryAmt)
+  const paidPunitoriosForHon = Math.min(honRemaining, punitoryAmt)
+  honRemaining -= paidPunitoriosForHon
   const rentForHonorarios = Math.min(Math.max(0, honRemaining), data.rentAmount || 0)
-  const montoAlquiler = pct > 0 ? Math.round(rentForHonorarios * pct / 100 * 100) / 100 : 0
+  const honorariosBase = rentForHonorarios + paidPunitoriosForHon
+  const montoAlquiler = pct > 0 ? Math.round(honorariosBase * pct / 100 * 100) / 100 : 0
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
 

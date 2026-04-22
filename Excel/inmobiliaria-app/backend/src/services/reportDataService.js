@@ -353,11 +353,13 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const honPct = options.honorariosPercent || 0;
   let honRemaining = amtPaid + previousBalance;
   honRemaining -= Math.min(honRemaining, serviciosIvaTotal);  // services first
-  honRemaining -= Math.min(honRemaining, punitoryAmt);        // punitorios second
+  const paidPunitoriosForHon = Math.min(honRemaining, punitoryAmt);
+  honRemaining -= paidPunitoriosForHon;                        // punitorios second
   const rentForHonorarios = Math.min(honRemaining, alquilerTotal); // what's left = rent for honorarios
+  const honorariosBase = rentForHonorarios + paidPunitoriosForHon; // commission on rent + punitorios paid
 
   const honorariosAlquilerCobrado = honPct > 0
-    ? Math.round(rentForHonorarios * honPct / 100 * 100) / 100
+    ? Math.round(honorariosBase * honPct / 100 * 100) / 100
     : 0;
   const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
   const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;
