@@ -348,10 +348,16 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // DISPLAY TOTALS: The user wants "Total Alquileres" to mean ONLY the Rent portion.
   const subtotalAlquileresCobrado = paidAlquiler;
 
-  // HONORARIOS: calculated as pct% of the actual rent collected (paidAlquiler)
+  // HONORARIOS: separate allocation order (Services → Punitorios → Rent)
+  // so that any pending amount reduces the rent base for commission
   const honPct = options.honorariosPercent || 0;
+  let honRemaining = amtPaid + previousBalance;
+  honRemaining -= Math.min(honRemaining, serviciosIvaTotal);  // services first
+  honRemaining -= Math.min(honRemaining, punitoryAmt);        // punitorios second
+  const rentForHonorarios = Math.min(honRemaining, alquilerTotal); // what's left = rent for honorarios
+
   const honorariosAlquilerCobrado = honPct > 0
-    ? Math.round(paidAlquiler * honPct / 100 * 100) / 100
+    ? Math.round(rentForHonorarios * honPct / 100 * 100) / 100
     : 0;
   const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
   const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;

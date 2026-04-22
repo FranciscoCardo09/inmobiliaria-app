@@ -155,9 +155,18 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Rent honorarios: based on COLLECTED rent only (paidAlquiler)
-  const paidAlquiler = data.paidAlquiler || 0
-  const montoAlquiler = pct > 0 ? Math.round(paidAlquiler * pct / 100 * 100) / 100 : 0
+  // Honorarios: deduct services + punitorios from payment first, remainder = rent for commission
+  // Same logic as backend: Services → Punitorios → Rent
+  const amtPaid = data.amountPaid || 0
+  const prevBal = data.conceptos?.find(c => c.concepto?.includes('Saldo a favor'))
+  const previousCredit = prevBal ? Math.abs(prevBal.importe) : 0
+  const serviciosIva = (data.paidServicios || 0)
+  const punitoryAmt = data.punitoryAmount || 0
+  let honRemaining = amtPaid + previousCredit
+  honRemaining -= Math.min(honRemaining, serviciosIva)
+  honRemaining -= Math.min(honRemaining, punitoryAmt)
+  const rentForHonorarios = Math.min(Math.max(0, honRemaining), data.rentAmount || 0)
+  const montoAlquiler = pct > 0 ? Math.round(rentForHonorarios * pct / 100 * 100) / 100 : 0
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
 
