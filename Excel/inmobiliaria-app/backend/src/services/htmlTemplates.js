@@ -167,7 +167,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
   const emp = dataArray[0].empresa;
   const currency = dataArray[0].currency;
   const periodo = dataArray[0].periodo;
-  const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, partialCount, unpaidCount } = computeGrandTotals(dataArray);
+  const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, grandServiciosCobrado, grandPunitoriosCobrado, grandAlquilerCobrado, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
   const propertyBlocks = dataArray.map((data) => {
     const conceptosFiltered = data.conceptos.filter(c => !(c.concepto.includes('Punitorios') && c.importe === 0));

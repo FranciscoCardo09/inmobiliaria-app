@@ -1224,7 +1224,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       `${periodo.label}`);
 
     // Grand total pre-calc: includes fully-paid + partially-paid rentals
-    const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, paidCount, partialCount, unpaidCount } = computeGrandTotals(dataArray);
+    const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, grandServiciosCobrado, grandPunitoriosCobrado, grandAlquilerCobrado, grandSaldoAFavor, paidCount, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
     // Metric cards
     y = drawMetrics(doc, y, [
