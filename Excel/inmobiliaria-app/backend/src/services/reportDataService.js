@@ -345,8 +345,9 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
   const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
-  // DISPLAY TOTALS: The user wants "Total Alquileres" to mean ONLY the Rent portion.
-  const subtotalAlquileresCobrado = paidAlquiler;
+  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - saldo a favor
+  const prevCredit = Math.max(0, previousBalance); // previousBalance > 0 = credit from prior month
+  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit;
 
   // HONORARIOS: pct% of (alquiler pagado + punitorios pagados)
   const honPct = options.honorariosPercent || 0;

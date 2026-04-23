@@ -1333,7 +1333,24 @@ const generateLiquidacionAllPDF = (dataArray) => {
           iy += 13;
         }
 
-        // Allocation detail (simplified)
+        // Allocation detail: what was paid
+        if ((data.paidServicios || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Servicios', bx, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidServicios, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 11;
+        }
+        if ((data.paidPunitorios || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Punitorios', bx, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidPunitorios, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 11;
+        }
+        if ((data.paidAlquiler || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Alquiler', bx, iy);
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidAlquiler, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 11;
+        }
+
+        // Saldo a favor (overpayment)
         if ((data.saldoAFavor || 0) > 0) {
           doc.font(F.b).fontSize(7).fillColor('#0066CC').text('Saldo a favor', bx, iy);
           doc.font(F.b).fontSize(7).fillColor('#0066CC').text(fmt(data.saldoAFavor, currency), bx, iy, { width: bw, align: 'right' });
