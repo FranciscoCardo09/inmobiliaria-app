@@ -549,6 +549,12 @@ function LiquidacionTab({ groupId }) {
                         </div>
                       )}
                       <div className="border-t border-base-300 pt-1 mt-1 space-y-0.5">
+                        {(data.prevCredit || 0) > 0 && (
+                          <div className="flex justify-between text-info">
+                            <span>→ Saldo a favor anterior</span>
+                            <span>{formatCurrency(data.prevCredit)}</span>
+                          </div>
+                        )}
                         {data.paidServicios > 0 && (
                           <div className="flex justify-between text-base-content/70">
                             <span>→ Servicios pagados</span>
@@ -561,12 +567,15 @@ function LiquidacionTab({ groupId }) {
                             <span>{formatCurrency(data.paidPunitorios)}</span>
                           </div>
                         )}
-                        {data.paidAlquiler > 0 && (
-                          <div className="flex justify-between text-base-content/70">
-                            <span>→ Alquiler pagado</span>
-                            <span>{formatCurrency(data.paidAlquiler)}</span>
-                          </div>
-                        )}
+                        {(() => {
+                          const alquilerAbonado = Math.max(0, (data.amountPaid || 0) - (data.paidServicios || 0) - (data.paidPunitorios || 0));
+                          return alquilerAbonado > 0 ? (
+                            <div className="flex justify-between text-base-content/70">
+                              <span>→ Alquiler pagado</span>
+                              <span>{formatCurrency(alquilerAbonado)}</span>
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                       {data.saldoAFavor > 0 && (
                         <div className="flex justify-between text-info font-bold border-t border-base-300 pt-1 mt-1">

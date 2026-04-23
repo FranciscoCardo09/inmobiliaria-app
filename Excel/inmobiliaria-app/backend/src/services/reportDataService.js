@@ -396,6 +396,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     isRentPaid,
     paymentStatus,
     saldoAFavor,
+    prevCredit,
     // Payment allocation breakdown
     paidServicios,
     paidPunitorios,

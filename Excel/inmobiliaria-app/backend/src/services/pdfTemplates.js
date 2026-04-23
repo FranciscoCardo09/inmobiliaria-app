@@ -1254,6 +1254,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const breakdownLines = hasBreakdown ? [
         amtPaid > 0, // "Pagado" line
         (data.pendingAmount || 0) > 0, // "Pendiente" line
+        (data.prevCredit || 0) > 0,
         (data.paidServicios || 0) > 0,
         (data.paidPunitorios || 0) > 0,
         (data.paidAlquiler || 0) > 0,
@@ -1331,6 +1332,13 @@ const generateLiquidacionAllPDF = (dataArray) => {
           doc.font(F.r).fontSize(7.5).fillColor('#CC0000').text('Pendiente', bx, iy);
           doc.font(F.b).fontSize(7.5).fillColor('#CC0000').text(fmt(data.pendingAmount, currency), bx, iy, { width: bw, align: 'right' });
           iy += 13;
+        }
+
+        // Previous credit (saldo a favor del mes anterior)
+        if ((data.prevCredit || 0) > 0) {
+          doc.font(F.r).fontSize(7).fillColor('#0066CC').text('→ Saldo a favor anterior', bx, iy);
+          doc.font(F.r).fontSize(7).fillColor('#0066CC').text(fmt(data.prevCredit, currency), bx, iy, { width: bw, align: 'right' });
+          iy += 11;
         }
 
         // Allocation detail: what was paid
