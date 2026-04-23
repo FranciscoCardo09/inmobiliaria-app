@@ -1248,22 +1248,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
         return true;
       });
 
-      // Calculate breakdown rows to determine card height
-      const amtPaid = data.amountPaid || 0;
-      const hasBreakdown = amtPaid > 0;
-      const breakdownLines = hasBreakdown ? [
-        amtPaid > 0, // "Pagado" line
-        (data.pendingAmount || 0) > 0, // "Pendiente" line
-        (data.prevCredit || 0) > 0,
-        (data.paidServicios || 0) > 0,
-        (data.paidPunitorios || 0) > 0,
-        (data.paidAlquiler || 0) > 0,
-        (data.saldoAFavor || 0) > 0,
-      ].filter(Boolean).length : 0;
-
       const cardRows = conceptosFiltered.length;
-      const breakdownH = hasBreakdown ? 10 + breakdownLines * 13 + 6 : 0; // padding + rows + separator
-      const cardH = 42 + cardRows * 15 + breakdownH;
+      const cardH = 42 + cardRows * 15;
       checkNewPage(cardH + 8);
 
       // Property card - thin border; colored by status
@@ -1312,60 +1298,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
         iy += 15;
       }
 
-      // Payment breakdown (inside the card)
-      if (hasBreakdown) {
-        iy += 2;
-        // Thin separator line
-        doc.strokeColor(C.line).lineWidth(0.3)
-          .moveTo(PAGE.margin + 18, iy).lineTo(PAGE.width - PAGE.margin - 18, iy).stroke();
-        iy += 6;
 
-        const bx = PAGE.margin + 24;
-        const bw = W - 48;
-
-        if (amtPaid > 0) {
-          doc.font(F.b).fontSize(7.5).fillColor(C.dark).text('Abonado', bx, iy);
-          doc.font(F.b).fontSize(7.5).fillColor(C.black).text(fmt(amtPaid, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
-        if ((data.pendingAmount || 0) > 0) {
-          doc.font(F.r).fontSize(7.5).fillColor('#CC0000').text('Pendiente', bx, iy);
-          doc.font(F.b).fontSize(7.5).fillColor('#CC0000').text(fmt(data.pendingAmount, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
-
-        // Previous credit (saldo a favor del mes anterior)
-        if ((data.prevCredit || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor('#0066CC').text('→ Saldo a favor anterior', bx, iy);
-          doc.font(F.r).fontSize(7).fillColor('#0066CC').text(fmt(data.prevCredit, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 11;
-        }
-
-        // Allocation detail: what was paid
-        if ((data.paidServicios || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Servicios', bx, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidServicios, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 11;
-        }
-        if ((data.paidPunitorios || 0) > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Punitorios', bx, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidPunitorios, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 11;
-        }
-        const alquilerAbonado = Math.max(0, amtPaid - (data.paidServicios || 0) - (data.paidPunitorios || 0));
-        if (alquilerAbonado > 0) {
-          doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Alquiler', bx, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(alquilerAbonado, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 11;
-        }
-
-        // Saldo a favor (overpayment)
-        if ((data.saldoAFavor || 0) > 0) {
-          doc.font(F.b).fontSize(7).fillColor('#0066CC').text('Saldo a favor', bx, iy);
-          doc.font(F.b).fontSize(7).fillColor('#0066CC').text(fmt(data.saldoAFavor, currency), bx, iy, { width: bw, align: 'right' });
-          iy += 13;
-        }
-      }
 
       y += cardH + 8;
     }
