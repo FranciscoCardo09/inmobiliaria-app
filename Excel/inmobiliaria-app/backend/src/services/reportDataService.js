@@ -349,10 +349,10 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const prevCredit = Math.max(0, previousBalance); // previousBalance > 0 = credit from prior month
   const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit;
 
-  // HONORARIOS: pct% of (alquiler pagado + punitorios pagados)
+  // HONORARIOS: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
   const honPct = options.honorariosPercent || 0;
   const honorariosAlquilerCobrado = honPct > 0
-    ? Math.round((paidAlquiler + paidPunitorios) * honPct / 100 * 100) / 100
+    ? Math.round(subtotalAlquileresCobrado * honPct / 100 * 100) / 100
     : 0;
   const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
   const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;

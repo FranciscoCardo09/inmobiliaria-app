@@ -155,8 +155,8 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Honorarios: pct% of (alquiler pagado + punitorios pagados)
-  const honorariosBase = (data.paidAlquiler || 0) + (data.paidPunitorios || 0)
+  // Honorarios: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
+  const honorariosBase = data.subtotalAlquileresCobrado || 0
   const montoAlquiler = pct > 0 ? Math.round(honorariosBase * pct / 100 * 100) / 100 : 0
   const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
   const monto = montoAlquiler + totalGastos
