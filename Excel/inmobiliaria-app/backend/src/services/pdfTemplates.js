@@ -1366,26 +1366,8 @@ const generateLiquidacionAllPDF = (dataArray) => {
       .text(`Son: ${alquilerLetras}`, PAGE.margin + 4, y, { width: W - 8 });
     y += 16;
 
-    // Pending / partial summary
-    if (grandSubtotalAlquileresPartial > 0) {
-      doc.font(F.r).fontSize(8).fillColor(C.amber)
-        .text(`Pendiente de cobro parcial (${partialCount} alquiler${partialCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresPartial, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
-      y += 14;
-    }
-    if (grandSubtotalAlquileresUnpaid > 0) {
-      doc.font(F.r).fontSize(8).fillColor('#CC0000')
-        .text(`No cobrado (${unpaidCount} alquiler${unpaidCount !== 1 ? 'es' : ''}): ${fmt(grandSubtotalAlquileresUnpaid, currency)}`, PAGE.margin + 4, y, { width: W - 8 });
-      y += 14;
-    }
 
-    // Grand sub-breakdowns (text only)
-    doc.font(F.r).fontSize(8).fillColor(C.medium)
-      .text(`Servicios cobrados: ${fmt(grandServiciosCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
-    y += 12;
-    doc.text(`Punitorios cobrados: ${fmt(grandPunitoriosCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
-    y += 12;
-    doc.text(`Alquiler cobrado: ${fmt(grandAlquilerCobrado, currency)}`, PAGE.margin + 4, y, { width: W - 8, align: 'right' });
-    y += 12;
+
 
     // TOTAL COBRADO box
     y += 6;
