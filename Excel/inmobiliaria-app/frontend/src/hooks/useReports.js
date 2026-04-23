@@ -46,7 +46,7 @@ export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorario
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 1000,
   })
 
   return {
