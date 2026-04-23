@@ -1344,9 +1344,10 @@ const generateLiquidacionAllPDF = (dataArray) => {
           doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidPunitorios, currency), bx, iy, { width: bw, align: 'right' });
           iy += 11;
         }
-        if ((data.paidAlquiler || 0) > 0) {
+        const alquilerAbonado = Math.max(0, amtPaid - (data.paidServicios || 0) - (data.paidPunitorios || 0));
+        if (alquilerAbonado > 0) {
           doc.font(F.r).fontSize(7).fillColor(C.medium).text('→ Alquiler', bx, iy);
-          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(data.paidAlquiler, currency), bx, iy, { width: bw, align: 'right' });
+          doc.font(F.r).fontSize(7).fillColor(C.dark).text(fmt(alquilerAbonado, currency), bx, iy, { width: bw, align: 'right' });
           iy += 11;
         }
 
