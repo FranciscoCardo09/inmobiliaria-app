@@ -945,7 +945,7 @@ const _recalculateCore = async (recordIds, tx) => {
     const isGap = !isNewContract && record.monthNumber !== expectedNextMonthNumber;
 
     if (isGap) {
-      throw new Error(`[Integridad] Secuencia rota para el contrato ${record.contractId}: salto del mes esperado ${expectedNextMonthNumber} al ${record.monthNumber}. Recalculo abortado.`);
+      console.warn(`[Integridad] Secuencia rota para el contrato ${record.contractId}: salto del mes esperado ${expectedNextMonthNumber} al ${record.monthNumber}. Continuando con saldo previo.`);
     }
 
     const activePreviousBalance = isNewContract 
