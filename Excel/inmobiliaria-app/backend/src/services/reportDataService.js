@@ -125,6 +125,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
             include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true },
           },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
+          debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
         },
       },
       services: {
@@ -151,6 +152,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
               contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
               property: { include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true } },
               rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
+              debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
             },
           },
           services: { include: { conceptType: true } },
@@ -409,6 +411,15 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     isCancelled: !!monthlyRecord.isCancelled,
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
+    deudas: (contract.debts || []).map(d => ({
+      periodo: d.periodLabel,
+      original: d.originalAmount,
+      pagado: d.amountPaid,
+      punitorios: d.accumulatedPunitory,
+      pendiente: d.currentTotal,
+      status: d.status,
+    })),
+    totalDeuda: (contract.debts || []).reduce((sum, d) => sum + d.currentTotal, 0),
     transacciones: monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
       inquilino: getTenantsName(contract), propiedad: contract.property.address,
@@ -500,6 +511,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
             } 
           },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
+          debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
         },
       },
       services: { include: { conceptType: true } },

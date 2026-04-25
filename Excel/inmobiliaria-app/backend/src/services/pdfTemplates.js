@@ -389,6 +389,27 @@ const generateLiquidacionPDF = (data) => {
       ['Propietario', `${data.propietario.nombre}${data.propietario.dni ? ` - ${formatDocumento(data.propietario.dni).label}: ${formatDocumento(data.propietario.dni).formatted}` : ''}`],
     ]);
 
+    if (data.deudas && data.deudas.length > 0) {
+      y = drawSection(doc, y, 'Deudas Acumuladas');
+      const debtRows = data.deudas.map(d => [d.periodo, fmt(d.original, data.currency), fmt(d.punitorios, data.currency), fmt(d.pendiente, data.currency)]);
+      y = drawTable(doc, y, ['Período', 'Monto Original', 'Punitorios', 'Total Pendiente'], debtRows, {
+        colWidths: [W * 0.3, W * 0.25, W * 0.2, W * 0.25],
+        fontSize: 8.5,
+        headerFontSize: 8,
+        colAligns: ['left', 'right', 'right', 'right']
+      });
+      y += 8;
+      const totalH = 34;
+      fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
+      doc.font(F.b).fontSize(11).fillColor(C.white)
+        .text('TOTAL DEUDA ACUMULADA', PAGE.margin + 14, y + 10);
+      doc.text(fmt(data.totalDeuda, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
+      y += totalH + 16;
+      y = drawSection(doc, y, `Liquidación del mes (${data.periodo.label})`);
+    } else {
+      y = drawSection(doc, y, 'Liquidación del mes');
+    }
+
     // Detail table
     const rows = data.conceptos.map(c => [c.concepto, fmt(c.importe, data.currency)]);
     const rowMeta = data.conceptos.map(c => ({ bold: !!c.isAjuste }));
@@ -1249,7 +1270,11 @@ const generateLiquidacionAllPDF = (dataArray) => {
       });
 
       const cardRows = conceptosFiltered.length;
-      const cardH = 42 + cardRows * 15;
+      let deudasH = 0;
+      if (data.deudas && data.deudas.length > 0) {
+        deudasH = 15 + data.deudas.length * 15 + 15 + 20 + 15;
+      }
+      const cardH = 42 + cardRows * 15 + deudasH;
       checkNewPage(cardH + 8);
 
       // Property card - thin border; colored by status
@@ -1268,9 +1293,9 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
       // Status label + total on right
       const statusLabels = {
-        'PAGADO': { label: 'PAGADO', color: '#228B22' },
+        'PAGADO': { label: '', color: '#228B22' },
         'PAGO PARCIAL': { label: 'PAGO PARCIAL', color: C.amber },
-        'NO COBRADO': { label: 'NO COBRADO', color: '#CC0000' },
+        'NO COBRADO': { label: 'SIN ABONAR', color: '#CC0000' },
         'SALDO A FAVOR': { label: 'SALDO A FAVOR', color: '#0066CC' },
       };
       const sl = statusLabels[data.paymentStatus] || { label: data.paymentStatus, color: C.dark };
@@ -1286,6 +1311,22 @@ const generateLiquidacionAllPDF = (dataArray) => {
         .text(totalDisplay, PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
 
       let iy = y + 34;
+
+      if (data.deudas && data.deudas.length > 0) {
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Deudas Acumuladas', PAGE.margin + 12, iy);
+        iy += 15;
+        for (const d of data.deudas) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodo}`, PAGE.margin + 24, iy, { width: W * 0.4 });
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.pendiente, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+          iy += 15;
+        }
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin + 24, iy);
+        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+        iy += 20;
+
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Liquidación Actual', PAGE.margin + 12, iy);
+        iy += 15;
+      }
 
       // Conceptos
       for (const c of conceptosFiltered) {

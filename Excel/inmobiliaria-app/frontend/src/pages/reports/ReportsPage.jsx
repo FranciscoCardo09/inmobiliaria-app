@@ -500,20 +500,54 @@ function LiquidacionTab({ groupId }) {
               const disponibles = data.serviciosDisponibles || []
 
               const statusBadge = {
-                'PAGADO':       { cls: 'badge-success', label: 'PAGADO' },
                 'SALDO A FAVOR': { cls: 'badge-info',   label: 'SALDO A FAVOR' },
                 'PAGO PARCIAL': { cls: 'badge-warning',  label: 'PAGO PARCIAL' },
-                'NO COBRADO':   { cls: 'badge-error',   label: 'NO COBRADO' },
-              }[data.paymentStatus] || { cls: 'badge-ghost', label: data.paymentStatus || '?' }
+                'NO COBRADO':   { cls: 'badge-error',   label: 'SIN ABONAR' },
+              }[data.paymentStatus]
 
               return (
                 <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
                   <div className="flex items-center gap-2 mb-2">
                     <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
-                    <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>
+                    {statusBadge && <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>}
                   </div>
 
+                  {data.deudas && data.deudas.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="font-semibold text-sm mb-2">Deudas Acumuladas</h4>
+                      <div className="overflow-x-auto bg-base-200/30 rounded-lg">
+                        <table className="table table-xs">
+                          <thead>
+                            <tr>
+                              <th className="pl-4">Período</th>
+                              <th className="text-right">Original</th>
+                              <th className="text-right">Punitorios</th>
+                              <th className="text-right">Pendiente</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.deudas.map((d, di) => (
+                              <tr key={di}>
+                                <td className="pl-4">{d.periodo}</td>
+                                <td className="text-right">{formatCurrency(d.original)}</td>
+                                <td className="text-right">{formatCurrency(d.punitorios)}</td>
+                                <td className="text-right font-semibold text-error">{formatCurrency(d.pendiente)}</td>
+                              </tr>
+                            ))}
+                            <tr className="border-t-2 border-base-300">
+                              <td colSpan="3" className="pl-4 text-right font-bold">TOTAL DEUDA ACUMULADA</td>
+                              <td className="text-right font-bold text-error">{formatCurrency(data.totalDeuda)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Conceptos table */}
+                  {data.deudas && data.deudas.length > 0 && (
+                    <h4 className="font-semibold text-sm mt-2 mb-2">Liquidación Actual</h4>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="table table-xs">
                       <tbody>
