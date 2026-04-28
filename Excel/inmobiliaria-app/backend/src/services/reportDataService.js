@@ -644,40 +644,57 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
     activeContracts,
     totalProperties,
     occupiedProperties,
-    monthlyRecords,
-    debtsOpen,
+    monthlyRecordsAgg,
+    statusGroups,
+    debtsAgg,
   ] = await Promise.all([
     prisma.contract.count({ where: { groupId, active: true } }),
     prisma.property.count({ where: { groupId, isActive: true } }),
-    prisma.contract.count({
+    prisma.contract.findMany({
       where: { groupId, active: true },
       distinct: ['propertyId'],
+      select: { propertyId: true }
     }),
-    prisma.monthlyRecord.findMany({
+    prisma.monthlyRecord.aggregate({
       where: { groupId, periodMonth: month, periodYear: year },
+      _sum: { amountPaid: true, totalDue: true, punitoryAmount: true },
+      _count: { id: true }
     }),
-    prisma.debt.findMany({
+    prisma.monthlyRecord.groupBy({
+      by: ['status'],
+      where: { groupId, periodMonth: month, periodYear: year },
+      _count: { id: true }
+    }),
+    prisma.debt.aggregate({
       where: { groupId, status: { not: 'PAID' } },
+      _sum: { currentTotal: true },
+      _count: { id: true }
     }),
   ]);
 
   // Previous month for comparison
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
-  const prevMonthlyRecords = await prisma.monthlyRecord.findMany({
+  const prevMonthlyRecordsAgg = await prisma.monthlyRecord.aggregate({
     where: { groupId, periodMonth: prevMonth, periodYear: prevYear },
+    _sum: { amountPaid: true }
   });
 
-  const ingresosMes = monthlyRecords.reduce((sum, r) => sum + r.amountPaid, 0);
-  const ingresosMesAnterior = prevMonthlyRecords.reduce((sum, r) => sum + r.amountPaid, 0);
-  const totalDueMes = monthlyRecords.reduce((sum, r) => sum + r.totalDue, 0);
-  const punitoryMes = monthlyRecords.reduce((sum, r) => sum + r.punitoryAmount, 0);
+  const ingresosMes = monthlyRecordsAgg._sum.amountPaid || 0;
+  const ingresosMesAnterior = prevMonthlyRecordsAgg._sum.amountPaid || 0;
+  const totalDueMes = monthlyRecordsAgg._sum.totalDue || 0;
+  const punitoryMes = monthlyRecordsAgg._sum.punitoryAmount || 0;
+  const totalRecordsCount = monthlyRecordsAgg._count.id || 0;
 
-  const totalDeuda = debtsOpen.reduce((sum, d) => sum + d.currentTotal, 0);
+  const totalDeuda = debtsAgg._sum.currentTotal || 0;
+  const deudasAbiertas = debtsAgg._count.id || 0;
 
-  const pagados = monthlyRecords.filter((r) => r.status === 'COMPLETE').length;
-  const parciales = monthlyRecords.filter((r) => r.status === 'PARTIAL').length;
-  const pendientes = monthlyRecords.filter((r) => r.status === 'PENDING').length;
+  let pagados = 0, parciales = 0, pendientes = 0;
+  for (const group of statusGroups) {
+    if (group.status === 'COMPLETE') pagados = group._count.id;
+    if (group.status === 'PARTIAL') parciales = group._count.id;
+    if (group.status === 'PENDING') pendientes = group._count.id;
+  }
 
   return {
     empresa,
@@ -696,18 +713,18 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
       cobranza: totalDueMes > 0 ? ((ingresosMes / totalDueMes) * 100).toFixed(1) : 0,
       punitoryMes,
       totalDeuda,
-      deudasAbiertas: debtsOpen.length,
+      deudasAbiertas,
       contratosActivos: activeContracts,
       totalPropiedades: totalProperties,
       ocupacion: totalProperties > 0
-        ? ((occupiedProperties / totalProperties) * 100).toFixed(1)
+        ? ((occupiedProperties.length / totalProperties) * 100).toFixed(1)
         : 0,
     },
     estadoPagos: {
       pagados,
       parciales,
       pendientes,
-      total: monthlyRecords.length,
+      total: totalRecordsCount,
     },
     currency: empresa.currency,
   };
@@ -765,22 +782,43 @@ const getCartaDocumentoData = async (groupId, contractId) => {
 const getEvolucionIngresosData = async (groupId, year) => {
   const empresa = await getEmpresaData(groupId);
 
-  const records = await prisma.monthlyRecord.findMany({
-    where: { groupId, periodYear: year },
-    orderBy: [{ periodMonth: 'asc' }],
-  });
+  const [aggData, statusData] = await Promise.all([
+    prisma.monthlyRecord.groupBy({
+      by: ['periodMonth'],
+      where: { groupId, periodYear: year },
+      _sum: { totalDue: true, amountPaid: true },
+      _count: { id: true },
+    }),
+    prisma.monthlyRecord.groupBy({
+      by: ['periodMonth'],
+      where: { groupId, periodYear: year, status: 'COMPLETE' },
+      _count: { id: true },
+    })
+  ]);
+
+  const aggMap = new Map();
+  for (const row of aggData) {
+    aggMap.set(row.periodMonth, row);
+  }
+  
+  const statusMap = new Map();
+  for (const row of statusData) {
+    statusMap.set(row.periodMonth, row._count.id);
+  }
 
   // Group by month
   const meses = [];
   for (let m = 1; m <= 12; m++) {
-    const mesRecords = records.filter((r) => r.periodMonth === m);
+    const agg = aggMap.get(m) || { _sum: { totalDue: 0, amountPaid: 0 }, _count: { id: 0 } };
+    const pagados = statusMap.get(m) || 0;
+    
     meses.push({
       mes: m,
       label: MONTH_NAMES[m],
-      totalDue: mesRecords.reduce((sum, r) => sum + r.totalDue, 0),
-      amountPaid: mesRecords.reduce((sum, r) => sum + r.amountPaid, 0),
-      contratos: mesRecords.length,
-      pagados: mesRecords.filter((r) => r.status === 'COMPLETE').length,
+      totalDue: agg._sum.totalDue || 0,
+      amountPaid: agg._sum.amountPaid || 0,
+      contratos: agg._count.id || 0,
+      pagados,
     });
   }
 
