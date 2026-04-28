@@ -26,6 +26,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   // Step 1 state
   const [selectedRecordIds, setSelectedRecordIds] = useState(new Set())
   const [searchTerm, setSearchTerm] = useState('')
+  const [contractTypeFilter, setContractTypeFilter] = useState('INQUILINO')
 
   // Step 2 state - months
   const [selectedYear, setSelectedYear] = useState(periodYear)
@@ -57,16 +58,22 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   }
 
   const filteredRecords = useMemo(() => {
-    if (!searchTerm.trim()) return records
+    let result = records
+
+    if (contractTypeFilter) {
+      result = result.filter(r => r.contract?.contractType === contractTypeFilter)
+    }
+
+    if (!searchTerm.trim()) return result
     const term = searchTerm.toLowerCase().trim()
-    return records.filter((r) => {
+    return result.filter((r) => {
       const address = (r.property?.address || '').toLowerCase()
       const unit = (r.property?.unit || '').toLowerCase()
       const tenant = getRecordTenant(r).toLowerCase()
       const owner = (r.owner?.name || '').toLowerCase()
       return address.includes(term) || unit.includes(term) || tenant.includes(term) || owner.includes(term)
     })
-  }, [records, searchTerm])
+  }, [records, searchTerm, contractTypeFilter])
 
   const toggleRecord = (recordId) => {
     setSelectedRecordIds((prev) => {
@@ -188,15 +195,26 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
               </div>
             </div>
 
-            <div className="relative mb-2">
-              <MagnifyingGlassIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
-              <input
-                type="text"
-                className="input input-bordered input-sm w-full pl-9"
-                placeholder="Buscar por propiedad, inquilino, dueño..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            <div className="flex gap-2 mb-2">
+              <div className="relative flex-1">
+                <MagnifyingGlassIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
+                <input
+                  type="text"
+                  className="input input-bordered input-sm w-full pl-9"
+                  placeholder="Buscar por propiedad, inquilino..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <select
+                className="select select-bordered select-sm w-40"
+                value={contractTypeFilter}
+                onChange={(e) => setContractTypeFilter(e.target.value)}
+              >
+                <option value="INQUILINO">Solo Inquilinos</option>
+                <option value="PROPIETARIO">Solo Propietarios</option>
+                <option value="">Todos</option>
+              </select>
             </div>
             <div className="max-h-64 overflow-y-auto border rounded-lg">
               {filteredRecords.map((record) => (

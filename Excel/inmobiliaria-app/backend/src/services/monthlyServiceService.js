@@ -75,7 +75,7 @@ const getServicesForRecord = async (monthlyRecordId) => {
  * Bulk assign a service to multiple months for a contract.
  * Creates MonthlyRecords if they don't exist.
  */
-const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null, tx = null) => {
+const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null, tx = null, skipRecalculate = false) => {
   const execute = async (client) => {
     const results = [];
     const affectedRecordIds = new Set();
@@ -104,6 +104,10 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
         // MINIMAL SAFE FIX: Prevent creation strictly before the start date or if explicitly inactive
         if (monthNumber < contract.startMonth) continue;
         if (!contract.active) continue;
+
+        // Prevent creation after the natural end date of the contract
+        const endMonth = contract.startMonth + contract.durationMonths - 1;
+        if (monthNumber > endMonth) continue;
 
         if (contract.rescindedAt) {
           const rescDate = new Date(contract.rescindedAt);
@@ -153,10 +157,13 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
       }
     }
 
-    if (affectedRecordIds.size > 0) {
+    if (affectedRecordIds.size > 0 && !skipRecalculate) {
       await recalculateMultipleRecords(Array.from(affectedRecordIds), client);
     }
 
+    if (skipRecalculate) {
+      return { results, affectedRecordIds: Array.from(affectedRecordIds) };
+    }
     return results;
   };
 
@@ -266,21 +273,28 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
   const errors = [];
 
   // Implement Safe Chunking
-  const CHUNK_SIZE = 50;
+  const CHUNK_SIZE = 5; // Reducido para evitar agotar el pool de conexiones y timeouts
   for (let i = 0; i < contractIds.length; i += CHUNK_SIZE) {
     const chunkIds = contractIds.slice(i, i + CHUNK_SIZE);
     
     try {
       await prisma.$transaction(async (tx) => {
+        const allAffectedIds = new Set();
         for (const contractId of chunkIds) {
           try {
-            const results = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx);
+            const { results, affectedRecordIds } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true);
             totalAssigned += results.length;
+            affectedRecordIds.forEach(id => allAffectedIds.add(id));
           } catch (e) {
             errors.push({ contractId, error: e.message });
           }
         }
-      });
+        
+        // Recalcular todo el lote junto, una sola vez por transacción
+        if (allAffectedIds.size > 0) {
+          await recalculateMultipleRecords(Array.from(allAffectedIds), tx);
+        }
+      }, { timeout: 30000 });
     } catch (chunkError) {
       for (const contractId of chunkIds) {
         errors.push({ contractId, error: `Error en lote: ${chunkError.message}` });

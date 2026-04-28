@@ -40,7 +40,11 @@ const authenticate = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
-    return ApiResponse.unauthorized(res, 'Error de autenticacion');
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return ApiResponse.unauthorized(res, 'Token invalido o expirado');
+    }
+    // Si es un error de BD (ej. Prisma timeout), pasamos al error handler (devuelve 500)
+    next(error);
   }
 };
 
