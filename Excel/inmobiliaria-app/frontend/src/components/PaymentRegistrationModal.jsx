@@ -90,6 +90,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const punitoryAmount = forgivePunitorios ? 0 : (punitoryPreview?.amount || 0)
 
   // Calculate total
+  const isMultaRescision = record?.services?.some(s => s.conceptType?.name === 'MULTA_RESCISION')
   const alquiler = record?.rentAmount || 0
   const servicios = record?.servicesTotal || 0
   const aFavorAnterior = record?.previousBalance || 0
@@ -336,7 +337,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
 
           <div className="space-y-1 text-sm">
             <div className="flex justify-between">
-              <span>Alquiler</span>
+              <span>{isMultaRescision ? 'Multa Rescisión' : 'Alquiler'}</span>
               <span className="font-mono">{formatCurrency(alquiler)}</span>
             </div>
 

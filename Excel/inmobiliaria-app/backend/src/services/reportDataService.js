@@ -912,8 +912,11 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     conceptos = [];
     const mesLabel = MONTH_NAMES[record.periodMonth];
     if (record.rentAmount > 0) {
+      const isMultaRescision = record.services?.some(s => s.conceptType?.name === 'MULTA_RESCISION');
       conceptos.push({
-        concepto: `Alquiler ${mesLabel} (Mes ${record.monthNumber})`,
+        concepto: isMultaRescision
+          ? `Multa Rescisión ${mesLabel} (Mes ${record.monthNumber})`
+          : `Alquiler ${mesLabel} (Mes ${record.monthNumber})`,
         importe: record.rentAmount,
       });
     }

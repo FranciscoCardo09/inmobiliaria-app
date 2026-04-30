@@ -25,6 +25,7 @@ export const useMonthlyServices = (groupId, recordId) => {
   }
 
   const addMutation = useMutation({
+    retry: 0,
     mutationFn: async ({ propagateForward, ...data }) => {
       const response = await api.post(
         `/groups/${groupId}/monthly-records/${recordId}/services`,
@@ -42,6 +43,7 @@ export const useMonthlyServices = (groupId, recordId) => {
   })
 
   const updateMutation = useMutation({
+    retry: 0,
     mutationFn: async ({ serviceId, propagateForward, ...data }) => {
       const response = await api.put(
         `/groups/${groupId}/monthly-records/${recordId}/services/${serviceId}`,
@@ -59,6 +61,7 @@ export const useMonthlyServices = (groupId, recordId) => {
   })
 
   const removeMutation = useMutation({
+    retry: 0,
     mutationFn: async ({ serviceId, propagateForward }) => {
       const params = propagateForward ? '?propagateForward=true' : ''
       await api.delete(

@@ -1039,9 +1039,8 @@ const processDirtyRecords = async () => {
       }
 
       await prisma.$transaction(async (tx) => {
-        // Simple advisory lock mapping the contract UUID to an integer
-        const lockValue = Array.from(dirtyRecord.contractId).reduce((h, c) => Math.imul(31, h) + c.charCodeAt(0) | 0, 0);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockValue})`;
+        // Use the same hashtext() key as _recalculateCore so both paths serialize on the same lock
+        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('${dirtyRecord.contractId}'))`);
 
         const dirtyRecords = await tx.monthlyRecord.findMany({
           where: { contractId: dirtyRecord.contractId, needsRecalculation: true },

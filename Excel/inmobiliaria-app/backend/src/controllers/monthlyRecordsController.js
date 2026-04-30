@@ -181,7 +181,12 @@ const addRecordService = async (req, res, next) => {
         record.periodYear,
         description || null
       );
-      return ApiResponse.created(res, null, 'Servicio agregado y propagado a meses siguientes');
+      const toMonth = 12;
+      return ApiResponse.created(
+        res,
+        { fromMonth: record.periodMonth, toMonth, year: record.periodYear },
+        `Servicio agregado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}`
+      );
     }
 
     const service = await addService(recordId, conceptTypeId, parseFloat(amount), description);
@@ -225,7 +230,12 @@ const updateRecordService = async (req, res, next) => {
         record.periodYear,
         description !== undefined ? description : existing.description
       );
-      return ApiResponse.success(res, null, 'Servicio actualizado y propagado a meses siguientes');
+      const toMonth = 12;
+      return ApiResponse.success(
+        res,
+        { fromMonth: record.periodMonth, toMonth, year: record.periodYear },
+        `Servicio actualizado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}`
+      );
     }
 
     const service = await updateService(serviceId, parseFloat(amount), description);

@@ -1,4 +1,4 @@
-import { useState, memo } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
 import api from '../../services/api'
@@ -442,12 +442,35 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
   )
 })
 
+// Controlled amount input for an existing service — stays in sync with server value after cache invalidation
+function ServiceAmountInput({ service, onUpdate }) {
+  const [draft, setDraft] = useState(String(service.amount))
+  useEffect(() => {
+    setDraft(String(service.amount))
+  }, [service.amount, service.id])
+
+  return (
+    <input
+      type="number"
+      className="input input-xs input-bordered w-24"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const val = parseFloat(draft)
+        if (!Number.isFinite(val) || val <= 0) return
+        if (Math.abs(val - parseFloat(service.amount)) < 0.01) return
+        onUpdate(service.id, val)
+      }}
+    />
+  )
+}
+
 // Inline Service Manager Component
 function ServiceManagerInline({ record, groupId }) {
   const { services, addService, updateService, removeService } = useMonthlyServices(groupId, record.id)
   const [selectedConceptId, setSelectedConceptId] = useState('')
   const [newAmount, setNewAmount] = useState('')
-  const [propagateForward, setPropagateForward] = useState(true)
+  const [propagateForward, setPropagateForward] = useState(false)
 
   const { data: conceptTypes = [] } = useQuery({
     queryKey: ['conceptTypes', groupId],
@@ -461,6 +484,12 @@ function ServiceManagerInline({ record, groupId }) {
 
   const handleAddService = () => {
     if (!selectedConceptId || !newAmount) return
+    if (propagateForward) {
+      const ok = confirm(
+        `Se aplicará "${conceptTypes.find(c => c.id === selectedConceptId)?.name}" a este mes y todos los siguientes del año. ¿Continuar?`
+      )
+      if (!ok) return
+    }
     addService({
       conceptTypeId: selectedConceptId,
       amount: parseFloat(newAmount),
@@ -470,8 +499,12 @@ function ServiceManagerInline({ record, groupId }) {
     setNewAmount('')
   }
 
-  const handleUpdateService = (serviceId, newAmount) => {
-    updateService({ serviceId, amount: parseFloat(newAmount), propagateForward })
+  const handleUpdateService = (serviceId, newAmt) => {
+    if (propagateForward) {
+      const ok = confirm('Se actualizará este servicio en este mes y todos los siguientes del año. ¿Continuar?')
+      if (!ok) return
+    }
+    updateService({ serviceId, amount: newAmt, propagateForward })
   }
 
   const handleRemoveService = (serviceId) => {
@@ -507,17 +540,7 @@ function ServiceManagerInline({ record, groupId }) {
               <span className={`badge badge-sm ${getCategoryColor(service.conceptType?.category)}`}>
                 {service.conceptType?.name}
               </span>
-              <input
-                type="number"
-                className="input input-xs input-bordered w-24"
-                defaultValue={service.amount}
-                onBlur={(e) => {
-                  const val = parseFloat(e.target.value)
-                  if (val !== service.amount && val > 0) {
-                    handleUpdateService(service.id, val)
-                  }
-                }}
-              />
+              <ServiceAmountInput service={service} onUpdate={handleUpdateService} />
               <button
                 className="btn btn-xs btn-ghost text-error"
                 onClick={() => handleRemoveService(service.id)}

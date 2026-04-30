@@ -75,7 +75,7 @@ const getServicesForRecord = async (monthlyRecordId) => {
  * Bulk assign a service to multiple months for a contract.
  * Creates MonthlyRecords if they don't exist.
  */
-const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null, tx = null, skipRecalculate = false) => {
+const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, description = null, tx = null, skipRecalculate = false, source = 'inline') => {
   const execute = async (client) => {
     const results = [];
     const affectedRecordIds = new Set();
@@ -156,6 +156,8 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
         console.error(`[bulkAssign] Error upserting service for record ${record.id}:`, e.message);
       }
     }
+
+    console.info('[bulkAssign]', { contractId, conceptTypeId, amount, monthsRequested: months.length, recordsTouched: affectedRecordIds.size, source });
 
     if (affectedRecordIds.size > 0 && !skipRecalculate) {
       await recalculateMultipleRecords(Array.from(affectedRecordIds), client);
@@ -282,7 +284,7 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
         const allAffectedIds = new Set();
         for (const contractId of chunkIds) {
           try {
-            const { results, affectedRecordIds } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true);
+            const { results, affectedRecordIds } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true, 'multi');
             totalAssigned += results.length;
             affectedRecordIds.forEach(id => allAffectedIds.add(id));
           } catch (e) {
@@ -319,7 +321,7 @@ const propagateServiceForward = async (groupId, contractId, conceptTypeId, amoun
     months.push({ month: m, year: fixedY });
   }
 
-  return bulkAssign(groupId, contractId, conceptTypeId, amount, months, description);
+  return bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, null, false, 'propagate');
 };
 
 /**
