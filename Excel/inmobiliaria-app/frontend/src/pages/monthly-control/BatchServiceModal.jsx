@@ -188,6 +188,7 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
   }
 
   const submitMutation = useMutation({
+    retry: 0,
     mutationFn: async () => {
       const res = await api.post(`/groups/${groupId}/monthly-records/batch-services`, {
         conceptTypeId,

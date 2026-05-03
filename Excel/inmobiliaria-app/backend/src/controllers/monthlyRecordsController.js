@@ -210,15 +210,17 @@ const updateRecordService = async (req, res, next) => {
     }
 
     if (propagateForward) {
-      const existing = await prisma.monthlyService.findUnique({
-        where: { id: serviceId },
-        select: { conceptTypeId: true, description: true },
-      });
-      if (!existing) return ApiResponse.notFound(res, 'Servicio no encontrado');
-
       const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
       if (!record || record.groupId !== groupId) {
         return ApiResponse.notFound(res, 'Registro no encontrado');
+      }
+
+      const existing = await prisma.monthlyService.findUnique({
+        where: { id: serviceId },
+        select: { conceptTypeId: true, description: true, monthlyRecordId: true },
+      });
+      if (!existing || existing.monthlyRecordId !== recordId) {
+        return ApiResponse.notFound(res, 'Servicio no encontrado');
       }
 
       await propagateServiceForward(
@@ -238,6 +240,19 @@ const updateRecordService = async (req, res, next) => {
       );
     }
 
+    const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+    if (!record || record.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    const toUpdate = await prisma.monthlyService.findUnique({
+      where: { id: serviceId },
+      select: { monthlyRecordId: true },
+    });
+    if (!toUpdate || toUpdate.monthlyRecordId !== recordId) {
+      return ApiResponse.notFound(res, 'Servicio no encontrado');
+    }
+
     const service = await updateService(serviceId, parseFloat(amount), description);
     return ApiResponse.success(res, service, 'Servicio actualizado');
   } catch (error) {
@@ -251,19 +266,20 @@ const deleteRecordService = async (req, res, next) => {
     const { groupId, recordId, serviceId } = req.params;
     const { propagateForward } = req.query;
 
+    const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
+    if (!record || record.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Registro no encontrado');
+    }
+
+    const existing = await prisma.monthlyService.findUnique({
+      where: { id: serviceId },
+      select: { conceptTypeId: true, monthlyRecordId: true },
+    });
+    if (!existing || existing.monthlyRecordId !== recordId) {
+      return ApiResponse.notFound(res, 'Servicio no encontrado');
+    }
+
     if (propagateForward === 'true') {
-      const existing = await prisma.monthlyService.findUnique({
-        where: { id: serviceId },
-        select: { conceptTypeId: true },
-      });
-      if (!existing) return ApiResponse.notFound(res, 'Servicio no encontrado');
-
-      const record = await prisma.monthlyRecord.findUnique({ where: { id: recordId } });
-      if (!record || record.groupId !== groupId) {
-        return ApiResponse.notFound(res, 'Registro no encontrado');
-      }
-
-      // Remove from current month and all future months this year
       await removeServiceForward(
         groupId,
         record.contractId,

@@ -30,7 +30,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
 
   // Step 2 state - months
   const [selectedYear, setSelectedYear] = useState(periodYear)
-  const [selectedMonths, setSelectedMonths] = useState([{ month: periodMonth, year: periodYear }])
+  const [selectedMonths, setSelectedMonths] = useState([])
 
   // Step 2 state - service & amount
   const [conceptTypeId, setConceptTypeId] = useState('')
@@ -123,6 +123,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   const canGoStep3 = conceptTypeId && amountNum > 0 && selectedMonths.length >= 1
 
   const submitMutation = useMutation({
+    retry: 0,
     mutationFn: async () => {
       const contractIds = selectedRecordsArray.map((r) => r.contractId)
       const res = await api.post(`/groups/${groupId}/monthly-records/bulk-load-services`, {
