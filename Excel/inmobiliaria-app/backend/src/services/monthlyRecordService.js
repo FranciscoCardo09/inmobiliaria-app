@@ -478,6 +478,31 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     // Refresh rentAmount, IVA for ALL existing records (including COMPLETE)
     // Refresh previousBalance only for non-COMPLETE records
+    // Convert existing record to penalty format if the contract was rescinded after the record was created
+    if (record && isPenaltyRecord) {
+      const penalty = contract.rescissionPenalty || 0;
+      const needsConversion = record.rentAmount !== 0 || Math.abs(record.servicesTotal - penalty) > 0.01;
+      if (needsConversion && penalty > 0) {
+        const newBalance = round2(record.amountPaid - penalty);
+        const conversionData = {
+          rentAmount: 0,
+          includeIva: false,
+          ivaAmount: 0,
+          servicesTotal: penalty,
+          totalDue: penalty,
+          balance: newBalance,
+          punitoryAmount: 0,
+          punitoryDays: 0,
+        };
+        updatesToPerform.push({ id: record.id, data: conversionData });
+        Object.assign(record, conversionData);
+      }
+      // Ensure MULTA_RESCISION service exists (idempotent — creation checks for existing)
+      if (!penaltyRecordsToSetup.some(c => c.id === contract.id)) {
+        penaltyRecordsToSetup.push(contract);
+      }
+    }
+
     // Skip rent refresh for penalty records (rent intentionally 0)
     if (record && !isPenaltyRecord) {
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
