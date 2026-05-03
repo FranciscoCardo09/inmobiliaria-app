@@ -1,5 +1,5 @@
 // Contract List Page - Table with filters, alerts, search, and rescission
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   PlusIcon,
@@ -11,6 +11,7 @@ import {
   NoSymbolIcon,
   ArrowUturnLeftIcon,
   ArrowPathIcon,
+  CalendarDaysIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts } from '../../hooks/useContracts'
@@ -30,7 +31,9 @@ export const ContractList = () => {
   })
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [rescindModal, setRescindModal] = useState(null) // contract to rescind
-  const [rescissionDate, setRescissionDate] = useState('')
+  const [rescissionDate, setRescissionDate] = useState('') // YYYY-MM-DD for API
+  const [rescissionDisplay, setRescissionDisplay] = useState('') // dd/mm/aaaa for display
+  const calendarRef = useRef(null)
 
   const {
     contracts, isLoading, deleteContract, isDeleting,
@@ -83,8 +86,33 @@ export const ContractList = () => {
   }, [rescindModal, rescissionDate, currentGroup?.id])
 
   const openRescindModal = (contract) => {
-    setRescissionDate(new Date().toISOString().split('T')[0])
+    const today = new Date()
+    const iso = today.toISOString().split('T')[0]
+    const [y, m, d] = iso.split('-')
+    setRescissionDate(iso)
+    setRescissionDisplay(`${d}/${m}/${y}`)
     setRescindModal(contract)
+  }
+
+  const handleRescissionTextChange = (e) => {
+    const val = e.target.value
+    setRescissionDisplay(val)
+    // Parse dd/mm/aaaa → YYYY-MM-DD
+    const match = val.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+    if (match) {
+      const [, d, m, y] = match
+      setRescissionDate(`${y}-${m}-${d}`)
+    } else {
+      setRescissionDate('')
+    }
+  }
+
+  const handleCalendarChange = (e) => {
+    const iso = e.target.value // YYYY-MM-DD
+    if (!iso) return
+    const [y, m, d] = iso.split('-')
+    setRescissionDate(iso)
+    setRescissionDisplay(`${d}/${m}/${y}`)
   }
 
   const getStatusBadge = (contract) => {
@@ -397,12 +425,32 @@ export const ContractList = () => {
                 <label className="label">
                   <span className="label-text font-medium">Fecha de rescisión (último mes activo)</span>
                 </label>
-                <input
-                  type="date"
-                  className="input input-bordered"
-                  value={rescissionDate}
-                  onChange={(e) => setRescissionDate(e.target.value)}
-                />
+                <div className="join w-full">
+                  <input
+                    type="text"
+                    className="input input-bordered join-item flex-1"
+                    placeholder="dd/mm/aaaa"
+                    value={rescissionDisplay}
+                    onChange={handleRescissionTextChange}
+                    maxLength={10}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-bordered join-item"
+                    onClick={() => calendarRef.current?.showPicker?.() || calendarRef.current?.click()}
+                    title="Abrir calendario"
+                  >
+                    <CalendarDaysIcon className="w-5 h-5" />
+                  </button>
+                  <input
+                    ref={calendarRef}
+                    type="date"
+                    className="sr-only"
+                    value={rescissionDate}
+                    onChange={handleCalendarChange}
+                    tabIndex={-1}
+                  />
+                </div>
               </div>
 
               {penaltyLoading && rescissionDate && (
@@ -427,7 +475,7 @@ export const ContractList = () => {
             <div className="modal-action">
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { setRescindModal(null); setRescissionDate('') }}
+                onClick={() => { setRescindModal(null); setRescissionDate(''); setRescissionDisplay('') }}
                 disabled={isRescinding}
               >
                 Cancelar
@@ -442,7 +490,7 @@ export const ContractList = () => {
               </button>
             </div>
           </div>
-          <div className="modal-backdrop" onClick={() => !isRescinding && setRescindModal(null)} />
+          <div className="modal-backdrop" onClick={() => { if (!isRescinding) { setRescindModal(null); setRescissionDisplay('') } }} />
         </div>
       )}
     </div>
