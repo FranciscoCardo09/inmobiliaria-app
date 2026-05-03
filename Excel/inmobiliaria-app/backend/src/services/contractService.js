@@ -60,7 +60,7 @@ const enrichContract = (c) => {
     nextAdjustmentMonth: effectiveNextAdj,
     endDate,
     status,
-    rentAmount: c.baseRent,
+    rentAmount: (c.rescindedAt && c.rescissionPenalty) ? c.rescissionPenalty : c.baseRent,
     currentPeriodLabel,
     remainingMonths,
     isExpiringSoon,

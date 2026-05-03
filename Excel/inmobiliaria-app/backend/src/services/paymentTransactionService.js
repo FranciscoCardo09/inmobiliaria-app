@@ -30,6 +30,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
       contract: {
         select: {
           id: true, punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
+          rescindedAt: true,
         },
       },
       services: {
@@ -143,12 +144,25 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   // 3. Rent (if still owed after services)
   if (rentStillOwed > 0 && remainingPayment > 0) {
     const paidToRent = Math.min(rentStillOwed, remainingPayment);
+    const isMultaRescision = (() => {
+      const rescindedAt = record.contract?.rescindedAt;
+      if (!rescindedAt) return false;
+      const rescDate = new Date(rescindedAt);
+      let pm = rescDate.getMonth() + 2;
+      let py = rescDate.getFullYear();
+      if (pm > 12) { pm = 1; py++; }
+      return record.periodMonth === pm && record.periodYear === py;
+    })();
     concepts.push({
-      type: 'ALQUILER',
+      type: isMultaRescision ? 'MULTA_RESCISION' : 'ALQUILER',
       amount: paidToRent,
-      description: paidToRent >= rentStillOwed
-        ? `Alquiler mes ${record.monthNumber}`
-        : `Alquiler mes ${record.monthNumber} (pago parcial)`,
+      description: isMultaRescision
+        ? (paidToRent >= rentStillOwed
+          ? `Multa Rescisión mes ${record.monthNumber}`
+          : `Multa Rescisión mes ${record.monthNumber} (pago parcial)`)
+        : (paidToRent >= rentStillOwed
+          ? `Alquiler mes ${record.monthNumber}`
+          : `Alquiler mes ${record.monthNumber} (pago parcial)`),
     });
     remainingPayment -= paidToRent;
   }

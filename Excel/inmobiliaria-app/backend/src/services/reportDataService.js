@@ -888,6 +888,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     // Usar concepto a los concepts guardados en esa transacción
     const CONCEPT_LABELS = {
       ALQUILER: 'Alquiler',
+      MULTA_RESCISION: 'Multa Rescisión',
       PUNITORIOS: 'Punitorios',
       A_FAVOR: 'Saldo a favor',
       SOBREPAGO: 'Pago en exceso',

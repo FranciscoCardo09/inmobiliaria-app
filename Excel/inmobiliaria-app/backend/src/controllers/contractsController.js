@@ -755,6 +755,18 @@ const rescindContract = async (req, res, next) => {
     const remainingMonths = Math.max(0, endMonth - rescissionMonthNumber);
     const rescissionPenalty = parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
 
+    // Check if the penalty month record already has payments
+    let penaltyMonth = rescDate.getMonth() + 2;
+    let penaltyYear = rescDate.getFullYear();
+    if (penaltyMonth > 12) { penaltyMonth = 1; penaltyYear++; }
+    const penaltyRecord = await prisma.monthlyRecord.findFirst({
+      where: { contractId: id, periodMonth: penaltyMonth, periodYear: penaltyYear },
+      include: { transactions: { select: { id: true } } },
+    });
+    if (penaltyRecord && penaltyRecord.transactions.length > 0) {
+      return ApiResponse.badRequest(res, 'Ya existen pagos registrados para el mes posterior a la rescisión. No se puede rescindir el contrato.');
+    }
+
     const updated = await prisma.contract.update({
       where: { id },
       data: {
