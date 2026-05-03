@@ -912,7 +912,16 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     conceptos = [];
     const mesLabel = MONTH_NAMES[record.periodMonth];
     if (record.rentAmount > 0) {
-      const isMultaRescision = record.services?.some(s => s.conceptType?.name === 'MULTA_RESCISION');
+      const isMultaRescision = (() => {
+        if (record.services?.some(s => s.conceptType?.name === 'MULTA_RESCISION')) return true;
+        const rescindedAt = record.contract?.rescindedAt;
+        if (!rescindedAt) return false;
+        const rescDate = new Date(rescindedAt);
+        let pm = rescDate.getMonth() + 2;
+        let py = rescDate.getFullYear();
+        if (pm > 12) { pm = 1; py++; }
+        return record.periodMonth === pm && record.periodYear === py;
+      })();
       conceptos.push({
         concepto: isMultaRescision
           ? `Multa Rescisión ${mesLabel} (Mes ${record.monthNumber})`

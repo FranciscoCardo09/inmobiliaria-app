@@ -68,8 +68,11 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const { sendCashReceipt } = useNotifications(groupId)
 
   // Get fresh record data in real-time
+  // Preserve isPenaltyRecord from the list record since the detail endpoint doesn't compute it
   const { data: freshRecord } = useMonthlyRecordDetail(groupId, recordProp?.id)
-  const record = freshRecord || recordProp
+  const record = freshRecord
+    ? { ...freshRecord, isPenaltyRecord: !!recordProp?.isPenaltyRecord }
+    : recordProp
 
   const { registerPayment, isRegistering } = usePaymentTransactions(groupId)
 
@@ -90,7 +93,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const punitoryAmount = forgivePunitorios ? 0 : (punitoryPreview?.amount || 0)
 
   // Calculate total
-  const isMultaRescision = record?.services?.some(s => s.conceptType?.name === 'MULTA_RESCISION')
+  const isMultaRescision = !!record?.isPenaltyRecord
   const alquiler = record?.rentAmount || 0
   const servicios = record?.servicesTotal || 0
   const aFavorAnterior = record?.previousBalance || 0
