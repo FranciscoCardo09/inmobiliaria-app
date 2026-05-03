@@ -233,7 +233,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     if (recordsByContractId.has(contract.id)) continue;
 
     if (isPenaltyRecord) {
-      // Penalty month: rent=0, total=penalty amount
+      // Penalty month: multa shown as rentAmount (not as a service)
       const penalty = contract.rescissionPenalty || 0;
       recordsToCreate.push({
         groupId,
@@ -241,18 +241,18 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         monthNumber,
         periodMonth: month,
         periodYear: year,
-        rentAmount: 0,
+        rentAmount: penalty,
         includeIva: false,
         ivaAmount: 0,
-        servicesTotal: penalty,
+        servicesTotal: 0,
         previousBalance: 0,
         punitoryAmount: 0,
         punitoryDays: 0,
         totalDue: penalty,
         amountPaid: 0,
         balance: -penalty,
-        comprobantesStatus: Array.isArray(contract.comprobantes) 
-          ? contract.comprobantes.map(c => ({ ...c, presented: false })) 
+        comprobantesStatus: Array.isArray(contract.comprobantes)
+          ? contract.comprobantes.map(c => ({ ...c, presented: false }))
           : [],
       });
       penaltyRecordsToSetup.push(contract);
@@ -397,49 +397,18 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     if (penaltyRecordsToSetup.length > 0) {
       for (const contract of penaltyRecordsToSetup) {
         const penaltyRecord = recordsByContractId.get(contract.id);
-        if (!penaltyRecord || contract.rescissionPenalty <= 0) continue;
+        if (!penaltyRecord) continue;
 
-        // Find or create the MULTA_RESCISION concept type for this group
-        const conceptType = await prisma.conceptType.upsert({
-          where: { groupId_name: { groupId: contract.groupId, name: 'MULTA_RESCISION' } },
-          update: {},
-          create: {
-            groupId: contract.groupId,
-            name: 'MULTA_RESCISION',
-            label: 'Multa por rescisión',
-            category: 'OTROS',
-            isDefault: false,
-          },
+        // Multa is shown as rentAmount — delete any stale MULTA_RESCISION service if present
+        const conceptType = await prisma.conceptType.findFirst({
+          where: { groupId: contract.groupId, name: 'MULTA_RESCISION' },
+          select: { id: true },
         });
-
-        // Only create if service doesn't already exist
-        const existing = await prisma.monthlyService.findFirst({
-          where: { monthlyRecordId: penaltyRecord.id, conceptTypeId: conceptType.id },
-        });
-        if (!existing) {
-          await prisma.monthlyService.create({
-            data: {
-              monthlyRecordId: penaltyRecord.id,
-              conceptTypeId: conceptType.id,
-              amount: contract.rescissionPenalty,
-              description: 'Multa por rescisión anticipada del contrato',
-            },
+        if (conceptType) {
+          await prisma.monthlyService.deleteMany({
+            where: { monthlyRecordId: penaltyRecord.id, conceptTypeId: conceptType.id },
           });
         }
-      }
-
-      // Re-fetch records that had penalty services added so they have the service included
-      const penaltyContractIds = penaltyRecordsToSetup.map(c => c.id);
-      const updatedPenaltyRecords = await prisma.monthlyRecord.findMany({
-        where: { groupId, periodMonth: month, periodYear: year, contractId: { in: penaltyContractIds } },
-        include: {
-          services: { include: { conceptType: { select: { id: true, name: true, label: true, category: true } } } },
-          transactions: { include: { concepts: true }, orderBy: { createdAt: 'asc' } },
-          debt: { include: { payments: { orderBy: { createdAt: 'asc' } } } },
-        },
-      });
-      for (const r of updatedPenaltyRecords) {
-        recordsByContractId.set(r.contractId, r);
       }
     }
   }
@@ -479,16 +448,17 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     // Refresh rentAmount, IVA for ALL existing records (including COMPLETE)
     // Refresh previousBalance only for non-COMPLETE records
     // Convert existing record to penalty format if the contract was rescinded after the record was created
+    // Multa shown as rentAmount (not as a service): rentAmount=penalty, servicesTotal=0
     if (record && isPenaltyRecord) {
       const penalty = contract.rescissionPenalty || 0;
-      const needsConversion = record.rentAmount !== 0 || Math.abs(record.servicesTotal - penalty) > 0.01;
+      const needsConversion = Math.abs(record.rentAmount - penalty) > 0.01 || record.servicesTotal !== 0;
       if (needsConversion && penalty > 0) {
         const newBalance = round2(record.amountPaid - penalty);
         const conversionData = {
-          rentAmount: 0,
+          rentAmount: penalty,
           includeIva: false,
           ivaAmount: 0,
-          servicesTotal: penalty,
+          servicesTotal: 0,
           totalDue: penalty,
           balance: newBalance,
           punitoryAmount: 0,
@@ -497,7 +467,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         updatesToPerform.push({ id: record.id, data: conversionData });
         Object.assign(record, conversionData);
       }
-      // Ensure MULTA_RESCISION service exists (idempotent — creation checks for existing)
+      // Ensure any stale MULTA_RESCISION service is cleaned up
       if (!penaltyRecordsToSetup.some(c => c.id === contract.id)) {
         penaltyRecordsToSetup.push(contract);
       }
