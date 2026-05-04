@@ -92,6 +92,42 @@ async function calculateRentForMonth(contract, monthNumber) {
 }
 
 /**
+ * Copy MonthlyService records from the rescission month into a penalty record.
+ * Returns the computed servicesTotal (discounts subtracted).
+ */
+async function copyRescissionMonthServices(contract, penaltyRecordId) {
+  const rescDate = new Date(contract.rescindedAt);
+  const rescMonth = rescDate.getMonth() + 1; // 1-indexed
+  const rescYear = rescDate.getFullYear();
+
+  const prevRecord = await prisma.monthlyRecord.findFirst({
+    where: { contractId: contract.id, periodMonth: rescMonth, periodYear: rescYear },
+    include: {
+      services: {
+        include: { conceptType: { select: { id: true, category: true } } },
+      },
+    },
+  });
+
+  if (!prevRecord?.services?.length) return 0;
+
+  await prisma.monthlyService.createMany({
+    data: prevRecord.services.map(s => ({
+      monthlyRecordId: penaltyRecordId,
+      conceptTypeId: s.conceptTypeId,
+      amount: s.amount,
+      description: s.description,
+    })),
+    skipDuplicates: true,
+  });
+
+  return prevRecord.services.reduce((sum, s) => {
+    const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
+    return sum + (isDiscount ? -Math.abs(s.amount) : s.amount);
+  }, 0);
+}
+
+/**
  * Get or create monthly records for all active contracts in a group for a given period.
  * This is the core auto-generation function.
  *
@@ -228,11 +264,13 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
   // --- BATCH 5: Bulk-create missing records (1 createMany instead of N creates) ---
   const recordsToCreate = [];
+  const penaltyContractsToSetup = []; // penalty records that need prev-month services copied
   for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
     if (recordsByContractId.has(contract.id)) continue;
 
     if (isPenaltyRecord) {
       // Penalty month: rent = penalty amount (replaces alquiler for this month)
+      // Services from the rescission month will be copied after bulk-create
       const penalty = contract.rescissionPenalty || 0;
       recordsToCreate.push({
         groupId,
@@ -254,6 +292,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           ? contract.comprobantes.map(c => ({ ...c, presented: false }))
           : [],
       });
+      penaltyContractsToSetup.push(contract);
     } else {
       const rentAmount = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       let previousBalance = 0;
@@ -391,6 +430,35 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       recordsByContractId.set(r.contractId, r);
     }
 
+    // Copy services from rescission month into newly created penalty records
+    if (penaltyContractsToSetup.length > 0) {
+      for (const contract of penaltyContractsToSetup) {
+        const penaltyRecord = recordsByContractId.get(contract.id);
+        if (!penaltyRecord) continue;
+        const svcTotal = await copyRescissionMonthServices(contract, penaltyRecord.id);
+        if (svcTotal !== 0) {
+          const penalty = contract.rescissionPenalty || 0;
+          const newTotalDue = round2(penalty + svcTotal);
+          await prisma.monthlyRecord.update({
+            where: { id: penaltyRecord.id },
+            data: { servicesTotal: svcTotal, totalDue: newTotalDue, balance: -newTotalDue },
+          });
+        }
+      }
+      // Re-fetch penalty records so they include the copied services
+      const penaltyContractIds = penaltyContractsToSetup.map(c => c.id);
+      const updatedPenaltyRecords = await prisma.monthlyRecord.findMany({
+        where: { groupId, periodMonth: month, periodYear: year, contractId: { in: penaltyContractIds } },
+        include: {
+          services: { include: { conceptType: { select: { id: true, name: true, label: true, category: true } } } },
+          transactions: { include: { concepts: true }, orderBy: { createdAt: 'asc' } },
+          debt: { include: { payments: { orderBy: { createdAt: 'asc' } } } },
+        },
+      });
+      for (const r of updatedPenaltyRecords) {
+        recordsByContractId.set(r.contractId, r);
+      }
+    }
   }
 
   // Batch: contratos con deudas abiertas (para marcar filas del mes actual)
@@ -430,16 +498,23 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     // For penalty records: convert from old format (rentAmount=0, servicesTotal=penalty) if needed
     if (record && isPenaltyRecord) {
       const penalty = contract.rescissionPenalty || 0;
-      if (record.services.length > 0 || Math.abs(record.rentAmount - penalty) > 0.01) {
+      // Only convert records still in old format (rentAmount=0 means old format)
+      if (Math.abs(record.rentAmount - penalty) > 0.01) {
         if (record.services.length > 0) {
           await prisma.monthlyService.deleteMany({ where: { monthlyRecordId: record.id } });
         }
-        const newBalance = round2(record.amountPaid - penalty);
+        const svcTotal = await copyRescissionMonthServices(contract, record.id);
+        const newTotalDue = round2(penalty + svcTotal);
+        const newBalance = round2(record.amountPaid - newTotalDue);
         updatesToPerform.push({
           id: record.id,
-          data: { rentAmount: penalty, servicesTotal: 0, totalDue: penalty, balance: newBalance },
+          data: { rentAmount: penalty, servicesTotal: svcTotal, totalDue: newTotalDue, balance: newBalance },
         });
-        Object.assign(record, { rentAmount: penalty, servicesTotal: 0, services: [], totalDue: penalty, balance: newBalance });
+        const refreshed = await prisma.monthlyService.findMany({
+          where: { monthlyRecordId: record.id },
+          include: { conceptType: { select: { id: true, name: true, label: true, category: true } } },
+        });
+        Object.assign(record, { rentAmount: penalty, servicesTotal: svcTotal, services: refreshed, totalDue: newTotalDue, balance: newBalance });
       }
     } else if (record && !isPenaltyRecord) {
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
