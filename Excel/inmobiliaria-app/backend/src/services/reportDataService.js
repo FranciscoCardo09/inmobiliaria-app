@@ -244,8 +244,21 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const conceptos = [];
 
   if (monthlyRecord.rentAmount > 0) {
-    let alquilerLabel = `Alquiler ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`;
-    if (ajusteEstesMes) {
+    const isMultaRescision = (() => {
+      const rescindedAt = contract.rescindedAt;
+      if (!rescindedAt) return false;
+      const rescDate = new Date(rescindedAt);
+      let pm = rescDate.getMonth() + 2;
+      let py = rescDate.getFullYear();
+      if (pm > 12) { pm = 1; py++; }
+      return monthlyRecord.periodMonth === pm && monthlyRecord.periodYear === py;
+    })();
+
+    let alquilerLabel = isMultaRescision
+      ? `Multa Rescisión ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`
+      : `Alquiler ${MONTH_NAMES[month]} ${year} (Mes ${monthlyRecord.monthNumber})`;
+
+    if (!isMultaRescision && ajusteEstesMes) {
       const pctStr = ajusteEstesMes.adjustmentPercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
       alquilerLabel += ` Ajuste ${pctStr}%`;
     }
@@ -253,7 +266,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       concepto: alquilerLabel,
       base: monthlyRecord.rentAmount,
       importe: monthlyRecord.rentAmount,
-      isAjuste: !!ajusteEstesMes,
+      isAjuste: !isMultaRescision && !!ajusteEstesMes,
     });
   }
 
