@@ -32,6 +32,7 @@ export const ContractList = () => {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [rescindModal, setRescindModal] = useState(null) // contract to rescind
   const [rescissionDate, setRescissionDate] = useState('')
+  const [penaltyType, setPenaltyType] = useState('PORCENTAJE')
 
   const {
     contracts, isLoading, deleteContract, isDeleting,
@@ -49,10 +50,11 @@ export const ContractList = () => {
   const handleRescind = async () => {
     if (!rescindModal || !rescissionDate) return
     try {
-      await rescindContract({ id: rescindModal.id, rescissionDate })
+      await rescindContract({ id: rescindModal.id, rescissionDate, penaltyType })
     } catch { /* toast handles error */ }
     setRescindModal(null)
     setRescissionDate('')
+    setPenaltyType('PORCENTAJE')
   }
 
   const handleUndoRescission = async (contract) => {
@@ -72,7 +74,7 @@ export const ContractList = () => {
     let cancelled = false
     setPenaltyLoading(true)
     api.get(`/groups/${currentGroup.id}/contracts/${rescindModal.id}/rescission-preview`, {
-      params: { rescissionDate }
+      params: { rescissionDate, penaltyType }
     }).then(res => {
       if (!cancelled) setPenaltyPreview(res.data.data)
     }).catch(() => {
@@ -81,10 +83,11 @@ export const ContractList = () => {
       if (!cancelled) setPenaltyLoading(false)
     })
     return () => { cancelled = true }
-  }, [rescindModal, rescissionDate, currentGroup?.id])
+  }, [rescindModal, rescissionDate, penaltyType, currentGroup?.id])
 
   const openRescindModal = (contract) => {
     setRescissionDate(getLocalToday())
+    setPenaltyType('PORCENTAJE')
     setRescindModal(contract)
   }
 
@@ -404,6 +407,20 @@ export const ContractList = () => {
                 />
               </div>
 
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text font-medium">Tipo de multa</span>
+                </label>
+                <select
+                  className="select select-bordered"
+                  value={penaltyType}
+                  onChange={(e) => setPenaltyType(e.target.value)}
+                >
+                  <option value="PORCENTAJE">10% × meses restantes × último alquiler</option>
+                  <option value="ULTIMO_ALQUILER">Igual al último valor de alquiler</option>
+                </select>
+              </div>
+
               {penaltyLoading && rescissionDate && (
                 <div className="text-sm text-base-content/60">Calculando multa...</div>
               )}
@@ -412,9 +429,15 @@ export const ContractList = () => {
                   <div>
                     <div className="font-medium">Cálculo de la multa</div>
                     <div className="text-sm space-y-1 mt-1">
-                      <div>Meses restantes: <strong>{penaltyPreview.remainingMonths}</strong></div>
-                      <div>Alquiler último mes pagado: <strong>${Math.round(penaltyPreview.rent).toLocaleString('es-AR')}</strong></div>
-                      <div>Multa (10%): <strong className="text-lg">${Math.round(penaltyPreview.penalty).toLocaleString('es-AR')}</strong></div>
+                      <div>Último alquiler: <strong>${Math.round(penaltyPreview.rent).toLocaleString('es-AR')}</strong></div>
+                      {penaltyType === 'PORCENTAJE' && (
+                        <div>Meses restantes: <strong>{penaltyPreview.remainingMonths}</strong></div>
+                      )}
+                      {penaltyType === 'PORCENTAJE' ? (
+                        <div>Multa (10% × {penaltyPreview.remainingMonths} meses): <strong className="text-lg">${Math.round(penaltyPreview.penalty).toLocaleString('es-AR')}</strong></div>
+                      ) : (
+                        <div>Multa (= último alquiler): <strong className="text-lg">${Math.round(penaltyPreview.penalty).toLocaleString('es-AR')}</strong></div>
+                      )}
                     </div>
                     <p className="text-xs mt-2 opacity-70">
                       La multa aparecerá como cargo en el control mensual del mes siguiente a la fecha de rescisión.
@@ -426,7 +449,7 @@ export const ContractList = () => {
             <div className="modal-action">
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { setRescindModal(null); setRescissionDate('') }}
+                onClick={() => { setRescindModal(null); setRescissionDate(''); setPenaltyType('PORCENTAJE') }}
                 disabled={isRescinding}
               >
                 Cancelar
@@ -441,7 +464,7 @@ export const ContractList = () => {
               </button>
             </div>
           </div>
-          <div className="modal-backdrop" onClick={() => { if (!isRescinding) { setRescindModal(null); setRescissionDate('') } }} />
+          <div className="modal-backdrop" onClick={() => { if (!isRescinding) { setRescindModal(null); setRescissionDate(''); setPenaltyType('PORCENTAJE') } }} />
         </div>
       )}
     </div>

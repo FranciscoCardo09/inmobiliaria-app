@@ -99,8 +99,8 @@ export const useContracts = (groupId, filters = {}) => {
   })
 
   const rescindMutation = useMutation({
-    mutationFn: async ({ id, rescissionDate }) => {
-      const response = await api.post(`/groups/${groupId}/contracts/${id}/rescind`, { rescissionDate })
+    mutationFn: async ({ id, rescissionDate, penaltyType = 'PORCENTAJE' }) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/rescind`, { rescissionDate, penaltyType })
       return response.data.data
     },
     onSuccess: () => {

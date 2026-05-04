@@ -633,11 +633,36 @@ const getContractRentHistory = async (req, res, next) => {
   }
 };
 
-// GET /api/groups/:groupId/contracts/:id/rescission-preview?rescissionDate=YYYY-MM-DD
+/** Shared: resolve effectiveRent for a contract at rescission time */
+async function resolveEffectiveRent(contract, rescissionMonthNumber) {
+  const lastPaidRecord = await prisma.monthlyRecord.findFirst({
+    where: { contractId: contract.id, status: 'COMPLETE' },
+    orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
+  });
+  if (lastPaidRecord) return lastPaidRecord.rentAmount;
+
+  const fallbackMonth = Math.max(1, rescissionMonthNumber - 1);
+  let rent = contract.baseRent;
+  for (const rh of contract.rentHistory) {
+    if (rh.effectiveFromMonth <= fallbackMonth) { rent = rh.rentAmount; break; }
+  }
+  return rent;
+}
+
+/** Shared: calculate penalty amount given type, remainingMonths and rent */
+function calcPenalty(penaltyType, remainingMonths, effectiveRent) {
+  if (penaltyType === 'ULTIMO_ALQUILER') {
+    return parseFloat(effectiveRent.toFixed(2));
+  }
+  // Default: PORCENTAJE (10% × meses restantes × alquiler)
+  return parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
+}
+
+// GET /api/groups/:groupId/contracts/:id/rescission-preview?rescissionDate=YYYY-MM-DD&penaltyType=PORCENTAJE|ULTIMO_ALQUILER
 const getRescissionPreview = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { rescissionDate } = req.query;
+    const { rescissionDate, penaltyType = 'PORCENTAJE' } = req.query;
 
     if (!rescissionDate) {
       return ApiResponse.badRequest(res, 'Se requiere rescissionDate');
@@ -661,30 +686,11 @@ const getRescissionPreview = async (req, res, next) => {
     const endMonth = sm + contract.durationMonths - 1;
     const rescissionMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
 
-    // Same logic as rescindContract: use last paid record's rentAmount
-    let effectiveRent = null;
-    const lastPaidRecord = await prisma.monthlyRecord.findFirst({
-      where: { contractId: id, status: 'COMPLETE' },
-      orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
-    });
-
-    if (lastPaidRecord) {
-      effectiveRent = lastPaidRecord.rentAmount;
-    } else {
-      const fallbackMonth = Math.max(1, rescissionMonthNumber - 1);
-      effectiveRent = contract.baseRent;
-      for (const rh of contract.rentHistory) {
-        if (rh.effectiveFromMonth <= fallbackMonth) {
-          effectiveRent = rh.rentAmount;
-          break;
-        }
-      }
-    }
-
+    const effectiveRent = await resolveEffectiveRent(contract, rescissionMonthNumber);
     const remainingMonths = Math.max(0, endMonth - rescissionMonthNumber);
-    const rescissionPenalty = parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
+    const rescissionPenalty = calcPenalty(penaltyType, remainingMonths, effectiveRent);
 
-    return ApiResponse.success(res, { remainingMonths, rent: effectiveRent, penalty: rescissionPenalty });
+    return ApiResponse.success(res, { remainingMonths, rent: effectiveRent, penalty: rescissionPenalty, penaltyType });
   } catch (err) {
     next(err);
   }
@@ -694,7 +700,7 @@ const getRescissionPreview = async (req, res, next) => {
 const rescindContract = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { rescissionDate } = req.body;
+    const { rescissionDate, penaltyType = 'PORCENTAJE' } = req.body;
 
     if (!rescissionDate) {
       return ApiResponse.badRequest(res, 'Se requiere la fecha de rescisión');
@@ -717,7 +723,6 @@ const rescindContract = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'El contrato ya está rescindido');
     }
 
-    // Calculate the contract month number at the rescission date
     const rescDate = parseLocalDate(rescissionDate);
     const start = new Date(contract.startDate);
     const monthsDiff =
@@ -727,33 +732,9 @@ const rescindContract = async (req, res, next) => {
     const endMonth = sm + contract.durationMonths - 1;
     const rescissionMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
 
-    // Get rent from last month paid (COMPLETE)
-    let effectiveRent = null;
-    const lastPaidRecord = await prisma.monthlyRecord.findFirst({
-      where: { contractId: id, status: 'COMPLETE' },
-      orderBy: [
-        { periodYear: 'desc' },
-        { periodMonth: 'desc' }
-      ]
-    });
-
-    if (lastPaidRecord) {
-      effectiveRent = lastPaidRecord.rentAmount;
-    } else {
-      // Fallback: rent at the month BEFORE rescission (last contractual price)
-      const fallbackMonth = Math.max(1, rescissionMonthNumber - 1);
-      effectiveRent = contract.baseRent;
-      for (const rh of contract.rentHistory) {
-        if (rh.effectiveFromMonth <= fallbackMonth) {
-          effectiveRent = rh.rentAmount;
-          break;
-        }
-      }
-    }
-
-    // Penalty = remaining months * rent * 10%
+    const effectiveRent = await resolveEffectiveRent(contract, rescissionMonthNumber);
     const remainingMonths = Math.max(0, endMonth - rescissionMonthNumber);
-    const rescissionPenalty = parseFloat((remainingMonths * effectiveRent * 0.10).toFixed(2));
+    const rescissionPenalty = calcPenalty(penaltyType, remainingMonths, effectiveRent);
 
     // Check if the penalty month record already has payments
     let penaltyMonth = rescDate.getMonth() + 2;
