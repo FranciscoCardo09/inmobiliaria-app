@@ -1202,8 +1202,6 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
     where.contract = { ...where.contract, property: { ownerId } };
   }
 
-  where.contract = { ...where.contract, contractType: 'PROPIETARIO' };
-
   const contractBaseInclude = {
     tenant: true,
     contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
@@ -1240,7 +1238,8 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
     const taxServices = record.services.filter(
       (s) => s.conceptType?.category === 'IMPUESTO' || s.conceptType?.category === 'SERVICIO'
     );
-    const debts = record.contract.debts || [];
+    const isPropietario = record.contract.contractType === 'PROPIETARIO';
+    const debts = isPropietario ? (record.contract.debts || []) : [];
     if (taxServices.length === 0 && debts.length === 0) continue;
 
     coveredContractIds.add(record.contractId);
