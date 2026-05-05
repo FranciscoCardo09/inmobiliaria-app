@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
@@ -34,6 +34,12 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
   const [savingGroup, setSavingGroup] = useState(false)
   const [groupName, setGroupName] = useState('')
 
+  // Changing contract type filter resets selection to avoid sending invisible records
+  useEffect(() => {
+    setSelectedRecordIds(new Set())
+    setDistributions({})
+  }, [contractTypeFilter])
+
   // Fetch concept types
   const { data: conceptTypes = [] } = useQuery({
     queryKey: ['conceptTypes', groupId],
@@ -43,11 +49,6 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
     },
     enabled: !!groupId,
   })
-
-  const selectedRecords = useMemo(
-    () => records.filter((r) => selectedRecordIds.has(r.id)),
-    [records, selectedRecordIds]
-  )
 
   // Helper to get display info from a record (flat structure)
   const getRecordLabel = (record) => {
@@ -63,9 +64,9 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
   // Filtered records for search in step 1
   const filteredRecords = useMemo(() => {
     let result = records
-    
+
     if (contractTypeFilter) {
-      result = result.filter(r => r.contract?.contractType === contractTypeFilter)
+      result = result.filter(r => (r.contract?.contractType ?? r.contractType) === contractTypeFilter)
     }
 
     if (!searchTerm) return result
@@ -80,6 +81,11 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
     })
   }, [records, searchTerm, contractTypeFilter])
 
+  const selectedRecords = useMemo(
+    () => filteredRecords.filter((r) => selectedRecordIds.has(r.id)),
+    [filteredRecords, selectedRecordIds]
+  )
+
   const toggleRecord = (recordId) => {
     setSelectedRecordIds((prev) => {
       const next = new Set(prev)
@@ -92,16 +98,25 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
   const loadGroup = (group) => {
     const newSelected = new Set()
     const newDist = {}
+    let omitted = 0
     for (const item of group.items) {
       const record = records.find((r) => r.contractId === item.contractId)
-      if (record) {
-        newSelected.add(record.id)
-        newDist[record.id] = { percentage: item.percentage, locked: true }
+      if (!record) continue
+      const recordType = record.contract?.contractType ?? record.contractType
+      if (contractTypeFilter && recordType !== contractTypeFilter) {
+        omitted++
+        continue
       }
+      newSelected.add(record.id)
+      newDist[record.id] = { percentage: item.percentage, locked: true }
     }
     setSelectedRecordIds(newSelected)
     setDistributions(newDist)
-    if (newSelected.size > 0) setStep(2)
+    if (omitted > 0) {
+      toast(`Se omitieron ${omitted} contrato${omitted !== 1 ? 's' : ''} por el filtro de tipo activo`, { icon: 'ℹ️' })
+    }
+    // Only auto-advance when all group items loaded (no omissions)
+    if (newSelected.size > 0 && omitted === 0) setStep(2)
   }
 
   const goToStep2 = () => {
@@ -303,8 +318,14 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
 
             <div className="modal-action">
               <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-              <button className="btn btn-primary" disabled={selectedRecordIds.size < 2} onClick={goToStep2}>
-                Siguiente ({selectedRecordIds.size} seleccionadas)
+              <button className="btn btn-primary" disabled={selectedRecords.length < 2} onClick={goToStep2}>
+                {(() => {
+                  const inquilinoCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'INQUILINO').length
+                  const propietarioCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'PROPIETARIO').length
+                  return propietarioCount > 0 && inquilinoCount > 0
+                    ? `Siguiente (Inq: ${inquilinoCount} · Prop: ${propietarioCount})`
+                    : `Siguiente (${selectedRecords.length} seleccionadas)`
+                })()}
               </button>
             </div>
           </div>
