@@ -79,6 +79,7 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
   const execute = async (client) => {
     const results = [];
     const affectedRecordIds = new Set();
+    const overwrites = [];
 
     for (const { month, year } of months) {
       // Find or create the monthly record
@@ -131,6 +132,30 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
 
       // Upsert the service
       try {
+        // Detect amount overwrite for observability
+        const existingService = await client.monthlyService.findUnique({
+          where: {
+            monthlyRecordId_conceptTypeId: {
+              monthlyRecordId: record.id,
+              conceptTypeId,
+            },
+          },
+          select: { id: true, amount: true },
+        });
+        if (existingService && Math.abs(existingService.amount - amount) > 0.001) {
+          console.warn('[service-overwrite]', {
+            monthlyRecordId: record.id,
+            conceptTypeId,
+            oldAmount: existingService.amount,
+            newAmount: amount,
+            contractId,
+            periodMonth: month,
+            periodYear: year,
+            source,
+          });
+          overwrites.push({ monthlyRecordId: record.id, conceptTypeId, oldAmount: existingService.amount, newAmount: amount });
+        }
+
         const service = await client.monthlyService.upsert({
           where: {
             monthlyRecordId_conceptTypeId: {
@@ -164,7 +189,7 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
     }
 
     if (skipRecalculate) {
-      return { results, affectedRecordIds: Array.from(affectedRecordIds) };
+      return { results, affectedRecordIds: Array.from(affectedRecordIds), overwrites };
     }
     return results;
   };
@@ -262,36 +287,41 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
   });
   if (!conceptType) throw new Error('Tipo de concepto no encontrado o inactivo');
 
+  // Deduplicate before validation so we check unique IDs
+  const uniqueContractIds = Array.from(new Set(contractIds));
+
   // Validate all contracts belong to this group
   const contracts = await prisma.contract.findMany({
-    where: { id: { in: contractIds }, groupId },
+    where: { id: { in: uniqueContractIds }, groupId },
     select: { id: true },
   });
-  if (contracts.length !== contractIds.length) {
+  if (contracts.length !== uniqueContractIds.length) {
     throw new Error('Algunos contratos no pertenecen a este grupo');
   }
 
   let totalAssigned = 0;
   const errors = [];
+  const overwrittenAmounts = [];
 
   // Implement Safe Chunking
   const CHUNK_SIZE = 5; // Reducido para evitar agotar el pool de conexiones y timeouts
-  for (let i = 0; i < contractIds.length; i += CHUNK_SIZE) {
-    const chunkIds = contractIds.slice(i, i + CHUNK_SIZE);
-    
+  for (let i = 0; i < uniqueContractIds.length; i += CHUNK_SIZE) {
+    const chunkIds = uniqueContractIds.slice(i, i + CHUNK_SIZE);
+
     try {
       await prisma.$transaction(async (tx) => {
         const allAffectedIds = new Set();
         for (const contractId of chunkIds) {
           try {
-            const { results, affectedRecordIds } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true, 'multi');
+            const { results, affectedRecordIds, overwrites } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true, 'multi');
             totalAssigned += results.length;
             affectedRecordIds.forEach(id => allAffectedIds.add(id));
+            overwrites.forEach(o => overwrittenAmounts.push(o));
           } catch (e) {
             errors.push({ contractId, error: e.message });
           }
         }
-        
+
         // Recalcular todo el lote junto, una sola vez por transacción
         if (allAffectedIds.size > 0) {
           await recalculateMultipleRecords(Array.from(allAffectedIds), tx);
@@ -304,7 +334,7 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
     }
   }
 
-  return { totalAssigned, errors };
+  return { totalAssigned, errors, overwrittenAmounts };
 };
 
 /**
