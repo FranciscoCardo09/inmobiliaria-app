@@ -16,6 +16,7 @@ const {
 } = require('../services/monthlyServiceService');
 
 const prisma = require('../lib/prisma');
+const { bulkLoadServicesSchema } = require('../validators/monthlyRecordsValidators');
 
 // GET /api/groups/:groupId/monthly-records?month=2&year=2026
 const getMonthlyRecords = async (req, res, next) => {
@@ -465,36 +466,26 @@ const forgiveBalance = async (req, res, next) => {
 const bulkLoadServices = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { contractIds, conceptTypeId, amount, months, description } = req.body;
 
-    if (!Array.isArray(contractIds) || contractIds.length === 0) {
-      return ApiResponse.badRequest(res, 'contractIds debe ser un array no vacío');
+    const parsed = bulkLoadServicesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const message = parsed.error.errors.map((e) => e.message).join('; ');
+      return ApiResponse.badRequest(res, message);
     }
-    if (!conceptTypeId) {
-      return ApiResponse.badRequest(res, 'conceptTypeId es requerido');
-    }
-    if (!amount || isNaN(amount) || Number(amount) <= 0) {
-      return ApiResponse.badRequest(res, 'amount debe ser un número mayor a 0');
-    }
-    if (!Array.isArray(months) || months.length === 0) {
-      return ApiResponse.badRequest(res, 'months debe ser un array no vacío de {month, year}');
-    }
-    for (const m of months) {
-      if (!m.month || !m.year || m.month < 1 || m.month > 12) {
-        return ApiResponse.badRequest(res, 'Cada mes debe tener month (1-12) y year válidos');
-      }
-    }
+
+    const { contractIds, conceptTypeId, amount, months, description } = parsed.data;
 
     const result = await bulkAssignMultiContract(
       groupId,
       contractIds,
       conceptTypeId,
-      Number(amount),
+      amount,
       months,
-      description || null
+      description ?? null
     );
 
-    return ApiResponse.success(res, result, `Se asignaron ${result.totalAssigned} servicios correctamente`);
+    const message = `Se asignaron ${result.totalAssigned} servicios correctamente`;
+    return ApiResponse.success(res, result, message);
   } catch (error) {
     next(error);
   }
