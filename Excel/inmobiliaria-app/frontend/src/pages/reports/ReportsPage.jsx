@@ -1581,22 +1581,60 @@ function ImpuestosTab({ groupId }) {
             {data.impuestos.map((item, idx) => (
               <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
                 <h3 className="font-semibold text-sm mb-2">{item.propiedad} - {item.inquilino}</h3>
-                <div className="overflow-x-auto">
-                  <table className="table table-xs">
-                    <tbody>
-                      {item.impuestos.map((imp, ii) => (
-                        <tr key={ii}>
-                          <td className="pl-4">{imp.concepto}</td>
-                          <td className="text-right">{formatCurrency(imp.monto)}</td>
-                        </tr>
-                      ))}
-                      <tr className="font-semibold">
-                        <td className="pl-4">Subtotal</td>
-                        <td className="text-right">{formatCurrency(item.totalImpuestos)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+
+                {item.deudas && item.deudas.length > 0 && (
+                  <div className="mb-4">
+                    <h4 className="font-semibold text-sm mb-2">Deudas Acumuladas</h4>
+                    <div className="overflow-x-auto bg-base-200/30 rounded-lg">
+                      <table className="table table-xs">
+                        <thead>
+                          <tr>
+                            <th className="pl-4">Período</th>
+                            <th className="text-right">Original</th>
+                            <th className="text-right">Pendiente</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.deudas.map((d, di) => (
+                            <tr key={di}>
+                              <td className="pl-4">{d.periodo}</td>
+                              <td className="text-right">{formatCurrency(d.original)}</td>
+                              <td className="text-right font-semibold text-error">{formatCurrency(d.pendiente)}</td>
+                            </tr>
+                          ))}
+                          <tr className="border-t-2 border-base-300">
+                            <td colSpan="2" className="pl-4 text-right font-bold">TOTAL DEUDA ACUMULADA</td>
+                            <td className="text-right font-bold text-error">{formatCurrency(item.totalDeuda)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {item.impuestos && item.impuestos.length > 0 && (
+                  <>
+                    {item.deudas && item.deudas.length > 0 && (
+                      <h4 className="font-semibold text-sm mt-2 mb-2">Servicios del mes</h4>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="table table-xs">
+                        <tbody>
+                          {item.impuestos.map((imp, ii) => (
+                            <tr key={ii}>
+                              <td className="pl-4">{imp.concepto}</td>
+                              <td className="text-right">{formatCurrency(imp.monto)}</td>
+                            </tr>
+                          ))}
+                          <tr className="font-semibold">
+                            <td className="pl-4">Subtotal</td>
+                            <td className="text-right">{formatCurrency(item.totalImpuestos)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
 

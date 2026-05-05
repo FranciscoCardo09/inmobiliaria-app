@@ -1202,16 +1202,23 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
     where.contract = { ...where.contract, property: { ownerId } };
   }
 
+  where.contract = { ...where.contract, contractType: 'PROPIETARIO' };
+
+  const contractBaseInclude = {
+    tenant: true,
+    contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+    property: {
+      include: { owner: { include: { transferBeneficiary: true } } },
+    },
+  };
+
   const records = await prisma.monthlyRecord.findMany({
     where,
     include: {
       contract: {
         include: {
-          tenant: true,
-          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-          property: {
-            include: { owner: { include: { transferBeneficiary: true } } },
-          },
+          ...contractBaseInclude,
+          debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
         },
       },
       services: {
@@ -1226,14 +1233,17 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
   const mesVencido = month === 1 ? 12 : month - 1;
   const anioVencido = month === 1 ? year - 1 : year;
 
-  // Filter records that have services with category 'IMPUESTO' or 'SERVICIO'
+  const coveredContractIds = new Set();
   const impuestos = [];
+
   for (const record of records) {
     const taxServices = record.services.filter(
       (s) => s.conceptType?.category === 'IMPUESTO' || s.conceptType?.category === 'SERVICIO'
     );
-    if (taxServices.length === 0) continue;
+    const debts = record.contract.debts || [];
+    if (taxServices.length === 0 && debts.length === 0) continue;
 
+    coveredContractIds.add(record.contractId);
     const owner = record.contract.property.owner;
     impuestos.push({
       inquilino: getTenantsName(record.contract),
@@ -1246,6 +1256,64 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),
       banco: resolveOwnerBank(owner) || empresa.banco,
       beneficiario: owner?.transferBeneficiary?.name || null,
+      deudas: debts.map((d) => ({
+        periodo: d.periodLabel,
+        original: d.originalAmount,
+        pagado: d.amountPaid,
+        punitorios: d.accumulatedPunitory,
+        pendiente: d.currentTotal,
+        status: d.status,
+      })),
+      totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
+    });
+  }
+
+  // Contracts with open debts but no MonthlyRecord in the current period
+  const debtWhere = { groupId, status: { not: 'PAID' } };
+  if (contractIds && contractIds.length > 0) {
+    debtWhere.contractId = { in: contractIds };
+  } else if (propertyIds && propertyIds.length > 0) {
+    debtWhere.contract = { propertyId: { in: propertyIds } };
+  }
+  if (ownerId) {
+    debtWhere.contract = { ...debtWhere.contract, property: { ownerId } };
+  }
+  debtWhere.contract = { ...debtWhere.contract, contractType: 'PROPIETARIO' };
+
+  const openDebts = await prisma.debt.findMany({
+    where: debtWhere,
+    include: { contract: { include: contractBaseInclude } },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const debtsByContract = new Map();
+  for (const debt of openDebts) {
+    if (coveredContractIds.has(debt.contractId)) continue;
+    if (!debtsByContract.has(debt.contractId)) {
+      debtsByContract.set(debt.contractId, { contract: debt.contract, debts: [] });
+    }
+    debtsByContract.get(debt.contractId).debts.push(debt);
+  }
+
+  for (const { contract, debts } of debtsByContract.values()) {
+    const owner = contract.property.owner;
+    impuestos.push({
+      inquilino: getTenantsName(contract),
+      propiedad: contract.property.address,
+      propietario: owner?.name || 'Sin propietario',
+      impuestos: [],
+      totalImpuestos: 0,
+      banco: resolveOwnerBank(owner) || empresa.banco,
+      beneficiario: owner?.transferBeneficiary?.name || null,
+      deudas: debts.map((d) => ({
+        periodo: d.periodLabel,
+        original: d.originalAmount,
+        pagado: d.amountPaid,
+        punitorios: d.accumulatedPunitory,
+        pendiente: d.currentTotal,
+        status: d.status,
+      })),
+      totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
     });
   }
 

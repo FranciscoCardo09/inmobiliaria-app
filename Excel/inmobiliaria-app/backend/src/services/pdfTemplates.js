@@ -1076,37 +1076,91 @@ const generateImpuestosPDF = (data) => {
     };
 
     for (const item of data.impuestos) {
+      const hasDebts = item.deudas && item.deudas.length > 0;
+      const hasServices = item.impuestos && item.impuestos.length > 0;
       checkNewPage(70);
 
-      // Property card - thin border, no color accent
-      const itemRows = item.impuestos.length;
-      const cardH = itemRows * 20 + 34;
-      fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
-      strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
+      if (!hasDebts) {
+        // Original: single card with title + services
+        const itemRows = item.impuestos.length;
+        const cardH = itemRows * 20 + 34;
+        fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
+        strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
 
-      // Property - Tenant title
-      doc.font(F.b).fontSize(9).fillColor(C.black)
-        .text(`${item.propiedad}`, PAGE.margin + 12, y + 8, { width: W * 0.6 });
-      doc.font(F.r).fontSize(8).fillColor(C.medium)
-        .text(item.inquilino, PAGE.margin + 12, y + 20, { width: W * 0.6 });
-
-      // Subtotal on right side of header
-      const subtotal = item.impuestos.reduce((s, i) => s + (i.monto || 0), 0);
-      doc.font(F.b).fontSize(10).fillColor(C.black)
-        .text(fmt(subtotal, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
-
-      let iy = y + 36;
-
-      // Tax items
-      for (const imp of item.impuestos) {
+        doc.font(F.b).fontSize(9).fillColor(C.black)
+          .text(`${item.propiedad}`, PAGE.margin + 12, y + 8, { width: W * 0.6 });
         doc.font(F.r).fontSize(8).fillColor(C.medium)
-          .text(imp.concepto, PAGE.margin + 24, iy, { width: W * 0.55 });
-        doc.font(F.r).fontSize(8).fillColor(C.dark)
-          .text(fmt(imp.monto, data.currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-        iy += 20;
-      }
+          .text(item.inquilino, PAGE.margin + 12, y + 20, { width: W * 0.6 });
 
-      y += cardH + 10;
+        const subtotal = item.impuestos.reduce((s, i) => s + (i.monto || 0), 0);
+        doc.font(F.b).fontSize(10).fillColor(C.black)
+          .text(fmt(subtotal, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+
+        let iy = y + 36;
+        for (const imp of item.impuestos) {
+          doc.font(F.r).fontSize(8).fillColor(C.medium)
+            .text(imp.concepto, PAGE.margin + 24, iy, { width: W * 0.55 });
+          doc.font(F.r).fontSize(8).fillColor(C.dark)
+            .text(fmt(imp.monto, data.currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+          iy += 20;
+        }
+        y += cardH + 10;
+      } else {
+        // Extended: property header, then debts block, then optional services card
+        doc.font(F.b).fontSize(9).fillColor(C.black)
+          .text(`${item.propiedad}`, PAGE.margin, y, { width: W * 0.6 });
+        doc.font(F.r).fontSize(8).fillColor(C.medium)
+          .text(item.inquilino, PAGE.margin, y + 12, { width: W * 0.6 });
+        y += 28;
+
+        const debtRows = item.deudas.map((d) => [
+          d.periodo,
+          fmt(d.original, data.currency),
+          fmt(d.pendiente, data.currency),
+        ]);
+        y = drawSection(doc, y, 'Deudas Acumuladas');
+        y = drawTable(doc, y, ['Período', 'Monto Original', 'Total Pendiente'], debtRows, {
+          colWidths: [W * 0.35, W * 0.3, W * 0.35],
+          fontSize: 8.5,
+          headerFontSize: 8,
+          colAligns: ['left', 'right', 'right'],
+        });
+        y += 6;
+        const totalDebtH = 28;
+        fillR(doc, PAGE.margin, y, W, totalDebtH, C.black, 0);
+        doc.font(F.b).fontSize(9).fillColor(C.white)
+          .text('TOTAL DEUDA ACUMULADA', PAGE.margin + 14, y + 8);
+        doc.text(fmt(item.totalDeuda, data.currency), PAGE.margin + 14, y + 8, { width: W - 28, align: 'right' });
+        y += totalDebtH + 12;
+
+        if (hasServices) {
+          checkNewPage(50);
+          y = drawSection(doc, y, `Servicios del mes (${data.periodo.label})`);
+          const itemRows = item.impuestos.length;
+          const cardH = itemRows * 20 + 34;
+          fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
+          strokeR(doc, PAGE.margin, y, W, cardH, C.line, 0.5, 0);
+
+          doc.font(F.b).fontSize(9).fillColor(C.black)
+            .text(`${item.propiedad}`, PAGE.margin + 12, y + 8, { width: W * 0.6 });
+          doc.font(F.r).fontSize(8).fillColor(C.medium)
+            .text(item.inquilino, PAGE.margin + 12, y + 20, { width: W * 0.6 });
+
+          const subtotal = item.impuestos.reduce((s, i) => s + (i.monto || 0), 0);
+          doc.font(F.b).fontSize(10).fillColor(C.black)
+            .text(fmt(subtotal, data.currency), PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
+
+          let iy = y + 36;
+          for (const imp of item.impuestos) {
+            doc.font(F.r).fontSize(8).fillColor(C.medium)
+              .text(imp.concepto, PAGE.margin + 24, iy, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark)
+              .text(fmt(imp.monto, data.currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+            iy += 20;
+          }
+          y += cardH + 10;
+        }
+      }
     }
 
     // ── Total ──
