@@ -86,6 +86,9 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
     [filteredRecords, selectedRecordIds]
   )
 
+  const inquilinoCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'INQUILINO').length
+  const propietarioCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'PROPIETARIO').length
+
   const toggleRecord = (recordId) => {
     setSelectedRecordIds((prev) => {
       const next = new Set(prev)
@@ -120,12 +123,13 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
   }
 
   const goToStep2 = () => {
-    const count = selectedRecordIds.size
+    const count = selectedRecords.length
     if (count === 0) return
     const equalPct = Math.round((100 / count) * 100) / 100
     const newDist = {}
     let i = 0
-    for (const id of selectedRecordIds) {
+    for (const record of selectedRecords) {
+      const id = record.id
       if (distributions[id]) {
         newDist[id] = distributions[id]
       } else if (i === count - 1) {
@@ -319,13 +323,9 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
             <div className="modal-action">
               <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
               <button className="btn btn-primary" disabled={selectedRecords.length < 2} onClick={goToStep2}>
-                {(() => {
-                  const inquilinoCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'INQUILINO').length
-                  const propietarioCount = selectedRecords.filter(r => (r.contract?.contractType ?? r.contractType) === 'PROPIETARIO').length
-                  return propietarioCount > 0 && inquilinoCount > 0
-                    ? `Siguiente (Inq: ${inquilinoCount} · Prop: ${propietarioCount})`
-                    : `Siguiente (${selectedRecords.length} seleccionadas)`
-                })()}
+                {propietarioCount > 0 && inquilinoCount > 0
+                  ? `Siguiente (Inq: ${inquilinoCount} · Prop: ${propietarioCount})`
+                  : `Siguiente (${selectedRecords.length} seleccionadas)`}
               </button>
             </div>
           </div>
