@@ -132,10 +132,10 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   const totalCombinations = selectedRecordsArray.length * selectedMonths.length
   const grandTotal = amountNum * totalCombinations
 
-  const inquilinoCount = selectedRecordsArray.filter(r => (r.contract?.contractType ?? r.contractType) !== 'PROPIETARIO').length
+  const inquilinoCount = selectedRecordsArray.filter(r => (r.contract?.contractType ?? r.contractType) === 'INQUILINO').length
   const propietarioCount = selectedRecordsArray.filter(r => (r.contract?.contractType ?? r.contractType) === 'PROPIETARIO').length
 
-  const canGoStep2 = selectedRecordIds.size >= 1
+  const canGoStep2 = selectedRecordsArray.length >= 1
   const canGoStep3 = conceptTypeId && amountNum > 0 && selectedMonths.length >= 1
 
   const submitMutation = useMutation({
