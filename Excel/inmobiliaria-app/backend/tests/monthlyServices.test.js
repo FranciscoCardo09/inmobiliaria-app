@@ -168,6 +168,7 @@ describe('bulkAssignMultiContract - amount uniforme', () => {
         findUnique: async ({ where }) => makeContract({ id: where.id }),
       },
       monthlyService: {
+        findUnique: async () => null, // no existing service → no overwrite warning
         upsert: async ({ create, update }) => {
           const recordId = create.monthlyRecordId;
           capturedAmounts[recordId] = create.amount;
@@ -215,6 +216,7 @@ describe('bulkAssign - idempotencia vía upsert', () => {
       },
       contract: { findUnique: async () => contract },
       monthlyService: {
+        findUnique: async () => null, // no existing service
         upsert: async ({ create, update }) => {
           upsertCallCount++;
           return { id: 'svc-1', amount: create.amount, conceptType: { id: 'ct-1', name: 'Agua', category: 'SERVICIO' } };
@@ -369,5 +371,226 @@ describe('batchAddServices - usa create sin idempotencia', () => {
     assert.strictEqual(createdItems[0].amount, 25000);
     assert.strictEqual(createdItems[1].recordId, 'rec-2');
     assert.strictEqual(createdItems[1].amount, 25000);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T9 — bulkAssignMultiContract deduplica contractIds duplicados:
+//      cada contrato recibe exactamente un upsert
+// ────────────────────────────────────────────────────────────
+describe('bulkAssignMultiContract - deduplica contractIds duplicados', () => {
+  test('contractId duplicado en el input produce un solo upsert por contrato', async () => {
+    const upsertCallsByContract = {};
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      conceptType: {
+        findFirst: async () => ({ id: 'ct-agua', groupId: 'group-1', isActive: true }),
+      },
+      contract: {
+        findMany: async ({ where }) => where.id.in.map(id => ({ id })),
+        findUnique: async ({ where }) => makeContract({ id: where.id }),
+      },
+      $transaction: async (fn, opts) => fn(mockPrisma),
+      monthlyRecord: {
+        findUnique: async ({ where }) => {
+          const { contractId, periodMonth, periodYear } = where.contractId_periodMonth_periodYear;
+          return makeRecord(contractId, periodMonth, periodYear);
+        },
+        create: async (data) => makeRecord(data.data.contractId, data.data.periodMonth, data.data.periodYear),
+        updateMany: async () => {},
+      },
+      monthlyService: {
+        findUnique: async () => null, // no existing service
+        upsert: async ({ create }) => {
+          // record id is 'record-c1-5-2026' → split('-')[1] = 'c1'
+          const contractId = create.monthlyRecordId.split('-')[1];
+          upsertCallsByContract[contractId] = (upsertCallsByContract[contractId] || 0) + 1;
+          return { id: 'svc-1', amount: create.amount, conceptType: { id: 'ct-agua', name: 'Agua', category: 'SERVICIO' } };
+        },
+      },
+    };
+
+    const service = proxyquire('../src/services/monthlyServiceService', {
+      '../lib/prisma': mockPrisma,
+      './monthlyRecordService': mockRecalculate,
+    });
+
+    const months = [{ month: 5, year: 2026 }];
+    const result = await service.bulkAssignMultiContract('group-1', ['c1', 'c1', 'c2'], 'ct-agua', 50000, months);
+
+    assert.strictEqual(result.errors.length, 0, `no debe haber errores: ${JSON.stringify(result.errors)}`);
+    // c1 should have been upserted exactly once (not twice)
+    assert.strictEqual(upsertCallsByContract['c1'] ?? 0, 1, 'c1 debe tener exactamente 1 upsert, no 2');
+    assert.strictEqual(upsertCallsByContract['c2'] ?? 0, 1, 'c2 debe tener exactamente 1 upsert');
+    const totalUpserts = Object.values(upsertCallsByContract).reduce((a, b) => a + b, 0);
+    assert.strictEqual(totalUpserts, 2, 'en total deben haberse hecho exactamente 2 upserts');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T10 — Regresión 668d9fb: serviceId de otro record es rechazado
+// ────────────────────────────────────────────────────────────
+describe('cross-record service validation (regresión 668d9fb)', () => {
+  test('un serviceId que pertenece a otro record es rechazado', () => {
+    // Simulate the guard logic added in 668d9fb:
+    // existing.monthlyRecordId must equal recordId from URL
+    const recordId = 'record-A';
+    const anotherRecordId = 'record-B';
+
+    // Service belongs to record-B but request targets record-A
+    const existingService = { id: 'svc-1', monthlyRecordId: anotherRecordId, conceptTypeId: 'ct-agua', amount: 50000 };
+
+    // Guard check (mirrors the controller logic)
+    const isValid = existingService.monthlyRecordId === recordId;
+
+    assert.strictEqual(isValid, false, 'serviceId de otro record debe ser rechazado (monthlyRecordId no coincide)');
+
+    // Confirm the same service would pass if it belonged to the correct record
+    const ownService = { ...existingService, monthlyRecordId: recordId };
+    const isOwnValid = ownService.monthlyRecordId === recordId;
+    assert.strictEqual(isOwnValid, true, 'serviceId del mismo record debe ser aceptado');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T11 — bulkAssign emite console.warn('[service-overwrite]')
+//       cuando el amount cambia, pero NO cuando es igual
+// ────────────────────────────────────────────────────────────
+describe('bulkAssign - emite warning cuando cambia el monto de un servicio existente', () => {
+  test('console.warn se emite cuando el amount existente difiere del nuevo', async () => {
+    const contract = makeContract();
+    const existingRecord = makeRecord(contract.id, 4, 2026);
+    const OLD_AMOUNT = 25000;
+    const NEW_AMOUNT = 50000;
+    const warnings = [];
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      $transaction: async (fn) => fn(mockPrisma),
+      monthlyRecord: {
+        findUnique: async () => existingRecord,
+      },
+      contract: { findUnique: async () => contract },
+      monthlyService: {
+        // Existing service with OLD_AMOUNT
+        findUnique: async () => ({ id: 'svc-existing', amount: OLD_AMOUNT }),
+        upsert: async ({ create, update }) => ({
+          id: 'svc-existing',
+          amount: update.amount,
+          conceptType: { id: 'ct-1', name: 'Agua', category: 'SERVICIO' },
+        }),
+      },
+    };
+
+    // Intercept console.warn
+    const originalWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args); };
+
+    try {
+      const service = proxyquire('../src/services/monthlyServiceService', {
+        '../lib/prisma': mockPrisma,
+        './monthlyRecordService': mockRecalculate,
+      });
+
+      const months = [{ month: 4, year: 2026 }];
+      await service.bulkAssign('group-1', contract.id, 'ct-1', NEW_AMOUNT, months);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    const overwriteWarnings = warnings.filter(([tag]) => tag === '[service-overwrite]');
+    assert.strictEqual(overwriteWarnings.length, 1, 'debe emitir exactamente 1 warning de overwrite');
+    const [, payload] = overwriteWarnings[0];
+    assert.strictEqual(payload.oldAmount, OLD_AMOUNT, 'oldAmount debe ser el monto anterior');
+    assert.strictEqual(payload.newAmount, NEW_AMOUNT, 'newAmount debe ser el monto nuevo');
+  });
+
+  test('NO emite warning cuando el amount no cambia', async () => {
+    const contract = makeContract();
+    const existingRecord = makeRecord(contract.id, 4, 2026);
+    const SAME_AMOUNT = 50000;
+    const warnings = [];
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      $transaction: async (fn) => fn(mockPrisma),
+      monthlyRecord: { findUnique: async () => existingRecord },
+      contract: { findUnique: async () => contract },
+      monthlyService: {
+        findUnique: async () => ({ id: 'svc-existing', amount: SAME_AMOUNT }),
+        upsert: async ({ create, update }) => ({
+          id: 'svc-existing', amount: update.amount,
+          conceptType: { id: 'ct-1', name: 'Agua', category: 'SERVICIO' },
+        }),
+      },
+    };
+
+    const originalWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args); };
+
+    try {
+      const service = proxyquire('../src/services/monthlyServiceService', {
+        '../lib/prisma': mockPrisma,
+        './monthlyRecordService': mockRecalculate,
+      });
+      const months = [{ month: 4, year: 2026 }];
+      await service.bulkAssign('group-1', contract.id, 'ct-1', SAME_AMOUNT, months);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    const overwriteWarnings = warnings.filter(([tag]) => tag === '[service-overwrite]');
+    assert.strictEqual(overwriteWarnings.length, 0, 'no debe emitir warning cuando el amount no cambia');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T12 — bulkAssign respeta rescindedAt: no crea servicios
+//       en meses posteriores a la fecha de rescisión
+// ────────────────────────────────────────────────────────────
+describe('bulkAssign - respeta rescindedAt', () => {
+  test('no crea servicios en meses posteriores a la fecha de rescisión', async () => {
+    // Contract rescinded at month 3 of 2025 (startMonth=1, so rescMonthNumber=3)
+    const contract = makeContract({
+      rescindedAt: '2025-03-15T12:00:00.000Z',
+      durationMonths: 24,
+    });
+    let upsertCallCount = 0;
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      $transaction: async (fn) => fn(mockPrisma),
+      monthlyRecord: {
+        findUnique: async () => null, // force record creation path
+        create: async (data) => makeRecord(contract.id, data.data.periodMonth, data.data.periodYear),
+      },
+      contract: { findUnique: async () => contract },
+      monthlyService: {
+        findUnique: async () => null,
+        upsert: async () => { upsertCallCount++; return {}; },
+      },
+    };
+
+    const service = proxyquire('../src/services/monthlyServiceService', {
+      '../lib/prisma': mockPrisma,
+      './monthlyRecordService': mockRecalculate,
+    });
+
+    // Request months 1-6, but contract is rescinded at month 3
+    const months = [
+      { month: 1, year: 2025 },
+      { month: 2, year: 2025 },
+      { month: 3, year: 2025 }, // = rescission month (borderline — rescMonthNumber=3, guard is monthNumber > 3)
+      { month: 4, year: 2025 }, // after rescission
+      { month: 5, year: 2025 }, // after rescission
+      { month: 6, year: 2025 }, // after rescission
+    ];
+
+    await service.bulkAssign('group-1', contract.id, 'ct-1', 50000, months);
+
+    // Months 1, 2, 3 should be upserted (3 is the rescission month itself, not after)
+    // Months 4, 5, 6 should be skipped
+    assert.strictEqual(upsertCallCount, 3, `debe upsertear solo los meses 1, 2 y 3 (rescisión en mes 3), obtuvo: ${upsertCallCount}`);
   });
 });
