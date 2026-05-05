@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
@@ -27,6 +27,9 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   const [selectedRecordIds, setSelectedRecordIds] = useState(new Set())
   const [searchTerm, setSearchTerm] = useState('')
   const [contractTypeFilter, setContractTypeFilter] = useState('INQUILINO')
+
+  // Changing contract type filter resets selection to avoid sending invisible records
+  useEffect(() => { setSelectedRecordIds(new Set()) }, [contractTypeFilter])
 
   // Step 2 state - months
   const [selectedYear, setSelectedYear] = useState(periodYear)
@@ -61,7 +64,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
     let result = records
 
     if (contractTypeFilter) {
-      result = result.filter(r => r.contract?.contractType === contractTypeFilter)
+      result = result.filter(r => (r.contract?.contractType ?? r.contractType) === contractTypeFilter)
     }
 
     if (!searchTerm.trim()) return result
@@ -89,11 +92,21 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
 
   const loadGroup = (group) => {
     const newSelected = new Set()
+    let omitted = 0
     for (const item of group.items) {
       const record = records.find((r) => r.contractId === item.contractId)
-      if (record) newSelected.add(record.id)
+      if (!record) continue
+      const recordType = record.contract?.contractType ?? record.contractType
+      if (contractTypeFilter && recordType !== contractTypeFilter) {
+        omitted++
+        continue
+      }
+      newSelected.add(record.id)
     }
     setSelectedRecordIds(newSelected)
+    if (omitted > 0) {
+      toast(`Se omitieron ${omitted} contrato${omitted !== 1 ? 's' : ''} por el filtro de tipo activo`, { icon: 'ℹ️' })
+    }
   }
 
   // Month selection helpers
@@ -115,9 +128,12 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
 
   const selectedConceptType = conceptTypes.find((ct) => ct.id === conceptTypeId)
   const amountNum = parseFloat(amount) || 0
-  const selectedRecordsArray = records.filter((r) => selectedRecordIds.has(r.id))
+  const selectedRecordsArray = filteredRecords.filter((r) => selectedRecordIds.has(r.id))
   const totalCombinations = selectedRecordsArray.length * selectedMonths.length
   const grandTotal = amountNum * totalCombinations
+
+  const inquilinoCount = selectedRecordsArray.filter(r => (r.contract?.contractType ?? r.contractType) !== 'PROPIETARIO').length
+  const propietarioCount = selectedRecordsArray.filter(r => (r.contract?.contractType ?? r.contractType) === 'PROPIETARIO').length
 
   const canGoStep2 = selectedRecordIds.size >= 1
   const canGoStep3 = conceptTypeId && amountNum > 0 && selectedMonths.length >= 1
@@ -125,7 +141,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
   const submitMutation = useMutation({
     retry: 0,
     mutationFn: async () => {
-      const contractIds = selectedRecordsArray.map((r) => r.contractId)
+      const contractIds = Array.from(new Set(selectedRecordsArray.map((r) => r.contractId)))
       const res = await api.post(`/groups/${groupId}/monthly-records/bulk-load-services`, {
         contractIds,
         conceptTypeId,
@@ -242,7 +258,9 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
             <div className="modal-action">
               <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
               <button className="btn btn-primary" disabled={!canGoStep2} onClick={() => setStep(2)}>
-                Siguiente ({selectedRecordIds.size} seleccionadas)
+                {propietarioCount > 0 && inquilinoCount > 0
+                  ? `Siguiente (Inq: ${inquilinoCount} · Prop: ${propietarioCount})`
+                  : `Siguiente (${selectedRecordsArray.length} seleccionadas)`}
               </button>
             </div>
           </div>
