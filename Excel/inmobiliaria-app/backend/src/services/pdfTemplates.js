@@ -1129,7 +1129,7 @@ const generateImpuestosPDF = (data) => {
         const totalDebtH = 28;
         fillR(doc, PAGE.margin, y, W, totalDebtH, C.black, 0);
         doc.font(F.b).fontSize(9).fillColor(C.white)
-          .text('TOTAL DEUDA ACUMULADA', PAGE.margin + 14, y + 8);
+          .text('TOTAL SALDO PENDIENTE', PAGE.margin + 14, y + 8);
         doc.text(fmt(item.totalDeuda, data.currency), PAGE.margin + 14, y + 8, { width: W - 28, align: 'right' });
         y += totalDebtH + 12;
 
@@ -1170,14 +1170,23 @@ const generateImpuestosPDF = (data) => {
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
     doc.font(F.b).fontSize(11).fillColor(C.white)
-      .text('TOTAL', PAGE.margin + 14, y + 10);
+      .text(`TOTAL ${data.periodo.label.toUpperCase()}`, PAGE.margin + 14, y + 10);
     doc.text(fmt(data.grandTotal, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 10;
 
+    if (data.grandTotalDeuda > 0) {
+      fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
+      doc.font(F.b).fontSize(11).fillColor(C.white)
+        .text('TOTAL A ABONAR (PENDIENTE + ACTUAL)', PAGE.margin + 14, y + 10);
+      doc.text(fmt(data.grandTotalAbonar, data.currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
+      y += totalH + 10;
+    }
+
     // Amount in words
-    if (data.grandTotalEnLetras) {
+    const letrasTexto = data.grandTotalDeuda > 0 ? data.grandTotalAbonarEnLetras : data.grandTotalEnLetras;
+    if (letrasTexto) {
       doc.font(F.r).fontSize(8).fillColor(C.dark)
-        .text(`Son: ${data.grandTotalEnLetras}`, PAGE.margin + 4, y, { width: W - 8 });
+        .text(`Son: ${letrasTexto}`, PAGE.margin + 4, y, { width: W - 8 });
       y += 20;
     }
 

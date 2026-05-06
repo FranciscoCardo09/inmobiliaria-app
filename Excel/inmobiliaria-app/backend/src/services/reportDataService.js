@@ -1317,6 +1317,8 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
   }
 
   const grandTotal = impuestos.reduce((sum, i) => sum + i.totalImpuestos, 0);
+  const grandTotalDeuda = impuestos.reduce((sum, i) => sum + i.totalDeuda, 0);
+  const grandTotalAbonar = grandTotal + grandTotalDeuda;
 
   return {
     empresa,
@@ -1330,6 +1332,9 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
     },
     impuestos,
     grandTotal,
+    grandTotalDeuda,
+    grandTotalAbonar,
+    grandTotalAbonarEnLetras: numeroATexto(grandTotalAbonar),
     grandTotalEnLetras: numeroATexto(grandTotal),
     currency: empresa.currency,
   };
