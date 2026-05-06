@@ -517,11 +517,11 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         include: {
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-          property: { 
-            include: { 
+          property: {
+            include: {
               owner: { include: { transferBeneficiary: true } },
-              transferBeneficiary: true 
-            } 
+              transferBeneficiary: true
+            }
           },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
           debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
@@ -813,7 +813,7 @@ const getEvolucionIngresosData = async (groupId, year) => {
   for (const row of aggData) {
     aggMap.set(row.periodMonth, row);
   }
-  
+
   const statusMap = new Map();
   for (const row of statusData) {
     statusMap.set(row.periodMonth, row._count.id);
@@ -824,7 +824,7 @@ const getEvolucionIngresosData = async (groupId, year) => {
   for (let m = 1; m <= 12; m++) {
     const agg = aggMap.get(m) || { _sum: { totalDue: 0, amountPaid: 0 }, _count: { id: 0 } };
     const pagados = statusMap.get(m) || 0;
-    
+
     meses.push({
       mes: m,
       label: MONTH_NAMES[m],
@@ -859,7 +859,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
           tenant: true,
           contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
           property: {
-            include: { 
+            include: {
               owner: {
                 select: { id: true, name: true, dni: true, phone: true },
               },
@@ -1008,12 +1008,12 @@ const getAjustesMesData = async (groupId, month, year) => {
 
   // Import the service function that gets contracts with adjustments
   const { getContractsWithAdjustmentInCalendar } = require('./adjustmentService');
-  
+
   // Get contracts that should adjust in this calendar month
   const contractsWithAdjustments = await getContractsWithAdjustmentInCalendar(groupId, month, year);
 
   const ajustes = [];
-  
+
   for (const contract of contractsWithAdjustments) {
     // Si tiene historial aplicado, mostrar el último ajuste aplicado para este mes
     if (contract.applied && contract.rentHistory.length > 0) {
@@ -1122,9 +1122,9 @@ const getControlMensualData = async (groupId, month, year) => {
 
     const serviciosDetalle = r.services.length > 0
       ? r.services.map((s) => {
-          const nombre = s.conceptType?.label || s.conceptType?.name || 'Servicio';
-          return `${nombre}: $${r2(s.amount).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }).join('\n')
+        const nombre = s.conceptType?.label || s.conceptType?.name || 'Servicio';
+        return `${nombre}: $${r2(s.amount).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }).join('\n')
       : null;
 
     return {
