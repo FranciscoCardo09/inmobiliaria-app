@@ -906,12 +906,22 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       A_FAVOR: 'Saldo a favor',
       SOBREPAGO: 'Pago en exceso',
     };
+    const mesVencidoTx = record.periodMonth === 1 ? 12 : record.periodMonth - 1;
+    const anioVencidoTx = record.periodMonth === 1 ? record.periodYear - 1 : record.periodYear;
+    const serviceByName = Object.fromEntries(
+      (record.services || []).map(s => [s.conceptType?.name, s.conceptType?.category])
+    );
     conceptos = targetTx.concepts
       .filter(c => c.amount > 0) // excluir créditos negativos del total visible
-      .map(c => ({
-        concepto: c.description || CONCEPT_LABELS[c.type] || c.type,
-        importe: c.amount,
-      }));
+      .map(c => {
+        const baseLabel = c.description || CONCEPT_LABELS[c.type] || c.type;
+        const cat = serviceByName[c.type];
+        const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
+        return {
+          concepto: showPeriodo ? `${baseLabel} | Período: ${MONTH_NAMES[mesVencidoTx]} ${anioVencidoTx}` : baseLabel,
+          importe: c.amount,
+        };
+      });
 
     // Usar número de recibo de la transacción si lo tiene, sino generar uno
     receiptNumber = targetTx.receiptNumber ||
