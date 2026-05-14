@@ -282,6 +282,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       importe: isDiscount ? -Math.abs(svc.amount) : svc.amount,
       serviceId: svc.id,
       isService: true,
+      category: cat,
     });
   }
 
@@ -315,22 +316,23 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // ================================================================
   // 3. Rent (Alquiler) and Punitorios Allocation
   // ================================================================
-  // We use current payment + previous credit + bonificaciones/descuentos as the "purchasing power".
-  // Bonificaciones/descuentos reducen lo que el inquilino paga, pero NO deben reducir la base
-  // de honorarios — para el sistema actúan como crédito que cubre alquiler/servicios.
+  // Poder de pago = lo pagado + crédito previo + BONIFICACIONES (no descuentos).
+  // BONIFICACION: no reduce la base de honorarios → se trata como crédito.
+  // DESCUENTO: sí reduce la base → se deja restando dentro de serviciosTotal como antes.
   const amtPaid = monthlyRecord.amountPaid || 0;
   const previousBalance = monthlyRecord.previousBalance || 0;
   const bonificacionesTotal = conceptos
-    .filter(c => c.isService && c.importe < 0)
+    .filter(c => c.isService && c.category === 'BONIFICACION')
     .reduce((s, c) => s + Math.abs(c.importe), 0);
   let remaining = amtPaid + previousBalance + bonificacionesTotal;
 
-  // Calculate gross amounts for each bucket (solo servicios positivos: bonif. ya se sumó al remaining)
-  const serviciosPositivos = conceptos
-    .filter(c => c.isService && c.importe > 0)
+  // Servicios + IVA, excluyendo bonificaciones (que ya se sumaron al remaining).
+  // Los descuentos sí se mantienen restando (su negativo queda incluido).
+  const serviciosTotal = conceptos
+    .filter(c => c.isService && c.category !== 'BONIFICACION')
     .reduce((s, c) => s + c.importe, 0);
   const ivaTotal = (monthlyRecord.includeIva && monthlyRecord.ivaAmount > 0) ? monthlyRecord.ivaAmount : 0;
-  const serviciosIvaTotal = serviciosPositivos + ivaTotal;
+  const serviciosIvaTotal = Math.max(0, serviciosTotal + ivaTotal);
   const alquilerTotal = monthlyRecord.rentAmount;
 
   // Step 1: Services + IVA (Highest priority)
@@ -365,9 +367,13 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
   const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
-  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - saldo a favor
+  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - saldo a favor - descuentos
+  // DESCUENTO reduce el alquiler cobrado (y por ende los honorarios). BONIFICACION no.
   const prevCredit = Math.max(0, previousBalance); // previousBalance > 0 = credit from prior month
-  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit;
+  const descuentosTotal = conceptos
+    .filter(c => c.isService && c.category === 'DESCUENTO')
+    .reduce((s, c) => s + Math.abs(c.importe), 0);
+  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit - descuentosTotal;
 
   // HONORARIOS: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
   // Si no se cobró nada (NO COBRADO) no se cobran honorarios, aunque haya saldo a favor previo.
