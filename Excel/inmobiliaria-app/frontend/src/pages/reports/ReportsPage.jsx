@@ -156,9 +156,15 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
   }
 
   // Honorarios: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
+  // Si no se cobró nada (NO COBRADO) no se cobran honorarios ni gastos a mi cargo,
+  // aunque haya saldo a favor previo.
+  const amtPaid = data.amountPaid || 0
   const honorariosBase = data.subtotalAlquileresCobrado || 0
-  const montoAlquiler = pct > 0 ? Math.round(honorariosBase * pct / 100 * 100) / 100 : 0
-  const totalGastos = gastosItems.reduce((s, g) => s + g.importe, 0)
+  const montoAlquiler = (pct > 0 && amtPaid > 0)
+    ? Math.max(0, Math.round(honorariosBase * pct / 100 * 100) / 100)
+    : 0
+  const totalGastosRaw = gastosItems.reduce((s, g) => s + g.importe, 0)
+  const totalGastos = amtPaid > 0 ? totalGastosRaw : 0
   const monto = montoAlquiler + totalGastos
 
   return { porcentaje: pct, baseHonorarios: honorariosBase, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
@@ -782,7 +788,7 @@ function LiquidacionTab({ groupId }) {
                 else gastosGrouped.push({ ...g })
               }
               const honPct = effectiveData.find(d => d.honorarios)?.honorarios?.porcentaje
-              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.honorariosCobrado || 0), 0)
+              const totalAlquiler = effectiveData.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0)
               return (
                 <div className="mt-3 p-3 bg-base-200 rounded-lg">
                   <p className="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Honorarios totales</p>
