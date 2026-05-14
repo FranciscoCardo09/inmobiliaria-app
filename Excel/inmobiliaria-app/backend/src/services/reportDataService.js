@@ -365,9 +365,10 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit;
 
   // HONORARIOS: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
+  // Si no se cobró nada (NO COBRADO) no se cobran honorarios, aunque haya saldo a favor previo.
   const honPct = options.honorariosPercent || 0;
-  const honorariosAlquilerCobrado = honPct > 0
-    ? Math.round(subtotalAlquileresCobrado * honPct / 100 * 100) / 100
+  const honorariosAlquilerCobrado = (honPct > 0 && amtPaid > 0)
+    ? Math.max(0, Math.round(subtotalAlquileresCobrado * honPct / 100 * 100) / 100)
     : 0;
   const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
   const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;
