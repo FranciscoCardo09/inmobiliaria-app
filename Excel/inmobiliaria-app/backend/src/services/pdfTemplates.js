@@ -1497,7 +1497,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       hy += 12;
 
       if (honPct > 0) {
-        const totalAlquilerHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
+        const totalAlquilerHon = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
         doc.font(F.r).fontSize(9).fillColor(C.dark).text(`Honorarios alquiler (${honPct}%)`, PAGE.margin + 12, hy);
         doc.font(F.b).fontSize(9).fillColor(C.black).text(fmt(totalAlquilerHon, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
         hy += rowH;
