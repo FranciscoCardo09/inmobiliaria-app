@@ -315,17 +315,22 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   // ================================================================
   // 3. Rent (Alquiler) and Punitorios Allocation
   // ================================================================
-  // We use current payment + previous credit as the "purchasing power"
+  // We use current payment + previous credit + bonificaciones/descuentos as the "purchasing power".
+  // Bonificaciones/descuentos reducen lo que el inquilino paga, pero NO deben reducir la base
+  // de honorarios — para el sistema actúan como crédito que cubre alquiler/servicios.
   const amtPaid = monthlyRecord.amountPaid || 0;
   const previousBalance = monthlyRecord.previousBalance || 0;
-  let remaining = amtPaid + previousBalance;
+  const bonificacionesTotal = conceptos
+    .filter(c => c.isService && c.importe < 0)
+    .reduce((s, c) => s + Math.abs(c.importe), 0);
+  let remaining = amtPaid + previousBalance + bonificacionesTotal;
 
-  // Calculate gross amounts for each bucket
-  const serviciosTotal = conceptos
-    .filter(c => c.isService)
+  // Calculate gross amounts for each bucket (solo servicios positivos: bonif. ya se sumó al remaining)
+  const serviciosPositivos = conceptos
+    .filter(c => c.isService && c.importe > 0)
     .reduce((s, c) => s + c.importe, 0);
   const ivaTotal = (monthlyRecord.includeIva && monthlyRecord.ivaAmount > 0) ? monthlyRecord.ivaAmount : 0;
-  const serviciosIvaTotal = Math.max(0, serviciosTotal + ivaTotal);
+  const serviciosIvaTotal = serviciosPositivos + ivaTotal;
   const alquilerTotal = monthlyRecord.rentAmount;
 
   // Step 1: Services + IVA (Highest priority)
