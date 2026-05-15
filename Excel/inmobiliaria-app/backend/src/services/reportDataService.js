@@ -367,13 +367,16 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
   const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
-  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - saldo a favor - descuentos
+  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - descuentos
   // DESCUENTO reduce el alquiler cobrado (y por ende los honorarios). BONIFICACION no.
+  // El saldo a favor previo (prevCredit) representa alquiler de este mes pagado con crédito de
+  // un mes anterior — no se restan honorarios por eso (ese mes anterior no cobró honorarios
+  // sobre la sobre-pago).
   const prevCredit = Math.max(0, previousBalance); // previousBalance > 0 = credit from prior month
   const descuentosTotal = conceptos
     .filter(c => c.isService && c.category === 'DESCUENTO')
     .reduce((s, c) => s + Math.abs(c.importe), 0);
-  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - prevCredit - descuentosTotal;
+  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - descuentosTotal;
 
   // HONORARIOS: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
   // Si no se cobró nada (NO COBRADO) no se cobran honorarios, aunque haya saldo a favor previo.
