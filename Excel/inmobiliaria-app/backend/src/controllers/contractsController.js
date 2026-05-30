@@ -769,6 +769,9 @@ const rescindContract = async (req, res, next) => {
 };
 
 // POST /api/groups/:groupId/contracts/:id/renew
+// Renovar = crear un nuevo Contract vinculado al viejo. El viejo NO se borra:
+// queda active=false con renewedAt, conserva sus MonthlyRecord/Debt/Payment.
+// El nuevo arranca con startMonth=1 y baseRent nuevo.
 const renewContract = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
@@ -778,26 +781,30 @@ const renewContract = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requieren fecha de inicio, duración y monto de alquiler');
     }
 
-    const contract = await prisma.contract.findUnique({
+    const oldContract = await prisma.contract.findUnique({
       where: { id },
-      include: { adjustmentIndex: true },
+      include: { adjustmentIndex: true, contractTenants: true },
     });
 
-    if (!contract || contract.groupId !== groupId) {
+    if (!oldContract || oldContract.groupId !== groupId) {
       return ApiResponse.notFound(res, 'Contrato no encontrado');
     }
 
-    const enriched = enrichContract(contract);
+    const enriched = enrichContract(oldContract);
     if (enriched.status !== 'EXPIRED') {
       return ApiResponse.badRequest(res, 'Solo se pueden renovar contratos vencidos');
+    }
+
+    if (oldContract.renewedAt) {
+      return ApiResponse.badRequest(res, 'Este contrato ya fue renovado');
     }
 
     // Check no other active contract of the same type on the same property
     const duplicate = await prisma.contract.findFirst({
       where: {
         groupId,
-        propertyId: contract.propertyId,
-        contractType: contract.contractType,
+        propertyId: oldContract.propertyId,
+        contractType: oldContract.contractType,
         active: true,
         id: { not: id },
       },
@@ -819,26 +826,73 @@ const renewContract = async (req, res, next) => {
     const newStartDate = parseLocalDate(startDate);
     const newBaseRent = parseFloat(baseRent);
     const newDurationMonths = parseInt(durationMonths, 10);
+    const renewedAt = new Date();
 
-    const updated = await prisma.contract.update({
-      where: { id },
-      data: {
-        startDate: newStartDate,
-        startMonth: 1,
-        currentMonth: 1,
-        durationMonths: newDurationMonths,
-        baseRent: newBaseRent,
-        adjustmentIndexId: adjustmentIndexId || null,
-        nextAdjustmentMonth,
-        active: true,
-        rescindedAt: null,
-        rescissionPenalty: null,
-        punitoryStartDay: punitoryStartDay != null ? parseInt(punitoryStartDay, 10) : contract.punitoryStartDay,
-        punitoryPercent: punitoryPercent != null ? parseFloat(punitoryPercent) : contract.punitoryPercent,
-        pagaIva: pagaIva != null ? pagaIva : contract.pagaIva,
-        observations: observations !== undefined ? observations : contract.observations,
-        comprobantes: comprobantes !== undefined ? comprobantes : contract.comprobantes,
-      },
+    const newContract = await prisma.$transaction(async (tx) => {
+      // 1. Marcar el contrato viejo como renovado (inactivo). Conserva intactos
+      //    startDate/startMonth/durationMonths para que sus MonthlyRecord sigan
+      //    siendo válidos dentro de su propio rango.
+      await tx.contract.update({
+        where: { id },
+        data: { active: false, renewedAt },
+      });
+
+      // 2. Crear el contrato nuevo
+      const created = await tx.contract.create({
+        data: {
+          groupId,
+          propertyId: oldContract.propertyId,
+          tenantId: oldContract.tenantId,
+          contractType: oldContract.contractType,
+          startDate: newStartDate,
+          startMonth: 1,
+          currentMonth: 1,
+          durationMonths: newDurationMonths,
+          baseRent: newBaseRent,
+          adjustmentIndexId: adjustmentIndexId || null,
+          nextAdjustmentMonth,
+          active: true,
+          punitoryStartDay: punitoryStartDay != null ? parseInt(punitoryStartDay, 10) : oldContract.punitoryStartDay,
+          punitoryGraceDay: oldContract.punitoryGraceDay,
+          punitoryPercent: punitoryPercent != null ? parseFloat(punitoryPercent) : oldContract.punitoryPercent,
+          pagaIva: pagaIva != null ? pagaIva : oldContract.pagaIva,
+          observations: observations !== undefined ? observations : oldContract.observations,
+          comprobantes: comprobantes !== undefined ? comprobantes : oldContract.comprobantes,
+          renewedFromContractId: id,
+        },
+      });
+
+      // 3. Clonar ContractTenants al nuevo contrato (preserva co-inquilinos)
+      const oldTenants = await tx.contractTenant.findMany({
+        where: { contractId: id },
+        select: { tenantId: true, isPrimary: true },
+      });
+      if (oldTenants.length > 0) {
+        await tx.contractTenant.createMany({
+          data: oldTenants.map((ct) => ({
+            contractId: created.id,
+            tenantId: ct.tenantId,
+            isPrimary: ct.isPrimary,
+          })),
+        });
+      }
+
+      // 4. RentHistory inicial del nuevo contrato (el viejo conserva el suyo)
+      await tx.rentHistory.create({
+        data: {
+          contractId: created.id,
+          effectiveFromMonth: 1,
+          rentAmount: newBaseRent,
+          reason: 'RENOVACION',
+        },
+      });
+
+      return created;
+    });
+
+    // Refetch con includes completos para enrichContract
+    const fullNew = await prisma.contract.findUnique({
+      where: { id: newContract.id },
       include: {
         tenant: { select: { id: true, name: true } },
         contractTenants: { include: { tenant: { select: { id: true, name: true } } }, orderBy: { isPrimary: 'desc' } },
@@ -847,16 +901,7 @@ const renewContract = async (req, res, next) => {
       },
     });
 
-    await prisma.rentHistory.create({
-      data: {
-        contractId: id,
-        effectiveFromMonth: 1,
-        rentAmount: newBaseRent,
-        reason: 'RENOVACION',
-      },
-    });
-
-    return ApiResponse.success(res, enrichContract(updated));
+    return ApiResponse.success(res, enrichContract(fullNew));
   } catch (error) {
     next(error);
   }

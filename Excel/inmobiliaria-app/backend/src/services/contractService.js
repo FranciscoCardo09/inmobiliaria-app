@@ -41,7 +41,9 @@ const enrichContract = (c) => {
   const remainingMonths = Math.max(0, endMonth - computedCurrentMonth);
 
   let status;
-  if (!c.active) {
+  if (!c.active && c.renewedAt) {
+    status = 'RENEWED';
+  } else if (!c.active) {
     status = 'TERMINATED';
   } else if (c.rescindedAt) {
     status = 'RESCINDED';
@@ -101,7 +103,36 @@ const getExpiringContractsOptimized = async (groupId) => {
   return expiring;
 };
 
+/**
+ * Devuelve la cadena de IDs de contratos vinculados por renovación, partiendo
+ * del contractId y caminando hacia atrás vía renewedFromContractId.
+ * Útil para encontrar deudas/registros mensuales que pertenecen a contratos
+ * anteriores en la cadena de renovaciones.
+ *
+ * @param {string} contractId - ID del contrato (típicamente el más reciente)
+ * @param {object} [client=prisma] - Cliente Prisma o transacción
+ * @returns {Promise<string[]>} Lista de contractIds incluyendo el original, ordenada desde el más nuevo al más viejo.
+ */
+const getContractChain = async (contractId, client = prisma) => {
+  const chain = [];
+  let currentId = contractId;
+  const visited = new Set();
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    chain.push(currentId);
+    const c = await client.contract.findUnique({
+      where: { id: currentId },
+      select: { renewedFromContractId: true },
+    });
+    currentId = c?.renewedFromContractId || null;
+  }
+
+  return chain;
+};
+
 module.exports = {
   enrichContract,
   getExpiringContractsOptimized,
+  getContractChain,
 };

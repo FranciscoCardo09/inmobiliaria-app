@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const proxyquire = require('proxyquire').noCallThru();
 const { enrichContract } = require('../src/services/contractService');
+const { makeFakePrisma } = require('./helpers/fakePrisma');
 
 test('contractService - enrichContract parses default ACTIVE fields', (t) => {
   const now = new Date();
@@ -75,6 +77,56 @@ test('contractService - enrichContract handles undefined/null edges gracefully',
   assert.strictEqual(enriched.contractType, 'INQUILINO', 'Default resolution worked');
   assert.strictEqual(enriched.currentMonth, 1, 'Assumed startMonth 1 worked internally');
   assert.strictEqual(enriched.baseRent, undefined); // It maps what is there
+});
+
+test('contractService - enrichContract returns RENEWED when inactive with renewedAt', (t) => {
+  const mockContract = {
+    id: 'c-renewed',
+    startDate: new Date('2024-01-01').toISOString(),
+    startMonth: 1,
+    durationMonths: 24,
+    baseRent: 100000,
+    active: false,
+    renewedAt: new Date('2026-01-15').toISOString(),
+  };
+  const enriched = enrichContract(mockContract);
+  assert.strictEqual(enriched.status, 'RENEWED', 'inactive + renewedAt should be RENEWED');
+});
+
+test('contractService - enrichContract still returns TERMINATED for inactive without renewedAt', (t) => {
+  const mockContract = {
+    id: 'c-terminated',
+    startDate: new Date('2024-01-01').toISOString(),
+    startMonth: 1,
+    durationMonths: 24,
+    baseRent: 100000,
+    active: false,
+    renewedAt: null,
+  };
+  assert.strictEqual(enrichContract(mockContract).status, 'TERMINATED');
+});
+
+test('contractService - getContractChain walks via renewedFromContractId', async () => {
+  const fakePrisma = makeFakePrisma();
+  await fakePrisma.contract.create({ data: { id: 'A', renewedFromContractId: null } });
+  await fakePrisma.contract.create({ data: { id: 'B', renewedFromContractId: 'A' } });
+  await fakePrisma.contract.create({ data: { id: 'C', renewedFromContractId: 'B' } });
+
+  const { getContractChain } = proxyquire('../src/services/contractService', {
+    '../lib/prisma': fakePrisma,
+  });
+  const chain = await getContractChain('C');
+  assert.deepStrictEqual(chain, ['C', 'B', 'A']);
+});
+
+test('contractService - getContractChain returns single element for non-renewed contract', async () => {
+  const fakePrisma = makeFakePrisma();
+  await fakePrisma.contract.create({ data: { id: 'lone' } });
+  const { getContractChain } = proxyquire('../src/services/contractService', {
+    '../lib/prisma': fakePrisma,
+  });
+  const chain = await getContractChain('lone');
+  assert.deepStrictEqual(chain, ['lone']);
 });
 
 test('contractService - enrichContract identifies Future contracts correctly', (t) => {

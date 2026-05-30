@@ -381,6 +381,12 @@ model Contract {
   rescindedAt         DateTime? @map("rescinded_at")        // Fecha de rescisión (último mes activo)
   rescissionPenalty   Float?    @map("rescission_penalty")  // Monto de la multa calculada
 
+  // Renovación: el viejo queda con active=false + renewedAt; el nuevo apunta al viejo via renewedFromContractId
+  renewedAt             DateTime? @map("renewed_at")
+  renewedFromContractId String?   @unique @map("renewed_from_contract_id")
+  renewedFrom           Contract? @relation("ContractRenewal", fields: [renewedFromContractId], references: [id], onDelete: SetNull)
+  renewedTo             Contract? @relation("ContractRenewal")
+
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 

@@ -33,12 +33,12 @@ function getMonthNumber(contract, periodMonth, periodYear) {
 }
 
 /**
- * Check if a contract is active for a given month number
+ * Check if a monthNumber falls inside the contract's [startMonth..endMonth] range.
+ * Does NOT gate on contract.active: renewed/inactive contracts still own their
+ * historical periods (their MonthlyRecord/Debt remain valid and visible).
  */
-function isContractActiveForMonth(contract, monthNumber) {
-  // When startMonth > 1, monthNumber range is [startMonth .. startMonth + durationMonths - 1]
+function isContractInRangeForMonth(contract, monthNumber) {
   const endMonth = contract.startMonth + contract.durationMonths - 1;
-  if (!contract.active) return false;
   if (monthNumber < contract.startMonth || monthNumber > endMonth) return false;
 
   // For rescinded contracts, cap the active range at the rescission month number
@@ -49,6 +49,15 @@ function isContractActiveForMonth(contract, monthNumber) {
   }
 
   return true;
+}
+
+/**
+ * Whether new MonthlyRecord rows can be created for this contract.
+ * Renewed (active=false + renewedAt) and otherwise inactive contracts cannot
+ * receive new records — we only READ what already exists for their periods.
+ */
+function canCreateRecordForContract(contract) {
+  return contract.active === true;
 }
 
 /**
@@ -140,9 +149,16 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const year = parseInt(periodYear);
   console.log(`[monthlyRecords] START month=${month} year=${year} groupId=${groupId}`);
 
-  // Get all active contracts with related data
+  // Get contracts relevant for any period: active ones (can create new records)
+  // and renewed ones (active=false + renewedAt, only read their existing records).
   const contracts = await prisma.contract.findMany({
-    where: { groupId, active: true },
+    where: {
+      groupId,
+      OR: [
+        { active: true },
+        { renewedAt: { not: null } },
+      ],
+    },
     include: {
       tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } },
       contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true, email: true, phone: true } } }, orderBy: { isPrimary: 'desc' } },
@@ -158,25 +174,30 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     },
   });
 
-  // Pre-filter active contracts and compute monthNumbers in memory
+  // Pre-filter contracts whose [startMonth..endMonth] range covers (month, year).
+  // Active contracts may create new records; renewed contracts only READ existing ones.
   const activeContracts = [];
   for (const contract of contracts) {
     const monthNumber = getMonthNumber(contract, month, year);
 
-    // Check if this period is the penalty month for a rescinded contract
-    if (contract.rescindedAt) {
+    // Check if this period is the penalty month for a rescinded contract (only relevant for active contracts)
+    if (contract.active && contract.rescindedAt) {
       const penaltyPeriod = getRescissionPenaltyPeriod(contract);
       if (penaltyPeriod && penaltyPeriod.penaltyMonth === month && penaltyPeriod.penaltyYear === year) {
-        // Include this contract as a penalty-only record
         const rescDate = new Date(contract.rescindedAt);
         const rescMonthNumber = getMonthNumber(contract, rescDate.getMonth() + 1, rescDate.getFullYear());
-        activeContracts.push({ contract, monthNumber: rescMonthNumber + 1, isPenaltyRecord: true });
+        activeContracts.push({ contract, monthNumber: rescMonthNumber + 1, isPenaltyRecord: true, canCreate: true });
         continue;
       }
     }
 
-    if (!isContractActiveForMonth(contract, monthNumber)) continue;
-    activeContracts.push({ contract, monthNumber, isPenaltyRecord: false });
+    if (!isContractInRangeForMonth(contract, monthNumber)) continue;
+    activeContracts.push({
+      contract,
+      monthNumber,
+      isPenaltyRecord: false,
+      canCreate: canCreateRecordForContract(contract),
+    });
   }
 
   console.log(`[monthlyRecords] activeContracts=${activeContracts.length} of ${contracts.length} total`);
@@ -265,8 +286,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   // --- BATCH 5: Bulk-create missing records (1 createMany instead of N creates) ---
   const recordsToCreate = [];
   const penaltyContractsToSetup = []; // penalty records that need prev-month services copied
-  for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
+  for (const { contract, monthNumber, isPenaltyRecord, canCreate } of activeContracts) {
     if (recordsByContractId.has(contract.id)) continue;
+    // Renewed/inactive contracts only expose existing records; never create new ones.
+    if (!canCreate) continue;
 
     if (isPenaltyRecord) {
       // Penalty month: rent = penalty amount (replaces alquiler for this month)
@@ -1206,4 +1229,6 @@ module.exports = {
   getCalendarPeriod,
   getMonthNumber,
   calculateRentForMonth,
+  isContractInRangeForMonth,
+  canCreateRecordForContract,
 };

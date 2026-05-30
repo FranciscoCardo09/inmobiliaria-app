@@ -4,6 +4,26 @@ const { MONTH_NAMES } = require('../utils/constants');
 
 const prisma = require('../lib/prisma');
 
+/**
+ * Expand a contractId to its full renewal chain (current + all renewedFrom ancestors).
+ * Local helper to avoid a circular require with contractService.
+ */
+async function expandToChain(contractId) {
+  const chain = [];
+  let currentId = contractId;
+  const visited = new Set();
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    chain.push(currentId);
+    const c = await prisma.contract.findUnique({
+      where: { id: currentId },
+      select: { renewedFromContractId: true },
+    });
+    currentId = c?.renewedFromContractId || null;
+  }
+  return chain;
+}
+
 // Helper: parse a date string as local midnight (avoids UTC shift)
 const parseLocalDate = (dateStr) => {
   if (!dateStr) return new Date();
@@ -552,7 +572,11 @@ const getOpenDebts = async (groupId, contractId = null) => {
     groupId,
     status: { in: ['OPEN', 'PARTIAL'] },
   };
-  if (contractId) where.contractId = contractId;
+  if (contractId) {
+    // Incluir deudas de toda la cadena de renovación (contratos anteriores que fueron renovados)
+    const chain = await expandToChain(contractId);
+    where.contractId = { in: chain };
+  }
 
   const debts = await prisma.debt.findMany({
     where,
@@ -593,7 +617,10 @@ const getDebts = async (groupId, filters = {}) => {
   const where = { groupId };
 
   if (filters.status) where.status = filters.status;
-  if (filters.contractId) where.contractId = filters.contractId;
+  if (filters.contractId) {
+    const chain = await expandToChain(filters.contractId);
+    where.contractId = { in: chain };
+  }
 
   const debts = await prisma.debt.findMany({
     where,
@@ -656,10 +683,12 @@ const getDebtsSummary = async (groupId) => {
  * Verificar si un contrato puede pagar el mes actual (no tiene deudas abiertas).
  */
 const canPayCurrentMonth = async (groupId, contractId) => {
+  // Expandir a la cadena de renovación para incluir deudas de contratos anteriores
+  const chain = await expandToChain(contractId);
   const openDebts = await prisma.debt.findMany({
     where: {
       groupId,
-      contractId,
+      contractId: { in: chain },
       status: { in: ['OPEN', 'PARTIAL'] },
     },
     include: {

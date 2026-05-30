@@ -138,10 +138,16 @@ export const useContracts = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
+      // La renovación ahora crea un NUEVO Contract y deja el viejo como inactivo
+      // con renewedAt. Invalidamos también deudas, control mensual y resumen
+      // porque las queries que usan el contractId pueden cambiar.
       queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debts', 'open', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] })
       toast.success('Contrato renovado exitosamente')
     },
     onError: (error) => {
