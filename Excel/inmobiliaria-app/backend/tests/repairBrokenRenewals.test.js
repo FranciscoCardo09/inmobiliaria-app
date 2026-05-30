@@ -247,13 +247,22 @@ test('runRepair - infers startDate so original monthNumbers stay in range (yocsi
   assert.strictEqual(result.status, 'repaired');
 
   const oldContract = await prisma.contract.findUnique({ where: { id: result.oldContractId } });
-  // The inferred startDate must put monthNumber=22 at 2026-02:
-  //   (22 - 1) months back from Feb 2026 = May 2024.
-  assert.strictEqual(oldContract.startDate.getFullYear(), 2024);
-  assert.strictEqual(oldContract.startDate.getMonth(), 4, 'May (0-indexed)');
-  assert.strictEqual(oldContract.startMonth, 1);
-  // durationMonths must cover the highest observed monthNumber.
-  assert.strictEqual(oldContract.durationMonths, 24);
+  // TIGHT range: the inferred contract must cover EXACTLY monthNumbers 22..24,
+  // with no phantom months before 22 (which would otherwise be auto-created as
+  // fake debts when browsing Control Mensual).
+  assert.strictEqual(oldContract.startMonth, 22, 'startMonth = min observed monthNumber');
+  assert.strictEqual(oldContract.durationMonths, 3, 'duration = max - min + 1');
+  // startDate = first record's period, so getMonthNumber(Feb 2026) === 22.
+  assert.strictEqual(oldContract.startDate.getFullYear(), 2026);
+  assert.strictEqual(oldContract.startDate.getMonth(), 1, 'February (0-indexed)');
+
+  // Sanity: every moved record's monthNumber falls inside [22..24].
+  const endMonth = oldContract.startMonth + oldContract.durationMonths - 1;
+  const movedMRs = await prisma.monthlyRecord.findMany({ where: { contractId: oldContract.id } });
+  for (const mr of movedMRs) {
+    assert.ok(mr.monthNumber >= oldContract.startMonth && mr.monthNumber <= endMonth,
+      `mn ${mr.monthNumber} must be within [${oldContract.startMonth}..${endMonth}]`);
+  }
 });
 
 test('runRepair - dryRun reports without mutating', async () => {

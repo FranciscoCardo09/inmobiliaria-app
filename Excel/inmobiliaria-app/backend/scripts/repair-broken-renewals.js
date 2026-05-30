@@ -82,14 +82,17 @@ async function repairOne(prisma, { contract: c, outOfEpoch }) {
     return a.periodMonth - b.periodMonth;
   });
   const first = sorted[0];
-  // Infer the original contract's startDate so the existing MonthlyRecord
-  // monthNumbers stay coherent. If MR has monthNumber=N for period (Y,M),
-  // and we keep startMonth=1, then startDate must be (Y,M) - (N-1) months.
-  const startOffsetMonths = first.monthNumber - 1; // monthsToSubtractFromFirstPeriod
-  const oldStartDate = new Date(first.periodYear, first.periodMonth - 1 - startOffsetMonths, 1);
-  // Duration covers up to the highest observed monthNumber.
+  // Build a TIGHT range that covers exactly the observed monthNumbers, so no
+  // empty (phantom) months get auto-created when the user browses Control
+  // Mensual. We keep the original monthNumbers intact by setting:
+  //   startMonth = min observed monthNumber
+  //   startDate  = the first record's period (so getMonthNumber(firstPeriod) == startMonth)
+  //   durationMonths = max - min + 1
+  const minMonthNumber = first.monthNumber; // sorted chronologically → smallest mn
   const maxMonthNumber = Math.max(...sorted.map((mr) => mr.monthNumber));
-  const oldDurationMonths = maxMonthNumber; // startMonth=1, so duration = maxMN
+  const oldStartDate = new Date(first.periodYear, first.periodMonth - 1, 1);
+  const oldStartMonth = minMonthNumber;
+  const oldDurationMonths = maxMonthNumber - minMonthNumber + 1;
 
   // Approximate the renewal date as the current Contract's startDate.
   const renewedAt = new Date(c.startDate);
@@ -114,8 +117,8 @@ async function repairOne(prisma, { contract: c, outOfEpoch }) {
         tenantId: c.tenantId,
         contractType: c.contractType,
         startDate: oldStartDate,
-        startMonth: 1,
-        currentMonth: 1,
+        startMonth: oldStartMonth,
+        currentMonth: oldStartMonth,
         durationMonths: oldDurationMonths,
         baseRent: oldBaseRent,
         adjustmentIndexId: c.adjustmentIndexId,
