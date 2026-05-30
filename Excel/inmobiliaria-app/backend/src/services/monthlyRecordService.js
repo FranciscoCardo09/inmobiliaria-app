@@ -539,7 +539,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         });
         Object.assign(record, { rentAmount: penalty, servicesTotal: svcTotal, services: refreshed, totalDue: newTotalDue, balance: newBalance });
       }
-    } else if (record && !isPenaltyRecord) {
+    } else if (record && !isPenaltyRecord && contract.active) {
+      // Renewed/inactive contracts have frozen historical records: do not
+      // recalculate rent/IVA/balance from the current contract config — that
+      // would clobber legitimate historical values.
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 

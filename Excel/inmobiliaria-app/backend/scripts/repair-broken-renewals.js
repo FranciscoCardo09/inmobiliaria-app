@@ -82,12 +82,14 @@ async function repairOne(prisma, { contract: c, outOfEpoch }) {
     return a.periodMonth - b.periodMonth;
   });
   const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const oldStartDate = new Date(first.periodYear, first.periodMonth - 1, 1);
-  // Generous duration: from first to last period inclusive (some months may be missing
-  // because the user never visited them, but the range needs to cover them all).
-  const oldDurationMonths =
-    (last.periodYear - first.periodYear) * 12 + (last.periodMonth - first.periodMonth) + 1;
+  // Infer the original contract's startDate so the existing MonthlyRecord
+  // monthNumbers stay coherent. If MR has monthNumber=N for period (Y,M),
+  // and we keep startMonth=1, then startDate must be (Y,M) - (N-1) months.
+  const startOffsetMonths = first.monthNumber - 1; // monthsToSubtractFromFirstPeriod
+  const oldStartDate = new Date(first.periodYear, first.periodMonth - 1 - startOffsetMonths, 1);
+  // Duration covers up to the highest observed monthNumber.
+  const maxMonthNumber = Math.max(...sorted.map((mr) => mr.monthNumber));
+  const oldDurationMonths = maxMonthNumber; // startMonth=1, so duration = maxMN
 
   // Approximate the renewal date as the current Contract's startDate.
   const renewedAt = new Date(c.startDate);

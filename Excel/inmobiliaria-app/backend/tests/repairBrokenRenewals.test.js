@@ -198,6 +198,64 @@ test('runRepair - is idempotent (second run is a no-op)', async () => {
   assert.strictEqual(second.length, 0, 'no candidates left after a successful repair');
 });
 
+test('runRepair - infers startDate so original monthNumbers stay in range (yocsina-like)', async () => {
+  // Realistic scenario: the original contract was at month 22-24 of its
+  // duration when it was renewed. The buggy renewContract reset startDate to
+  // the new period and durationMonths to 24, leaving the historical MRs
+  // (monthNumber 22, 23, 24) outside the current Contract's [1..24] range.
+  // The repair must infer the original startDate so those monthNumbers fall
+  // BACK into a valid range, not just throw them into a 3-month bucket.
+  const prisma = makeFakePrisma();
+  await prisma.contract.create({
+    data: {
+      id: 'yocsina-like',
+      groupId: 'g1',
+      propertyId: 'p1',
+      tenantId: 't1',
+      contractType: 'INQUILINO',
+      startDate: new Date(2026, 4, 1), // May 2026 (post-renewal)
+      startMonth: 1,
+      currentMonth: 1,
+      durationMonths: 24,
+      baseRent: 900000,
+      active: true,
+      renewedAt: null,
+      renewedFromContractId: null,
+      punitoryStartDay: 4,
+      punitoryGraceDay: 10,
+      punitoryPercent: 0.02,
+      pagaIva: false,
+      comprobantes: [],
+    },
+  });
+  // 3 out-of-epoch MRs: monthNumber 22, 23, 24; periods Feb/Mar/Apr 2026.
+  for (let i = 0; i < 3; i++) {
+    await prisma.monthlyRecord.create({
+      data: {
+        groupId: 'g1', contractId: 'yocsina-like',
+        monthNumber: 22 + i, periodMonth: 2 + i, periodYear: 2026,
+        rentAmount: 901388, totalDue: 901388, amountPaid: 0,
+        balance: -901388, status: 'PENDING',
+      },
+    });
+  }
+  await prisma.contractTenant.create({
+    data: { contractId: 'yocsina-like', tenantId: 't1', isPrimary: true },
+  });
+
+  const [result] = await runRepair(prisma);
+  assert.strictEqual(result.status, 'repaired');
+
+  const oldContract = await prisma.contract.findUnique({ where: { id: result.oldContractId } });
+  // The inferred startDate must put monthNumber=22 at 2026-02:
+  //   (22 - 1) months back from Feb 2026 = May 2024.
+  assert.strictEqual(oldContract.startDate.getFullYear(), 2024);
+  assert.strictEqual(oldContract.startDate.getMonth(), 4, 'May (0-indexed)');
+  assert.strictEqual(oldContract.startMonth, 1);
+  // durationMonths must cover the highest observed monthNumber.
+  assert.strictEqual(oldContract.durationMonths, 24);
+});
+
 test('runRepair - dryRun reports without mutating', async () => {
   const prisma = makeFakePrisma();
   await seedBrokenContract(prisma);
