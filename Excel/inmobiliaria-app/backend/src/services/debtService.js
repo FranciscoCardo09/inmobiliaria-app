@@ -276,25 +276,38 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       const correctUnpaidServices = imputation.unpaidServices;
       const correctUnpaidRent = imputation.unpaidRent;
       const correctUnpaidPunitory = imputation.unpaidPunitory;
-      
+
+      // GUARD: this auto-recompute exists to CORRECT legacy/corrupt debts DOWNWARD.
+      // It must NEVER inflate a debt. If the recomputed total exceeds what the debt
+      // was created with, the source MonthlyRecord is almost certainly corrupt
+      // (e.g. a stale negative previousBalance carried from a month that was deleted
+      // by an earlier bug). In that case the stored debt values are more trustworthy,
+      // so we leave them untouched. Without this guard, opening a settled debt whose
+      // MonthlyRecord has a bad previousBalance reinflates it to a huge phantom amount.
+      const storedTotal = (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0) + (debt.accumulatedPunitory || 0);
+      const recomputedTotal = correctUnpaidRent + correctUnpaidServices + correctUnpaidPunitory;
+      const wouldInflate = recomputedTotal > storedTotal + 0.5; // tolerancia de redondeo
+
       const updateData = {};
-      if (correctUnpaidServices !== unpaidServicesAmount) {
-        unpaidServicesAmount = correctUnpaidServices;
-        updateData.unpaidServicesAmount = correctUnpaidServices;
+      if (!wouldInflate) {
+        if (correctUnpaidServices !== unpaidServicesAmount) {
+          unpaidServicesAmount = correctUnpaidServices;
+          updateData.unpaidServicesAmount = correctUnpaidServices;
+        }
+        if (correctUnpaidRent !== unpaidRentAmount) {
+          unpaidRentAmount = correctUnpaidRent;
+          updateData.unpaidRentAmount = correctUnpaidRent;
+        }
+        if (correctUnpaidPunitory !== accumulatedPunitory) {
+          accumulatedPunitory = correctUnpaidPunitory;
+          updateData.accumulatedPunitory = correctUnpaidPunitory;
+        }
       }
-      if (correctUnpaidRent !== unpaidRentAmount) {
-        unpaidRentAmount = correctUnpaidRent;
-        updateData.unpaidRentAmount = correctUnpaidRent;
-      }
-      if (correctUnpaidPunitory !== accumulatedPunitory) {
-        accumulatedPunitory = correctUnpaidPunitory;
-        updateData.accumulatedPunitory = correctUnpaidPunitory;
-      }
-      
+
       if (Object.keys(updateData).length > 0) {
         // Enforce setting currentTotal correctly
         updateData.currentTotal = correctUnpaidRent + correctUnpaidServices + correctUnpaidPunitory;
-        
+
         // If everything is paid, we could close the debt, but we just set values.
         // The display will show $0.
         if (!skipUpdate) {
