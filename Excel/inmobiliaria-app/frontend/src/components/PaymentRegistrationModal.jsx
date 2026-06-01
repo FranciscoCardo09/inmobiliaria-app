@@ -76,10 +76,11 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
 
   const { registerPayment, isRegistering } = usePaymentTransactions(groupId)
 
-  // Check if contract is blocked by debts
+  // Check if this specific period can be paid (chronological order)
   const { data: debtCheck, isLoading: isCheckingDebt } = useCanPayCurrentMonth(
     groupId,
-    record?.contract?.id
+    record?.contract?.id,
+    { periodMonth: record?.periodMonth, periodYear: record?.periodYear }
   )
   const isBlocked = debtCheck && !debtCheck.canPay
 
@@ -296,42 +297,46 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
           </div>
         )}
 
-        {isBlocked && (
+        {isBlocked && (() => {
+          const blocker = debtCheck.blockingPeriod || debtCheck.debts?.[0]
+          return (
           <div className="bg-error/10 border-2 border-error/30 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-3">
               <NoSymbolIcon className="w-6 h-6 text-error" />
               <span className="font-bold text-error text-lg">BLOQUEADO</span>
             </div>
             <p className="text-sm mb-3">
-              {record?.tenant?.name} tiene {debtCheck.debts.length} deuda(s) abierta(s):
+              Primero debe pagar <span className="font-semibold">{blocker?.periodLabel}</span> (el período impago más antiguo) antes de {record?.periodLabel}.
             </p>
-            <div className="space-y-2 mb-4">
-              {debtCheck.debts.map((d) => (
-                <div key={d.id} className="flex justify-between bg-base-100 p-2 rounded text-sm">
-                  <span className="font-medium">{d.periodLabel}</span>
-                  <span className="font-mono text-error">{formatCurrency(d.total)}</span>
-                </div>
-              ))}
-            </div>
+            {debtCheck.debts?.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {debtCheck.debts.map((d) => (
+                  <div key={d.id} className="flex justify-between bg-base-100 p-2 rounded text-sm">
+                    <span className="font-medium">{d.periodLabel}</span>
+                    <span className="font-mono text-error">{formatCurrency(d.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <Button
               variant="error"
               size="sm"
               className="w-full"
               onClick={() => {
                 onClose()
-                const oldest = debtCheck.debts[0]
-                if (oldest?.periodMonth && oldest?.periodYear) {
-                  navigate(`/monthly-control?month=${oldest.periodMonth}&year=${oldest.periodYear}`)
+                if (blocker?.periodMonth && blocker?.periodYear) {
+                  navigate(`/monthly-control?month=${blocker.periodMonth}&year=${blocker.periodYear}`)
                 } else {
                   navigate('/monthly-control')
                 }
               }}
             >
               <ExclamationTriangleIcon className="w-4 h-4" />
-              Pagar deudas primero
+              Ir a pagar {blocker?.periodLabel || 'el período anterior'}
             </Button>
           </div>
-        )}
+          )
+        })()}
 
         {/* Breakdown + Form (hidden if blocked) */}
         {!isBlocked && <>

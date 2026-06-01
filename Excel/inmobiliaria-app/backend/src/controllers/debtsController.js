@@ -117,19 +117,24 @@ const payDebtHandler = async (req, res, next) => {
 
     return ApiResponse.success(res, result, 'Pago de deuda registrado');
   } catch (error) {
-    if (error.message === 'Esta deuda ya está pagada') {
+    if (error.message === 'Esta deuda ya está pagada' || error.code === 'ORDER_BLOCK') {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
   }
 };
 
-// GET /api/groups/:groupId/contracts/:contractId/can-pay-current-month
+// GET /api/groups/:groupId/contracts/:contractId/can-pay-current-month?periodMonth=&periodYear=
 const checkCanPayCurrentMonth = async (req, res, next) => {
   try {
     const { groupId, contractId } = req.params;
+    const { periodMonth, periodYear } = req.query;
 
-    const result = await canPayCurrentMonth(groupId, contractId);
+    const targetPeriod = (periodMonth && periodYear)
+      ? { periodMonth: parseInt(periodMonth, 10), periodYear: parseInt(periodYear, 10) }
+      : null;
+
+    const result = await canPayCurrentMonth(groupId, contractId, targetPeriod);
     return ApiResponse.success(res, result);
   } catch (error) {
     next(error);

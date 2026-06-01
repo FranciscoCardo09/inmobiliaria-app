@@ -115,12 +115,19 @@ export const useDebt = (groupId, debtId) => {
   })
 }
 
-export const useCanPayCurrentMonth = (groupId, contractId) => {
+export const useCanPayCurrentMonth = (groupId, contractId, period = {}) => {
+  const { periodMonth, periodYear } = period || {}
   return useQuery({
-    queryKey: ['canPayCurrentMonth', groupId, contractId],
+    queryKey: ['canPayCurrentMonth', groupId, contractId, periodMonth, periodYear],
     queryFn: async () => {
+      const params = new URLSearchParams()
+      if (periodMonth != null && periodYear != null) {
+        params.append('periodMonth', periodMonth)
+        params.append('periodYear', periodYear)
+      }
+      const qs = params.toString()
       const response = await api.get(
-        `/groups/${groupId}/contracts/${contractId}/can-pay-current-month`
+        `/groups/${groupId}/contracts/${contractId}/can-pay-current-month${qs ? `?${qs}` : ''}`
       )
       return response.data.data
     },

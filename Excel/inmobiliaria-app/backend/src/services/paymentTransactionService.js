@@ -48,8 +48,13 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
 
   const contract = record.contract;
 
-  // BLOQUEO: Verificar si el contrato tiene deudas abiertas
-  const debtCheck = await canPayCurrentMonth(groupId, contract.id);
+  // BLOQUEO: Verificar orden cronológico. Solo se puede pagar el período impago
+  // más antiguo de la cadena (deudas + meses pendientes). Pasamos el período de
+  // ESTE record para que, si es el más viejo, se permita; si hay algo anterior, se bloquee.
+  const debtCheck = await canPayCurrentMonth(groupId, contract.id, {
+    periodMonth: record.periodMonth,
+    periodYear: record.periodYear,
+  });
   if (!debtCheck.canPay) {
     const error = new Error(debtCheck.message);
     error.code = 'DEBT_BLOCK';

@@ -1,5 +1,6 @@
 // Debt Payment Modal - Pay open debts
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import {
@@ -7,9 +8,10 @@ import {
   ExclamationTriangleIcon,
   ClockIcon,
   TrashIcon,
+  NoSymbolIcon,
 } from '@heroicons/react/24/outline'
 import DateInput, { getLocalToday } from './ui/DateInput'
-import { useDebtPunitoryPreview, useDebts, useDebt } from '../hooks/useDebts'
+import { useDebtPunitoryPreview, useDebts, useDebt, useCanPayCurrentMonth } from '../hooks/useDebts'
 import toast from 'react-hot-toast'
 
 const formatCurrency = (amount) => {
@@ -35,6 +37,7 @@ const formatDateLocal = (dateStr) => {
 
 export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPaying, onClose }) {
   const today = getLocalToday()
+  const navigate = useNavigate()
 
   const [paymentDate, setPaymentDate] = useState(today)
   const [amount, setAmount] = useState('')
@@ -46,6 +49,15 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   // Fetch fresh debt data from the server (auto-updates after payments)
   const { data: freshDebt } = useDebt(groupId, debtProp?.id)
   const debt = freshDebt || debtProp
+
+  // Chronological order: only the oldest unpaid period of the chain can be paid
+  const { data: orderCheck } = useCanPayCurrentMonth(
+    groupId,
+    debt?.contractId || debt?.contract?.id,
+    { periodMonth: debt?.periodMonth, periodYear: debt?.periodYear }
+  )
+  const isBlocked = orderCheck && !orderCheck.canPay
+  const blocker = orderCheck?.blockingPeriod
 
   // Recalculate punitorios when date changes
   const { data: preview } = useDebtPunitoryPreview(groupId, debt?.id, paymentDate)
@@ -127,7 +139,37 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
           </div>
         </div>
 
-        {/* Breakdown */}
+        {/* ORDER BLOCK */}
+        {isBlocked && (
+          <div className="bg-error/10 border-2 border-error/30 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <NoSymbolIcon className="w-6 h-6 text-error" />
+              <span className="font-bold text-error text-lg">BLOQUEADO</span>
+            </div>
+            <p className="text-sm mb-3">
+              Primero debe pagar <span className="font-semibold">{blocker?.periodLabel}</span> (el período impago más antiguo) antes de {debt?.periodLabel}.
+            </p>
+            <Button
+              variant="error"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                onClose()
+                if (blocker?.periodMonth && blocker?.periodYear) {
+                  navigate(`/monthly-control?month=${blocker.periodMonth}&year=${blocker.periodYear}`)
+                } else {
+                  navigate('/monthly-control')
+                }
+              }}
+            >
+              <ExclamationTriangleIcon className="w-4 h-4" />
+              Ir a pagar {blocker?.periodLabel || 'el período anterior'}
+            </Button>
+          </div>
+        )}
+
+        {/* Breakdown + Form (hidden if blocked) */}
+        {!isBlocked && <>
         <div className="bg-base-100 border border-base-300 rounded-lg p-4">
           <h3 className="font-semibold text-sm mb-3">Desglose</h3>
           <div className="space-y-1 text-sm">
@@ -298,12 +340,14 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
             placeholder="Notas sobre el pago de deuda..."
           />
         </div>
+        </>}
       </div>
 
       <div className="modal-action">
         <Button variant="ghost" size="sm" onClick={onClose}>
-          Cancelar
+          {isBlocked ? 'Cerrar' : 'Cancelar'}
         </Button>
+        {!isBlocked && (
         <Button
           variant="primary"
           size="sm"
@@ -314,6 +358,7 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
           <CurrencyDollarIcon className="w-4 h-4" />
           Pagar Deuda
         </Button>
+        )}
       </div>
     </Modal>
   )

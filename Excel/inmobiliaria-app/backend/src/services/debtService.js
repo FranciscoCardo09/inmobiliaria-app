@@ -456,6 +456,22 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   if (!debt) throw new Error('Deuda no encontrada');
   if (debt.status === 'PAID') throw new Error('Esta deuda ya está pagada');
 
+  // ORDEN CRONOLÓGICO: solo se puede pagar el período impago más antiguo de la cadena
+  // (mirando deudas abiertas + meses pendientes sin cerrar). Si esta deuda no es la
+  // más antigua, bloquear y señalar qué debe pagarse primero.
+  const unpaidPeriods = await getUnpaidPeriods(debt.groupId, debt.contractId);
+  if (unpaidPeriods.length > 0) {
+    const oldest = unpaidPeriods[0];
+    const thisKey = debt.periodYear * 12 + debt.periodMonth;
+    const oldestKey = oldest.periodYear * 12 + oldest.periodMonth;
+    if (thisKey > oldestKey) {
+      const error = new Error(`Debe pagar primero ${oldest.periodLabel} antes de ${debt.periodLabel || 'esta deuda'}.`);
+      error.code = 'ORDER_BLOCK';
+      error.blockingPeriod = oldest;
+      throw error;
+    }
+  }
+
   // Calcular punitorios al momento del pago
   const { amount: punitoryAmount, days, remainingDebt: remainingBase } = await calculateDebtPunitory(debt, paymentDate);
 
@@ -693,51 +709,147 @@ const getDebtsSummary = async (groupId) => {
 };
 
 /**
- * Verificar si un contrato puede pagar el mes actual (no tiene deudas abiertas).
+ * Construir la lista de períodos impagos de toda la cadena de renovación de un
+ * contrato, ordenada cronológicamente ascendente (más viejo primero).
+ *
+ * Combina DOS fuentes que de otro modo se evalúan por separado:
+ *   1. Deudas (meses ya cerrados) con status OPEN/PARTIAL.
+ *   2. MonthlyRecords pendientes/parciales todavía NO cerrados, excluyendo los
+ *      que ya tienen una Debt asociada (representados por su deuda, no se cuentan doble).
+ *
+ * Esto permite forzar el pago en orden cronológico estricto sin importar si un
+ * período es una deuda formal o un mes pendiente sin cerrar.
+ * Devuelve: [{ type: 'DEBT'|'RECORD', id, monthlyRecordId, periodMonth, periodYear, periodLabel }]
  */
-const canPayCurrentMonth = async (groupId, contractId) => {
-  // Expandir a la cadena de renovación para incluir deudas de contratos anteriores
+const getUnpaidPeriods = async (groupId, contractId) => {
   const chain = await expandToChain(contractId);
+
+  // Deudas abiertas de la cadena
   const openDebts = await prisma.debt.findMany({
     where: {
       groupId,
       contractId: { in: chain },
       status: { in: ['OPEN', 'PARTIAL'] },
     },
-    include: {
-      contract: {
-        include: {
-          tenant: { select: { id: true, name: true } },
-          property: { select: { id: true, address: true } },
-        },
-      },
+    select: {
+      id: true, monthlyRecordId: true, periodMonth: true, periodYear: true,
+      periodLabel: true, contractId: true,
     },
     orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
   });
 
-  if (openDebts.length === 0) {
-    return { canPay: true, debts: [] };
+  // monthlyRecordIds que ya tienen una deuda (cualquier estado) → excluir de records
+  const allDebts = await prisma.debt.findMany({
+    where: { groupId, contractId: { in: chain } },
+    select: { monthlyRecordId: true },
+  });
+  const recordIdsWithDebt = new Set(allDebts.map((d) => d.monthlyRecordId));
+
+  // MonthlyRecords pendientes/parciales no cancelados de la cadena
+  const unpaidRecords = await prisma.monthlyRecord.findMany({
+    where: {
+      groupId,
+      contractId: { in: chain },
+      status: { in: ['PENDING', 'PARTIAL'] },
+      isCancelled: false,
+    },
+    select: {
+      id: true, periodMonth: true, periodYear: true, contractId: true,
+    },
+  });
+
+  const periods = [];
+  for (const d of openDebts) {
+    periods.push({
+      type: 'DEBT',
+      id: d.id,
+      monthlyRecordId: d.monthlyRecordId,
+      periodMonth: d.periodMonth,
+      periodYear: d.periodYear,
+      periodLabel: d.periodLabel,
+    });
+  }
+  for (const r of unpaidRecords) {
+    if (recordIdsWithDebt.has(r.id)) continue; // representado por su deuda
+    periods.push({
+      type: 'RECORD',
+      id: r.id,
+      monthlyRecordId: r.id,
+      periodMonth: r.periodMonth,
+      periodYear: r.periodYear,
+      periodLabel: `${MONTH_NAMES[r.periodMonth]} ${r.periodYear}`,
+    });
   }
 
-  // Batch-load dependencies and recalculate punitorios
-  const preloaded = await preloadDebtDependencies(openDebts);
-  const debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
-    const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(), preloaded, true);
-    return {
-      id: debt.id,
-      periodLabel: debt.periodLabel,
-      periodMonth: debt.periodMonth,
-      periodYear: debt.periodYear,
-      remainingDebt,
-      punitory: currentPunitory,
-      total: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
-    };
-  }));
+  periods.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+  return periods;
+};
+
+// Clave numérica comparable de un período (año*12 + mes)
+const periodKey = (p) => (p.periodYear * 12 + p.periodMonth);
+
+/**
+ * Verificar si un período puede pagarse respetando el orden cronológico.
+ *
+ * Regla: solo el período impago MÁS ANTIGUO de la cadena (mirando deudas + meses
+ * pendientes) puede pagarse. Debe quedar 100% saldado antes de habilitar el siguiente.
+ *
+ * @param {object|null} targetPeriod - { periodMonth, periodYear } del período que se
+ *   intenta pagar. Si es null (llamada legacy a nivel contrato), se bloquea si hay
+ *   cualquier deuda abierta (comportamiento histórico).
+ */
+const canPayCurrentMonth = async (groupId, contractId, targetPeriod = null) => {
+  const periods = await getUnpaidPeriods(groupId, contractId);
+
+  if (periods.length === 0) {
+    return { canPay: true, debts: [], blockingPeriod: null, oldestUnpaid: null };
+  }
+
+  const oldest = periods[0];
+  const openDebtPeriods = periods.filter((p) => p.type === 'DEBT');
+
+  // Enriquecer las deudas abiertas con punitorios en vivo (para la UI). Compatible
+  // con el shape previo: { id, periodLabel, periodMonth, periodYear, total, ... }
+  let debtsWithPunitory = [];
+  if (openDebtPeriods.length > 0) {
+    const openDebts = await prisma.debt.findMany({
+      where: { id: { in: openDebtPeriods.map((p) => p.id) } },
+    });
+    const preloaded = await preloadDebtDependencies(openDebts);
+    debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
+      const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(), preloaded, true);
+      return {
+        id: debt.id,
+        periodLabel: debt.periodLabel,
+        periodMonth: debt.periodMonth,
+        periodYear: debt.periodYear,
+        remainingDebt,
+        punitory: currentPunitory,
+        total: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
+      };
+    }));
+    // Mismo orden cronológico que las deudas
+    debtsWithPunitory.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+  }
+
+  let canPay;
+  if (targetPeriod && targetPeriod.periodMonth != null && targetPeriod.periodYear != null) {
+    canPay = periodKey(targetPeriod) <= periodKey(oldest);
+  } else {
+    // Legacy: a nivel contrato, bloquear si hay alguna deuda abierta
+    canPay = openDebtPeriods.length === 0;
+  }
+
+  if (canPay) {
+    return { canPay: true, debts: debtsWithPunitory, blockingPeriod: null, oldestUnpaid: oldest };
+  }
 
   return {
     canPay: false,
     debts: debtsWithPunitory,
-    message: `${openDebts[0].contract?.tenant?.name || 'Inquilino'} tiene ${openDebts.length} deuda(s) abierta(s). Pagar deudas anteriores primero.`,
+    blockingPeriod: oldest,
+    oldestUnpaid: oldest,
+    message: `Debe pagar primero ${oldest.periodLabel} (el período impago más antiguo) antes de continuar.`,
   };
 };
 
@@ -997,4 +1109,5 @@ module.exports = {
   getDebts,
   getDebtsSummary,
   canPayCurrentMonth,
+  getUnpaidPeriods,
 };
