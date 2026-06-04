@@ -61,6 +61,75 @@ function canCreateRecordForContract(contract) {
 }
 
 /**
+ * Repara los monthNumber de los MonthlyRecord de un contrato para que sean
+ * consistentes con (startDate, startMonth, durationMonths) actuales.
+ *
+ * Motivo: al editar la fecha de inicio / duración de un contrato, los records
+ * existentes conservaban su monthNumber viejo y quedaban fuera del rango nuevo
+ * ("meses fantasma"). El filtro recordInRange los ignora silenciosamente, lo
+ * que escondía pagos reales (Problema A) o dejaba meses con deuda inflada de
+ * contratos vencidos (Problema B).
+ *
+ * Reglas:
+ *  - Recalcula el monthNumber de cada record desde su período calendario.
+ *  - Record dentro de rango con monthNumber distinto => se corrige.
+ *  - Record fuera de rango SIN plata (sin pagos, sin deuda, sin transacciones)
+ *    => se borra (mes fantasma). Los MonthlyService se borran por cascade.
+ *  - Record fuera de rango CON plata => se PRESERVA y se reporta para
+ *    reconciliación manual (nunca se mueve dinero automáticamente).
+ *
+ * @returns {Promise<{updated:number, deleted:number, paidOrphans:Array}>}
+ */
+async function repairContractRecordMonthNumbers(contract, { deletePhantoms = true, client = prisma } = {}) {
+  const endMonth = contract.startMonth + contract.durationMonths - 1;
+  const records = await client.monthlyRecord.findMany({
+    where: { contractId: contract.id },
+    select: {
+      id: true, periodMonth: true, periodYear: true, monthNumber: true, amountPaid: true,
+      debt: { select: { id: true } },
+      _count: { select: { transactions: true } },
+    },
+  });
+
+  const result = { updated: 0, deleted: 0, paidOrphans: [] };
+  const toUpdate = []; // { id, target }
+
+  for (const r of records) {
+    const target = getMonthNumber(contract, r.periodMonth, r.periodYear);
+    const inRange = target >= contract.startMonth && target <= endMonth;
+    const hasMoney = (r.amountPaid || 0) > 0 || !!r.debt || (r._count?.transactions || 0) > 0;
+
+    if (inRange) {
+      if (r.monthNumber !== target) toUpdate.push({ id: r.id, target });
+    } else if (hasMoney) {
+      result.paidOrphans.push({
+        id: r.id, periodMonth: r.periodMonth, periodYear: r.periodYear,
+        monthNumber: r.monthNumber, amountPaid: r.amountPaid || 0,
+      });
+    } else if (deletePhantoms) {
+      await client.monthlyRecord.delete({ where: { id: r.id } });
+      result.deleted++;
+    }
+  }
+
+  // Aplicar correcciones en dos fases para no chocar con @@unique([contractId, monthNumber])
+  if (toUpdate.length > 0) {
+    const apply = async (tx) => {
+      for (let i = 0; i < toUpdate.length; i++) {
+        await tx.monthlyRecord.update({ where: { id: toUpdate[i].id }, data: { monthNumber: -(i + 1) } });
+      }
+      for (const u of toUpdate) {
+        await tx.monthlyRecord.update({ where: { id: u.id }, data: { monthNumber: u.target } });
+      }
+    };
+    if (client === prisma) await prisma.$transaction(apply); else await apply(client);
+    result.updated = toUpdate.length;
+  }
+
+  return result;
+}
+
+/**
  * Returns the calendar {penaltyMonth, penaltyYear} for the penalty month of a rescinded contract
  * (the calendar month immediately following the rescission month)
  */
@@ -1234,4 +1303,5 @@ module.exports = {
   calculateRentForMonth,
   isContractInRangeForMonth,
   canCreateRecordForContract,
+  repairContractRecordMonthNumbers,
 };

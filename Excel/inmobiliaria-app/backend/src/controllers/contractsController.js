@@ -10,6 +10,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { parseLocalDate } = require('../utils/dateUtils');
 const contractService = require('../services/contractService');
 const enrichContract = contractService.enrichContract;
+const { repairContractRecordMonthNumbers } = require('../services/monthlyRecordService');
 
 // GET /api/groups/:groupId/contracts
 const getContracts = async (req, res, next) => {
@@ -474,11 +475,29 @@ const updateContract = async (req, res, next) => {
       }
     }
 
+    // Si cambió el cronograma (fecha de inicio / duración / mes actual), reparar los
+    // monthNumber de los records existentes para que sigan dentro del rango nuevo.
+    // Esto evita los "meses fantasma" (Problema A/B): corrige numeraciones desfasadas,
+    // borra meses fuera de rango sin plata y preserva los que tienen pagos (avisando).
+    let repairWarning = null;
+    if (startDate || durationMonths || currentMonth) {
+      const repair = await repairContractRecordMonthNumbers(updated, { deletePhantoms: true });
+      if (repair.paidOrphans.length > 0) {
+        repairWarning = {
+          code: 'PAID_RECORDS_OUT_OF_RANGE',
+          message: `Quedaron ${repair.paidOrphans.length} mes(es) con pagos fuera del rango del contrato tras editar la fecha/duración. Revisalos para reconciliarlos (no se movió dinero automáticamente).`,
+          records: repair.paidOrphans,
+        };
+      }
+    }
+
     const tenants = updated.contractTenants.length > 0
       ? updated.contractTenants.map((ct) => ct.tenant)
       : updated.tenant ? [updated.tenant] : [];
 
-    return ApiResponse.success(res, { ...enrichContract(updated), tenants }, 'Contrato actualizado');
+    const payload = { ...enrichContract(updated), tenants };
+    if (repairWarning) payload.warning = repairWarning;
+    return ApiResponse.success(res, payload, 'Contrato actualizado');
   } catch (error) {
     next(error);
   }
