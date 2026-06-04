@@ -126,6 +126,13 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
             rentAmount: contract.baseRent,
             totalDue: contract.baseRent,
             balance: -contract.baseRent,
+            // Inicializar estado de comprobantes desde el contrato, igual que
+            // getOrCreateMonthlyRecords. Sin esto, los meses creados al asignar
+            // servicios (propagateServiceForward) quedaban con comprobantesStatus=[]
+            // y la casilla de comprobante no aparecía en el control mensual.
+            comprobantesStatus: Array.isArray(contract.comprobantes)
+              ? contract.comprobantes.map(c => ({ ...c, presented: false }))
+              : [],
           },
         });
       }
