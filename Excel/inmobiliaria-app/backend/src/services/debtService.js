@@ -713,12 +713,16 @@ const getDebtsSummary = async (groupId) => {
  * contrato, ordenada cronológicamente ascendente (más viejo primero).
  *
  * Combina DOS fuentes que de otro modo se evalúan por separado:
- *   1. Deudas (meses ya cerrados) con status OPEN/PARTIAL.
- *   2. MonthlyRecords pendientes/parciales todavía NO cerrados, excluyendo los
- *      que ya tienen una Debt asociada (representados por su deuda, no se cuentan doble).
+ *   1. Deudas (meses ya cerrados) con status OPEN/PARTIAL → siempre son obligaciones confirmadas.
+ *   2. MonthlyRecords que el inquilino EMPEZÓ a pagar (status PARTIAL y amountPaid > 0),
+ *      todavía NO cerrados, en rango del contrato y sin Debt asociada.
  *
- * Esto permite forzar el pago en orden cronológico estricto sin importar si un
- * período es una deuda formal o un mes pendiente sin cerrar.
+ * IMPORTANTE: NO se cuentan los MonthlyRecord PENDING nunca tocados (amountPaid = 0).
+ * El control mensual autogenera registros PENDING para casi todos los meses (incluso
+ * futuros y anteriores al inicio real), que NO son obligaciones reales. Tomarlos como
+ * período impago bloqueaba el pago del mes actual por meses fantasma (regresión).
+ * También se descartan los registros fuera de rango (monthNumber inválido / corrupto).
+ *
  * Devuelve: [{ type: 'DEBT'|'RECORD', id, monthlyRecordId, periodMonth, periodYear, periodLabel }]
  */
 const getUnpaidPeriods = async (groupId, contractId) => {
@@ -745,16 +749,42 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   });
   const recordIdsWithDebt = new Set(allDebts.map((d) => d.monthlyRecordId));
 
-  // MonthlyRecords pendientes/parciales no cancelados de la cadena
+  // Datos de contratos de la cadena para validar rango (evita registros corruptos/fuera de rango)
+  const chainContracts = await prisma.contract.findMany({
+    where: { id: { in: chain } },
+    select: { id: true, startMonth: true, durationMonths: true, rescindedAt: true, startDate: true },
+  });
+  const contractMap = new Map(chainContracts.map((c) => [c.id, c]));
+
+  // ¿el monthNumber de un record cae dentro del rango real del contrato?
+  // (replica isContractInRangeForMonth de monthlyRecordService para evitar require circular)
+  const recordInRange = (record) => {
+    const c = contractMap.get(record.contractId);
+    if (!c) return false;
+    if (record.monthNumber == null) return true; // sin dato → no descartar
+    const endMonth = c.startMonth + c.durationMonths - 1;
+    if (record.monthNumber < c.startMonth || record.monthNumber > endMonth) return false;
+    if (c.rescindedAt) {
+      const r = new Date(c.rescindedAt);
+      // mes calendario del record vs mes de rescisión
+      const recKey = record.periodYear * 12 + record.periodMonth;
+      const rescKey = r.getFullYear() * 12 + (r.getMonth() + 1);
+      if (recKey > rescKey) return false;
+    }
+    return true;
+  };
+
+  // SOLO meses con pago parcial iniciado (obligación real en curso), no cerrados.
   const unpaidRecords = await prisma.monthlyRecord.findMany({
     where: {
       groupId,
       contractId: { in: chain },
-      status: { in: ['PENDING', 'PARTIAL'] },
+      status: 'PARTIAL',
+      amountPaid: { gt: 0 },
       isCancelled: false,
     },
     select: {
-      id: true, periodMonth: true, periodYear: true, contractId: true,
+      id: true, periodMonth: true, periodYear: true, contractId: true, monthNumber: true,
     },
   });
 
@@ -771,6 +801,7 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   }
   for (const r of unpaidRecords) {
     if (recordIdsWithDebt.has(r.id)) continue; // representado por su deuda
+    if (!recordInRange(r)) continue; // fuera de rango / corrupto → ignorar
     periods.push({
       type: 'RECORD',
       id: r.id,
