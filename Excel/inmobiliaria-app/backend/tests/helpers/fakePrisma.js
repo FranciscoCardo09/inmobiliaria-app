@@ -79,6 +79,8 @@ function applySelect(rows, select) {
     const out = {};
     for (const [k, v] of Object.entries(select)) {
       if (v === true) out[k] = row[k];
+      // nested relation select/include: pass the stored value through as-is
+      else if (v && typeof v === 'object') out[k] = row[k];
     }
     return out;
   });

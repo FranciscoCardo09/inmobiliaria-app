@@ -21,6 +21,8 @@ const addService = async (monthlyRecordId, conceptTypeId, amount, description = 
 
   // Recalculate the monthly record totals
   await recalculateMonthlyRecord(monthlyRecordId);
+  // Si el mes ya generó deuda, propagar el servicio a la deuda (sumarlo + recalcular punitorios)
+  await require('./debtService').syncDebtServicesFromRecord(monthlyRecordId);
   return service;
 };
 
@@ -40,6 +42,7 @@ const updateService = async (monthlyServiceId, amount, description) => {
   });
 
   await recalculateMonthlyRecord(service.monthlyRecordId);
+  await require('./debtService').syncDebtServicesFromRecord(service.monthlyRecordId);
   return service;
 };
 
@@ -55,6 +58,7 @@ const removeService = async (monthlyServiceId) => {
 
   await prisma.monthlyService.delete({ where: { id: monthlyServiceId } });
   await recalculateMonthlyRecord(service.monthlyRecordId);
+  await require('./debtService').syncDebtServicesFromRecord(service.monthlyRecordId);
   return service;
 };
 

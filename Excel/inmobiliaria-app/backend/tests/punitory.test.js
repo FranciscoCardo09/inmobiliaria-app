@@ -4,8 +4,8 @@
  * Covers:
  *  1. calculateImputation — distribución de pagos en orden servicios→IVA→alquiler→punitorios
  *  2. calculateDebtPunitory — regla de base:
- *       - Sin pagos: punitorios sobre alquiler
- *       - Con pagos: punitorios sobre saldo restante total (servicios+alquiler-pagado)
+ *       - Punitorios sobre el saldo restante total = alquiler + servicios - pagado
+ *         (regla confirmada con el usuario: la multa incluye TODOS los servicios)
  *       - Base totalmente pagada: solo punitorios acumulados
  *  3. calculatePunitoryV2 — verificación de la fórmula base × % × días
  *
@@ -234,13 +234,13 @@ describe('calculateDebtPunitory — regla de base para punitorios', () => {
     assert.equal(r.remainingDebt, 100000);
   });
 
-  test('CASO 1b: sin pagos, tiene servicios — base = solo alquiler (no servicios)', async () => {
-    // Total = 100k alquiler + 200k servicios = 300k, pero base punitorios = 100k
+  test('CASO 1b: sin pagos, tiene servicios — base = alquiler + servicios', async () => {
+    // Total = 100k alquiler + 200k servicios = 300k. Punitorios sobre TODO (regla confirmada).
     const debt = makeDebt({ unpaidRentAmount: 100000, unpaidServicesAmount: 200000, amountPaid: 0 });
     const preloaded = fakePreloaded(debt.contractId, RATE);
     const r = await calculateDebtPunitory(debt, PAYMENT_DATE, preloaded);
 
-    const expectedPunitory = round(100000 * RATE * DAYS); // solo alquiler
+    const expectedPunitory = round(300000 * RATE * DAYS); // alquiler + servicios
     assert.equal(r.amount, expectedPunitory);
     assert.equal(r.remainingDebt, 300000); // servicios + alquiler completo
     assert.equal(r.remainingServices, 200000);
@@ -328,7 +328,7 @@ describe('calculateDebtPunitory — regla de base para punitorios', () => {
 
   test('CASO 5: ejemplo del usuario — $565k alquiler + $4.9k servicios, sin pagos', async () => {
     // Ejemplo real del usuario: alquiler $565354, servicios $4955
-    // Sin pagos → base punitorios = alquiler = 565354
+    // Sin pagos → base punitorios = alquiler + servicios (regla confirmada con el usuario)
     const ALQUILER = 565354;
     const SERVICIOS = 4955;
     const debt = makeDebt({
@@ -339,8 +339,8 @@ describe('calculateDebtPunitory — regla de base para punitorios', () => {
     const preloaded = fakePreloaded(debt.contractId, RATE);
     const r = await calculateDebtPunitory(debt, PAYMENT_DATE, preloaded);
 
-    const expectedPunitory = round(ALQUILER * RATE * DAYS);
-    assert.equal(r.amount, expectedPunitory, 'punitorios solo sobre alquiler');
+    const expectedPunitory = round((ALQUILER + SERVICIOS) * RATE * DAYS);
+    assert.equal(r.amount, expectedPunitory, 'punitorios sobre alquiler + servicios');
     assert.equal(r.remainingDebt, ALQUILER + SERVICIOS, 'deuda base = alquiler + servicios');
     assert.equal(r.days, DAYS);
   });

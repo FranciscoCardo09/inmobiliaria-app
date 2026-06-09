@@ -319,12 +319,12 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
   const totalBase = round2(unpaidRentAmount + unpaidServicesAmount);
   const remainingBase = round2(Math.max(totalBase - debt.amountPaid, 0));
 
-  // Regla de base para punitorios:
-  // - Sin pagos: solo sobre alquiler
-  // - Con pagos: sobre el saldo restante total (lo que falta pagar)
-  const punitoryBase = debt.amountPaid <= 0
-    ? round2(unpaidRentAmount)
-    : remainingBase;
+  // Regla de base para punitorios (confirmada con el usuario):
+  // los punitorios se calculan sobre TODO lo que falta pagar = alquiler + servicios
+  // (los servicios incluyen IVA y ya vienen netos de descuentos), menos lo pagado.
+  // unpaidServicesAmount = "Servicios + IVA impagos" (ver createDebtFromMonthlyRecord),
+  // por eso remainingBase ya contempla servicios e IVA.
+  const punitoryBase = remainingBase;
 
   // Para display: cuánto queda de servicios vs alquiler (imputación servicios → alquiler)
   const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);
@@ -1127,9 +1127,82 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   return updatedDebt;
 };
 
+/**
+ * Sincronizar los servicios impagos de la deuda asociada a un MonthlyRecord.
+ *
+ * Se llama cuando se agrega / edita / quita un servicio en un mes que YA generó
+ * deuda. Antes, agregar un servicio actualizaba el mes pero NO la deuda: el servicio
+ * no se sumaba a la deuda ni se le calculaban punitorios. Acá recalculamos los
+ * servicios impagos desde los servicios actuales del mes (mismo criterio que
+ * createDebtFromMonthlyRecord: servicios netos + IVA, imputando primero los pagos del
+ * mes a servicios) y los escribimos en la deuda.
+ *
+ * Solo toca servicios (y los totales derivados). NO toca el alquiler impago ni los
+ * punitorios acumulados, así que NO interfiere con el guard anti-inflación de
+ * calculateDebtPunitory (caso Yocsina): una vez sincronizada, la base almacenada
+ * coincide con la recalculada. Los punitorios sobre el servicio nuevo los aplica
+ * calculateDebtPunitory vía punitoryBase = saldo restante (alquiler + servicios).
+ */
+const syncDebtServicesFromRecord = async (monthlyRecordId) => {
+  const debt = await prisma.debt.findUnique({ where: { monthlyRecordId } });
+  if (!debt || debt.status === 'PAID') return null;
+
+  const record = await prisma.monthlyRecord.findUnique({
+    where: { id: monthlyRecordId },
+    select: {
+      rentAmount: true, includeIva: true, amountPaid: true,
+      punitoryAmount: true, previousBalance: true,
+      services: { select: { amount: true, conceptType: { select: { category: true } } } },
+    },
+  });
+  if (!record) return null;
+
+  // servicesTotal NETO — mismo criterio que _recalculateCore: descuentos/bonificaciones restan
+  let servicesTotal = 0;
+  for (const s of record.services) {
+    if (s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION') {
+      servicesTotal -= Math.abs(s.amount);
+    } else {
+      servicesTotal += s.amount;
+    }
+  }
+  const ivaAmount = record.includeIva ? round2(record.rentAmount * 0.21) : 0;
+
+  // previousBalance negativo: nunca usarlo como "crédito negativo" en la imputación.
+  // Un previousBalance negativo corrupto (caso Yocsina: arrastre de un mes borrado)
+  // haría que calculateImputation crea que NADA está cubierto e inflaría los
+  // servicios impagos de la deuda. Solo cuenta como crédito si es saldo a favor (> 0).
+  const { unpaidServices } = calculateImputation({
+    rentAmount: record.rentAmount,
+    servicesTotal,
+    ivaAmount,
+    punitoryAmount: record.punitoryAmount || 0,
+    amountPaid: record.amountPaid || 0,
+    previousBalance: Math.max(record.previousBalance || 0, 0),
+  });
+
+  if (round2(unpaidServices) === round2(debt.unpaidServicesAmount || 0)) return debt;
+
+  const delta = round2(unpaidServices - (debt.unpaidServicesAmount || 0));
+  const newCurrentTotal = round2(
+    Math.max((debt.unpaidRentAmount || 0) + unpaidServices + (debt.accumulatedPunitory || 0) - (debt.amountPaid || 0), 0)
+  );
+  const newOriginal = round2((debt.originalAmount || 0) + delta);
+
+  return prisma.debt.update({
+    where: { id: debt.id },
+    data: {
+      unpaidServicesAmount: unpaidServices,
+      currentTotal: newCurrentTotal,
+      originalAmount: newOriginal,
+    },
+  });
+};
+
 module.exports = {
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,
+  syncDebtServicesFromRecord,
   calculateImputation,
   preloadDebtDependencies,
   payDebt,
