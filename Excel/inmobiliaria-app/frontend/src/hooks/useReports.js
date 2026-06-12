@@ -23,9 +23,19 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
   }
 }
 
-export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent, ownerId, contractIds, soloConPago } = {}) => {
+// Codifica overrides de período por contrato a "contractId:mes-anio;..." para el query param.
+const encodePeriodOverrides = (overrides) => {
+  if (!overrides) return ''
+  return Object.entries(overrides)
+    .filter(([, o]) => o && o.month && o.year)
+    .map(([cid, o]) => `${cid}:${o.month}-${o.year}`)
+    .join(';')
+}
+
+export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorariosPercent, ownerId, contractIds, soloConPago, periodOverrides } = {}) => {
+  const overridesParam = encodePeriodOverrides(periodOverrides)
   const query = useQuery({
-    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent, ownerId, contractIds, soloConPago],
+    queryKey: ['report', 'liquidacion-all', groupId, month, year, propertyIds, honorariosPercent, ownerId, contractIds, soloConPago, overridesParam],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
       if (contractIds && contractIds.length > 0) {
@@ -41,6 +51,9 @@ export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorario
       }
       if (soloConPago !== undefined) {
         params.append('soloConPago', soloConPago)
+      }
+      if (overridesParam) {
+        params.append('periodOverrides', overridesParam)
       }
       const response = await api.get(`/groups/${groupId}/reports/liquidacion-all?${params}`)
       return response.data.data

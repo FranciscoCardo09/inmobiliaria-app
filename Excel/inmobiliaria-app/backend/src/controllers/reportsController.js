@@ -42,6 +42,28 @@ const {
 } = require('../services/htmlTemplates');
 const emailService = require('../services/emailService');
 
+// Parsea overrides de período por contrato.
+// GET (query): formato compacto "contractId:mes-anio;contractId2:mes-anio".
+// POST (body): objeto { [contractId]: { month, year } } → se devuelve tal cual (validado).
+const parsePeriodOverrides = (raw) => {
+  if (!raw) return null;
+  const map = {};
+  if (typeof raw === 'object') {
+    for (const [cid, o] of Object.entries(raw)) {
+      const m = parseInt(o?.month), y = parseInt(o?.year);
+      if (cid && m >= 1 && m <= 12 && y > 1900) map[cid] = { month: m, year: y };
+    }
+  } else {
+    for (const part of String(raw).split(';')) {
+      const [cid, my] = part.split(':');
+      if (!cid || !my) continue;
+      const [m, y] = my.split('-').map((n) => parseInt(n));
+      if (m >= 1 && m <= 12 && y > 1900) map[cid] = { month: m, year: y };
+    }
+  }
+  return Object.keys(map).length ? map : null;
+};
+
 // ============================================
 // PREVIEW JSON ENDPOINTS
 // ============================================
@@ -81,13 +103,15 @@ const getLiquidacionAll = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Se requiere month y year');
     }
 
-    const options = { soloConPago: false };
+    const options = { soloConPago: false, includePlaceholders: true };
     if (honorariosPercent && parseFloat(honorariosPercent) > 0) {
       options.honorariosPercent = parseFloat(honorariosPercent);
     }
     if (req.query.soloConPago !== undefined) {
       options.soloConPago = req.query.soloConPago === 'true';
     }
+    const periodOverrides = parsePeriodOverrides(req.query.periodOverrides);
+    if (periodOverrides) options.periodOverrides = periodOverrides;
 
     const propertyIdArray = propertyIds ? propertyIds.split(',').filter(Boolean) : null;
     const contractIdArray = contractIds ? contractIds.split(',').filter(Boolean) : null;
@@ -747,6 +771,8 @@ const downloadLiquidacionAllPDFPost = async (req, res, next) => {
     if (descuentosAlquiler) {
       options.descuentosAlquiler = descuentosAlquiler;
     }
+    const periodOverrides = parsePeriodOverrides(req.body.periodOverrides);
+    if (periodOverrides) options.periodOverrides = periodOverrides;
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
@@ -791,6 +817,8 @@ const downloadLiquidacionAllDOCXPost = async (req, res, next) => {
     if (descuentosAlquiler) {
       options.descuentosAlquiler = descuentosAlquiler;
     }
+    const periodOverrides = parsePeriodOverrides(req.body.periodOverrides);
+    if (periodOverrides) options.periodOverrides = periodOverrides;
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
@@ -835,6 +863,8 @@ const downloadLiquidacionAllHTMLPost = async (req, res, next) => {
     if (descuentosAlquiler) {
       options.descuentosAlquiler = descuentosAlquiler;
     }
+    const periodOverrides = parsePeriodOverrides(req.body.periodOverrides);
+    if (periodOverrides) options.periodOverrides = periodOverrides;
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }
@@ -878,6 +908,8 @@ const downloadLiquidacionAllExcelPost = async (req, res, next) => {
     if (descuentosAlquiler) {
       options.descuentosAlquiler = descuentosAlquiler;
     }
+    const periodOverrides = parsePeriodOverrides(req.body.periodOverrides);
+    if (periodOverrides) options.periodOverrides = periodOverrides;
     if (req.body.soloConPago !== undefined) {
       options.soloConPago = req.body.soloConPago === true || req.body.soloConPago === 'true';
     }

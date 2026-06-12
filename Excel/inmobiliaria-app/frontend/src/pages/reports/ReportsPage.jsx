@@ -181,6 +181,8 @@ function LiquidacionTab({ groupId }) {
   const [gastosAMiCargo, setGastosAMiCargo] = useState({})
   // { [contractId]: number } — descuento manual sobre el alquiler para calcular honorarios
   const [descuentosAlquiler, setDescuentosAlquiler] = useState({})
+  // { [contractId]: { month, year } } — override de período por contrato (inquilino que paga atrasado)
+  const [periodOverrides, setPeriodOverrides] = useState({})
   const [soloConPago, setSoloConPago] = useState(true)
   const [showOwnerNotifyModal, setShowOwnerNotifyModal] = useState(false)
 
@@ -194,6 +196,7 @@ function LiquidacionTab({ groupId }) {
     contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
     ownerId: selectedOwnerId || undefined,
     soloConPago: false,
+    periodOverrides,
   })
   const { downloadPDFPost, downloadDOCXPost, downloadHTMLPost, downloadExcelPost } = useReportDownload(groupId)
 
@@ -214,6 +217,7 @@ function LiquidacionTab({ groupId }) {
   // Services stay in conceptos and total unchanged — gastos only affect honorarios section
   const effectiveData = useMemo(() => {
     return filteredData.map(data => {
+      if (data.noData) return data
       const sel = gastosAMiCargo[data.contractId] || {}
       const selectedIds = sel.serviceIds || []
       const extras = sel.extras || []
@@ -250,6 +254,12 @@ function LiquidacionTab({ groupId }) {
       if (n > 0) descuentosBody[contractId] = n
     }
 
+    // Solo overrides válidos (mes/año presentes)
+    const overridesBody = {}
+    for (const [contractId, o] of Object.entries(periodOverrides)) {
+      if (o && o.month && o.year) overridesBody[contractId] = { month: o.month, year: o.year }
+    }
+
     return {
       month, year,
       honorariosPercent: honorariosPercent ? parseFloat(honorariosPercent) : undefined,
@@ -257,6 +267,7 @@ function LiquidacionTab({ groupId }) {
       ownerId: selectedOwnerId || undefined,
       gastosAMiCargo: Object.keys(gastosBody).length > 0 ? gastosBody : undefined,
       descuentosAlquiler: Object.keys(descuentosBody).length > 0 ? descuentosBody : undefined,
+      periodOverrides: Object.keys(overridesBody).length > 0 ? overridesBody : undefined,
     }
   }
 
@@ -296,6 +307,26 @@ function LiquidacionTab({ groupId }) {
       return { ...prev, [contractId]: { ...cur, extras: cur.extras.filter(e => e.id !== extraId) } }
     })
   }
+
+  // Override de período por contrato. Si el mes/año elegido coincide con el global, se borra el override.
+  const setContractPeriod = (contractId, newMonth, newYear) => {
+    setPeriodOverrides(prev => {
+      const next = { ...prev }
+      if (Number(newMonth) === Number(month) && Number(newYear) === Number(year)) {
+        delete next[contractId]
+      } else {
+        next[contractId] = { month: Number(newMonth), year: Number(newYear) }
+      }
+      return next
+    })
+  }
+  // Años disponibles para el selector (global ±2)
+  const overrideYearOptions = useMemo(() => {
+    const ys = new Set()
+    for (let y = year - 2; y <= year + 1; y++) ys.add(y)
+    Object.values(periodOverrides).forEach(o => o?.year && ys.add(o.year))
+    return Array.from(ys).sort((a, b) => a - b)
+  }, [year, periodOverrides])
 
   const allTransactions = useMemo(() => {
     const txns = []
@@ -499,11 +530,33 @@ function LiquidacionTab({ groupId }) {
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
             {effectiveData
-              .filter((d) => !soloConPago || d.paymentStatus === 'PAGADO' || d.paymentStatus === 'SALDO A FAVOR')
+              .filter((d) => !soloConPago || d.paymentStatus === 'PAGADO' || d.paymentStatus === 'SALDO A FAVOR' || d.noData)
               .map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
               const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
               const disponibles = data.serviciosDisponibles || []
+
+              const ov = periodOverrides[data.contractId]
+              const selMonth = ov?.month || month
+              const selYear = ov?.year || year
+              const isOverridden = !!ov
+              const periodSelector = (
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-xs text-base-content/50">Mes liquidación:</span>
+                  <select className="select select-xs select-bordered" value={selMonth}
+                    onChange={(e) => setContractPeriod(data.contractId, e.target.value, selYear)}>
+                    {monthNames.slice(1).map((m, i) => (<option key={i + 1} value={i + 1}>{m}</option>))}
+                  </select>
+                  <select className="select select-xs select-bordered" value={selYear}
+                    onChange={(e) => setContractPeriod(data.contractId, selMonth, e.target.value)}>
+                    {overrideYearOptions.map((y) => (<option key={y} value={y}>{y}</option>))}
+                  </select>
+                  {isOverridden && (
+                    <button className="btn btn-xs btn-ghost" title="Volver al mes global"
+                      onClick={() => setContractPeriod(data.contractId, month, year)}>✕</button>
+                  )}
+                </div>
+              )
 
               const statusBadge = {
                 'SALDO A FAVOR': { cls: 'badge-info',   label: 'SALDO A FAVOR' },
@@ -511,11 +564,28 @@ function LiquidacionTab({ groupId }) {
                 'NO COBRADO':   { cls: 'badge-error',   label: 'SIN ABONAR' },
               }[data.paymentStatus]
 
+              if (data.noData) {
+                return (
+                  <div key={data.contractId || idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
+                      <span className="badge badge-sm badge-warning">SIN DATOS</span>
+                      {periodSelector}
+                    </div>
+                    <div className="text-sm text-base-content/60 bg-warning/10 rounded p-2">
+                      Sin liquidación generada para <strong>{data.periodo.label}</strong>. Elegí otro mes para este contrato.
+                    </div>
+                  </div>
+                )
+              }
+
               return (
-                <div key={idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
-                  <div className="flex items-center gap-2 mb-2">
+                <div key={data.contractId || idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
                     {statusBadge && <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>}
+                    {isOverridden && <span className="badge badge-sm badge-info" title="Período distinto al global">{data.periodo.label}</span>}
+                    {periodSelector}
                   </div>
 
                   {data.deudas && data.deudas.length > 0 && (

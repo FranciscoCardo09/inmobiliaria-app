@@ -491,7 +491,8 @@ const computeGrandTotals = (dataArray) => {
  * Single batch query instead of N+1 queries per contract.
  */
 const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = null, options = {}, ownerId = null, contractIds = null) => {
-  // Auto-create monthly records for the period before querying
+  // Auto-create monthly records for the GLOBAL period before querying.
+  // Los períodos override NO se auto-crean (decisión: evitar tocar/regenerar meses viejos).
   try {
     const { getOrCreateMonthlyRecords } = require('./monthlyRecordService');
     await getOrCreateMonthlyRecords(groupId, month, year);
@@ -501,54 +502,85 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   const empresa = await getEmpresaData(groupId);
 
-  // Build where clause for a single batch query
   const soloConPago = options.soloConPago !== false; // default true: only show cancelled (paid) records
-  const where = {
-    groupId,
-    periodMonth: month,
-    periodYear: year,
-    contract: { active: true },
-  };
-  if (soloConPago) {
-    where.isCancelled = true;
-  }
+  const includePlaceholders = !!options.includePlaceholders;
 
-  // contractIds takes priority over propertyIds
-  if (contractIds && contractIds.length > 0) {
-    where.contractId = { in: contractIds };
-  } else if (propertyIds && propertyIds.length > 0) {
-    where.contract.propertyId = { in: propertyIds };
-  }
-
-  if (ownerId) {
-    where.contract.property = { ownerId };
-    where.contract.contractType = 'INQUILINO';
-  }
-
-  const records = await prisma.monthlyRecord.findMany({
-    where,
-    include: {
-      contract: {
-        include: {
-          tenant: true,
-          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
-          property: {
-            include: {
-              owner: { include: { transferBeneficiary: true } },
-              transferBeneficiary: true
-            }
-          },
-          rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
-          debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
-        },
-      },
-      services: { include: { conceptType: true } },
-      transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
-    },
-    orderBy: { contract: { property: { address: 'asc' } } },
+  // Overrides de período por contrato: { [contractId]: { month, year } }
+  const periodOverrides = (options.periodOverrides && typeof options.periodOverrides === 'object' && !Array.isArray(options.periodOverrides))
+    ? options.periodOverrides
+    : {};
+  const overrideContractIds = Object.keys(periodOverrides).filter((cid) => {
+    const o = periodOverrides[cid];
+    return o && Number(o.month) >= 1 && Number(o.month) <= 12 && Number(o.year) > 1900;
   });
+  const overrideSet = new Set(overrideContractIds);
 
-  const result = records.map((record) => {
+  // Filtros base compartidos por la query global y la de overrides (sin período)
+  const buildBaseWhere = () => {
+    const w = { groupId, contract: { active: true } };
+    if (soloConPago) w.isCancelled = true;
+    if (contractIds && contractIds.length > 0) {
+      w.contractId = { in: contractIds };
+    } else if (propertyIds && propertyIds.length > 0) {
+      w.contract.propertyId = { in: propertyIds };
+    }
+    if (ownerId) {
+      w.contract.property = { ownerId };
+      w.contract.contractType = 'INQUILINO';
+    }
+    return w;
+  };
+
+  const includeClause = {
+    contract: {
+      include: {
+        tenant: true,
+        contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+        property: {
+          include: {
+            owner: { include: { transferBeneficiary: true } },
+            transferBeneficiary: true
+          }
+        },
+        rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
+        debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
+      },
+    },
+    services: { include: { conceptType: true } },
+    transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
+  };
+  const orderByClause = { contract: { property: { address: 'asc' } } };
+
+  // 1) Query GLOBAL: contratos SIN override, en el mes/año global
+  const globalWhere = buildBaseWhere();
+  globalWhere.periodMonth = month;
+  globalWhere.periodYear = year;
+  if (overrideContractIds.length > 0) {
+    if (globalWhere.contractId && globalWhere.contractId.in) {
+      globalWhere.contractId = { in: globalWhere.contractId.in.filter((id) => !overrideSet.has(id)) };
+    } else {
+      globalWhere.contractId = { notIn: overrideContractIds };
+    }
+  }
+  const globalRecords = await prisma.monthlyRecord.findMany({ where: globalWhere, include: includeClause, orderBy: orderByClause });
+
+  // 2) Query OVERRIDE: contratos con override, en su propio período (registros EXISTENTES, sin auto-crear)
+  let overrideRecords = [];
+  if (overrideContractIds.length > 0) {
+    const ow = buildBaseWhere();
+    // El usuario eligió explícitamente ese período: no forzar isCancelled, traer el registro exista o no como "cobrado".
+    delete ow.isCancelled;
+    ow.OR = overrideContractIds.map((cid) => ({
+      contractId: cid,
+      periodMonth: periodOverrides[cid].month,
+      periodYear: periodOverrides[cid].year,
+    }));
+    overrideRecords = await prisma.monthlyRecord.findMany({ where: ow, include: includeClause, orderBy: orderByClause });
+  }
+
+  const allRecords = [...globalRecords, ...overrideRecords];
+
+  const result = allRecords.map((record) => {
     // Route per-contract gastosAMiCargo if provided as a map { [contractId]: {...} }
     const contractOptions = { ...options };
     if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
@@ -557,8 +589,39 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     if (options.descuentosAlquiler && typeof options.descuentosAlquiler === 'object') {
       contractOptions.descuentosAlquiler = options.descuentosAlquiler[record.contractId] || 0;
     }
-    return buildLiquidacionFromRecord(record, empresa, month, year, contractOptions);
+    // Usar el período PROPIO del registro (para overrides difiere del global; para el resto es igual)
+    return buildLiquidacionFromRecord(record, empresa, record.periodMonth, record.periodYear, contractOptions);
   });
+
+  // 3) Placeholders "sin datos" para contratos con override que no tienen registro en ese período (solo preview)
+  if (includePlaceholders && overrideContractIds.length > 0) {
+    const foundCids = new Set(overrideRecords.map((r) => r.contractId));
+    const missingCids = overrideContractIds.filter((cid) => !foundCids.has(cid));
+    if (missingCids.length > 0) {
+      const missingContracts = await prisma.contract.findMany({
+        where: { id: { in: missingCids } },
+        include: {
+          tenant: true,
+          contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
+          property: { include: { owner: true } },
+        },
+      });
+      for (const c of missingContracts) {
+        const o = periodOverrides[c.id];
+        const isProp = c.contractType === 'PROPIETARIO';
+        result.push({
+          noData: true,
+          contractId: c.id,
+          contractType: c.contractType || 'INQUILINO',
+          propiedad: { direccion: c.property?.address || 'Sin dirección', piso: c.property?.floor, depto: c.property?.apartment },
+          inquilino: { nombre: isProp ? (c.property?.owner?.name || 'Propietario') : getTenantsName(c) },
+          periodo: { mes: o.month, anio: o.year, label: `${MONTH_NAMES[o.month]} ${o.year}` },
+          conceptos: [], serviciosDisponibles: [], deudas: [], totalDeuda: 0,
+          total: 0, paymentStatus: 'SIN DATOS',
+        });
+      }
+    }
+  }
 
   // Natural sort by address: handles numbers correctly (Torre 1, Torre 2, ..., Torre 10)
   // and normalizes extra spaces that cause wrong lexicographic order
