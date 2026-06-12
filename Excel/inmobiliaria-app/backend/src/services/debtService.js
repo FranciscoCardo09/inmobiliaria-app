@@ -500,7 +500,12 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   const servicesPortion = round2(Math.min(remainingServicesBefore, parsedAmount));
   const afterServices = round2(parsedAmount - servicesPortion);
   const rentPortion = round2(Math.min(remainingRentBefore, afterServices));
-  const punitoryPortion = round2(Math.max(afterServices - rentPortion, 0));
+  const afterRent = round2(Math.max(afterServices - rentPortion, 0));
+  // Topear la porción de punitorios al punitorio REAL adeudado. Lo que sobre es
+  // pago en exceso → saldo a favor del próximo mes (NO inflar punitorios, porque
+  // eso inflaría el totalDue del MonthlyRecord en el recálculo y anularía el saldo).
+  const punitoryPortion = round2(Math.min(afterRent, punitoryAmount));
+  const overpay = round2(Math.max(afterRent - punitoryPortion, 0));
 
   const transaction = await prisma.paymentTransaction.create({
     data: {
@@ -517,6 +522,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
           ...(servicesPortion > 0 ? [{ type: 'SERVICIOS_DEUDA', description: 'Pago deuda servicios', amount: servicesPortion }] : []),
           ...(rentPortion > 0 ? [{ type: 'ALQUILER_DEUDA', description: 'Pago deuda alquiler', amount: rentPortion }] : []),
           ...(punitoryPortion > 0 ? [{ type: 'PUNITORIOS', description: 'Punitorios por mora', amount: punitoryPortion }] : []),
+          ...(overpay > 0.01 ? [{ type: 'SOBREPAGO', description: 'Pago en exceso (a favor próximo mes)', amount: overpay }] : []),
         ],
       },
     },

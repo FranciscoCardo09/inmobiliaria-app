@@ -100,23 +100,28 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
 
   const punitoryAmount = forgivePunitorios ? 0 : round2(unpaidFrozenPunitory + punitory.amount);
 
-  // Build transaction concepts breakdown
-  // Concepts should reflect HOW THIS PAYMENT is distributed, not the total owed
+  // Build transaction concepts breakdown.
+  // Los conceptos reflejan QUÉ pagó ESTA transacción, con montos REALES por concepto
+  // (cada servicio con su monto, alquiler real, punitorios), congelados al momento del pago.
+  // Orden de imputación: los créditos previos (saldo a favor + pagos anteriores) cubren
+  // servicios → alquiler → punitorios; luego ESTE pago cubre lo que reste en ese mismo orden.
   const concepts = [];
-
-  // Payment order: Services → Rent → Punitorios
-  // Credits from previous balance + payments already made
   const paymentAmount = parseFloat(amount);
-  let remainingPayment = paymentAmount;
+  const alreadyPaid = round2(amountPaidSoFar + prevBalance);
 
-  // Track what's already been paid (before this transaction)
-  const alreadyPaid = amountPaidSoFar + prevBalance;
+  // Cuánto falta de cada concepto ANTES de este pago (descontando créditos previos)
+  const creditsOnServices = round2(Math.min(alreadyPaid, Math.max(servicesTotal, 0)));
+  const remainingServicesOwed = round2(Math.max(servicesTotal - creditsOnServices, 0));
+  const remainingRentOwed = unpaidRent; // ya calculado arriba (neto de créditos)
+  const remainingPunitoryOwed = round2(Math.max(punitoryAmount, 0)); // ya neto de créditos/frozen
 
-  // Calculate what's still owed for each concept
-  const servicesStillOwed = round2(Math.max(servicesTotal - alreadyPaid, 0));
-  const rentStillOwed = round2(Math.max(record.rentAmount - Math.max(alreadyPaid - servicesTotal, 0), 0));
+  // Cuánto de ESTE pago se imputa a cada concepto (servicios → alquiler → punitorios → excedente)
+  const servicesPay = round2(Math.min(remainingServicesOwed, paymentAmount));
+  const rentPay = round2(Math.min(remainingRentOwed, paymentAmount - servicesPay));
+  const punitoryPay = round2(Math.min(remainingPunitoryOwed, paymentAmount - servicesPay - rentPay));
+  const overpay = round2(Math.max(paymentAmount - servicesPay - rentPay - punitoryPay, 0));
 
-  // 1. Previous balance (if any) - show as credit
+  // 1. Saldo a favor del mes anterior (crédito)
   if (prevBalance > 0) {
     concepts.push({
       type: 'A_FAVOR',
@@ -125,30 +130,36 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     });
   }
 
-  // 2. Services (if any are still owed)
-  if (servicesTotal > 0 && servicesStillOwed > 0) {
+  // 2. Servicios: cada servicio con su monto REAL, secuencialmente, hasta agotar lo que
+  //    este pago destina a servicios. Los descuentos/bonificaciones se muestran como
+  //    líneas negativas (reducen el neto), igual que en el formulario de pago.
+  if (servicesPay > 0) {
+    let svcBudget = servicesPay;
+    let skip = creditsOnServices; // porción de servicios ya cubierta por créditos previos
     for (const s of record.services) {
       const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
-      const serviceAmount = isDiscount ? -Math.abs(s.amount) : s.amount;
-
-      // Calculate this service's share of what's still owed
-      const serviceShare = servicesStillOwed > 0 ? (serviceAmount / servicesTotal) * servicesStillOwed : 0;
-
-      if (serviceShare > 0 && remainingPayment > 0) {
-        const paidToService = Math.min(serviceShare, remainingPayment);
-        concepts.push({
-          type: s.conceptType?.name || 'SERVICIO',
-          amount: paidToService,
-          description: s.conceptType?.label || s.description || s.conceptType?.name || 'Servicio',
-        });
-        remainingPayment -= paidToService;
+      const label = s.conceptType?.label || s.description || s.conceptType?.name || 'Servicio';
+      const type = s.conceptType?.name || 'SERVICIO';
+      if (isDiscount) {
+        concepts.push({ type, amount: -Math.abs(s.amount), description: label });
+        continue;
+      }
+      let amt = s.amount;
+      if (skip > 0) {
+        const sk = Math.min(skip, amt);
+        amt = round2(amt - sk);
+        skip = round2(skip - sk);
+      }
+      if (amt > 0 && svcBudget > 0) {
+        const pay = round2(Math.min(amt, svcBudget));
+        concepts.push({ type, amount: pay, description: label });
+        svcBudget = round2(svcBudget - pay);
       }
     }
   }
 
-  // 3. Rent (if still owed after services)
-  if (rentStillOwed > 0 && remainingPayment > 0) {
-    const paidToRent = Math.min(rentStillOwed, remainingPayment);
+  // 3. Alquiler (lo que este pago destina al alquiler)
+  if (rentPay > 0) {
     const isMultaRescision = (() => {
       const rescindedAt = record.contract?.rescindedAt;
       if (!rescindedAt) return false;
@@ -158,38 +169,32 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
       if (pm > 12) { pm = 1; py++; }
       return record.periodMonth === pm && record.periodYear === py;
     })();
+    const isPartialRent = rentPay < remainingRentOwed;
     concepts.push({
       type: isMultaRescision ? 'MULTA_RESCISION' : 'ALQUILER',
-      amount: paidToRent,
+      amount: rentPay,
       description: isMultaRescision
-        ? (paidToRent >= rentStillOwed
-          ? `Multa Rescisión mes ${record.monthNumber}`
-          : `Multa Rescisión mes ${record.monthNumber} (pago parcial)`)
-        : (paidToRent >= rentStillOwed
-          ? `Alquiler mes ${record.monthNumber}`
-          : `Alquiler mes ${record.monthNumber} (pago parcial)`),
+        ? `Multa Rescisión mes ${record.monthNumber}${isPartialRent ? ' (pago parcial)' : ''}`
+        : `Alquiler mes ${record.monthNumber}${isPartialRent ? ' (pago parcial)' : ''}`,
     });
-    remainingPayment -= paidToRent;
   }
 
-  // 4. Punitorios (if any after rent is paid)
-  if (punitoryAmount > 0 && remainingPayment > 0) {
-    const paidToPunitory = Math.min(punitoryAmount, remainingPayment);
+  // 4. Punitorios (lo que este pago destina a punitorios)
+  if (punitoryPay > 0) {
     // Si los nuevos punitorios son 0 días pero hay acumulados (frozen), mostrar los días originales del record
     const diasPunitorios = punitory.days > 0 ? punitory.days : (unpaidFrozenPunitory > 0 ? (record.punitoryDays || 0) : 0);
     concepts.push({
       type: 'PUNITORIOS',
-      amount: paidToPunitory,
+      amount: punitoryPay,
       description: `${diasPunitorios} día(s) de atraso${forgivePunitorios ? ' (condonados)' : ''}`,
     });
-    remainingPayment -= paidToPunitory;
   }
 
-  // 5. Overpayment (if payment exceeds total due)
-  if (remainingPayment > 0.01) {
+  // 5. Excedente (pago mayor al total adeudado → a favor del próximo mes)
+  if (overpay > 0.01) {
     concepts.push({
       type: 'SOBREPAGO',
-      amount: remainingPayment,
+      amount: overpay,
       description: 'Pago en exceso (a favor próximo mes)',
     });
   }
