@@ -75,6 +75,124 @@ const getServicesForRecord = async (monthlyRecordId) => {
   });
 };
 
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Resolver (o crear) el MonthlyRecord de un contrato para un mes/año, respetando
+ * el rango del contrato (mismo criterio que bulkAssign). Devuelve null si el mes
+ * cae fuera del rango o el contrato está inactivo.
+ */
+const findOrCreateRecord = async (client, groupId, contractId, month, year) => {
+  let record = await client.monthlyRecord.findUnique({
+    where: {
+      contractId_periodMonth_periodYear: {
+        contractId,
+        periodMonth: parseInt(month),
+        periodYear: parseInt(year),
+      },
+    },
+  });
+  if (record) return record;
+
+  const contract = await client.contract.findUnique({ where: { id: contractId } });
+  if (!contract || !contract.active) return null;
+
+  const startDate = new Date(contract.startDate);
+  const totalMonthsDiff = (parseInt(year) - startDate.getFullYear()) * 12 + (parseInt(month) - (startDate.getMonth() + 1));
+  const monthNumber = contract.startMonth + totalMonthsDiff;
+
+  if (monthNumber < contract.startMonth) return null;
+  const endMonth = contract.startMonth + contract.durationMonths - 1;
+  if (monthNumber > endMonth) return null;
+  if (contract.rescindedAt) {
+    const rescDate = new Date(contract.rescindedAt);
+    const rescMonthNumber = contract.startMonth + ((rescDate.getFullYear() - startDate.getFullYear()) * 12) + (rescDate.getMonth() + 1 - (startDate.getMonth() + 1));
+    if (monthNumber > rescMonthNumber) return null;
+  }
+
+  return client.monthlyRecord.create({
+    data: {
+      groupId,
+      contractId,
+      monthNumber,
+      periodMonth: parseInt(month),
+      periodYear: parseInt(year),
+      rentAmount: contract.baseRent,
+      totalDue: contract.baseRent,
+      balance: -contract.baseRent,
+      comprobantesStatus: Array.isArray(contract.comprobantes)
+        ? contract.comprobantes.map((c) => ({ ...c, presented: false }))
+        : [],
+    },
+  });
+};
+
+/**
+ * Asignar un servicio "en cuotas" a un contrato: crea N meses consecutivos a partir
+ * de (startMonth/startYear), numerados cuotaNumber 1..N y cuotaTotal N. El monto total
+ * se reparte parejo (la última cuota absorbe el redondeo); cada cuota queda editable
+ * por mes con updateService (preserva los campos de cuota).
+ */
+const assignInstallmentService = async (groupId, contractId, conceptTypeId, totalCuotas, startMonth, startYear, montoTotal, description = null) => {
+  const concept = await prisma.conceptType.findFirst({
+    where: { id: conceptTypeId, groupId, isActive: true },
+  });
+  if (!concept) throw new Error('Tipo de concepto no encontrado o inactivo');
+
+  const N = parseInt(totalCuotas);
+  if (!(N >= 1)) throw new Error('Cantidad de cuotas inválida');
+  const total = parseFloat(montoTotal);
+  if (!(total >= 0)) throw new Error('Monto inválido');
+
+  const per = round2(total / N);
+  const plan = [];
+  let m = parseInt(startMonth);
+  let y = parseInt(startYear);
+  for (let k = 1; k <= N; k++) {
+    const amount = k === N ? round2(total - per * (N - 1)) : per;
+    plan.push({ month: m, year: y, cuotaNumber: k, cuotaTotal: N, amount });
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+
+  const { results, affectedIds } = await prisma.$transaction(async (tx) => {
+    const out = [];
+    const affected = new Set();
+    for (const it of plan) {
+      const record = await findOrCreateRecord(tx, groupId, contractId, it.month, it.year);
+      if (!record) continue; // fuera del rango del contrato
+      const svc = await tx.monthlyService.upsert({
+        where: {
+          monthlyRecordId_conceptTypeId: { monthlyRecordId: record.id, conceptTypeId },
+        },
+        update: { amount: it.amount, description, cuotaNumber: it.cuotaNumber, cuotaTotal: it.cuotaTotal },
+        create: {
+          monthlyRecordId: record.id,
+          conceptTypeId,
+          amount: it.amount,
+          description,
+          cuotaNumber: it.cuotaNumber,
+          cuotaTotal: it.cuotaTotal,
+        },
+        include: { conceptType: { select: { id: true, name: true, label: true, category: true } } },
+      });
+      out.push(svc);
+      affected.add(record.id);
+    }
+    if (affected.size > 0) {
+      await recalculateMultipleRecords(Array.from(affected), tx);
+    }
+    return { results: out, affectedIds: Array.from(affected) };
+  }, { timeout: 30000 });
+
+  // Propagar a deudas existentes (igual patrón que addService), fuera de la transacción
+  for (const id of affectedIds) {
+    await require('./debtService').syncDebtServicesFromRecord(id);
+  }
+
+  return results;
+};
+
 /**
  * Bulk assign a service to multiple months for a contract.
  * Creates MonthlyRecords if they don't exist.
@@ -401,6 +519,7 @@ module.exports = {
   removeService,
   getServicesForRecord,
   bulkAssign,
+  assignInstallmentService,
   bulkAssignMultiContract,
   copyConfig,
   batchAddServices,

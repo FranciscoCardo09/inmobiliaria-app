@@ -1,6 +1,7 @@
 import { useState, useEffect, memo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
+import { formatServiceLabel } from '../../utils/serviceLabel'
 import api from '../../services/api'
 import {
   ChevronUpIcon,
@@ -59,7 +60,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
   const servicesTooltip = !record.services || record.services.length === 0
     ? 'Sin servicios'
     : record.services
-        .map((s) => `${s.conceptType?.label || s.conceptType?.name}: ${formatCurrency(s.amount)}`)
+        .map((s) => `${formatServiceLabel(s)}: ${formatCurrency(s.amount)}`)
         .join('\n')
 
   return (
@@ -468,9 +469,13 @@ function ServiceAmountInput({ service, onUpdate }) {
 // Inline Service Manager Component
 function ServiceManagerInline({ record, groupId }) {
   const { services, addService, updateService, removeService } = useMonthlyServices(groupId, record.id)
+  const queryClient = useQueryClient()
   const [selectedConceptId, setSelectedConceptId] = useState('')
   const [newAmount, setNewAmount] = useState('')
   const [propagateForward, setPropagateForward] = useState(false)
+  const [installmentMode, setInstallmentMode] = useState(false)
+  const [numCuotas, setNumCuotas] = useState('3')
+  const [savingInstallment, setSavingInstallment] = useState(false)
 
   const { data: conceptTypes = [] } = useQuery({
     queryKey: ['conceptTypes', groupId],
@@ -482,7 +487,39 @@ function ServiceManagerInline({ record, groupId }) {
     staleTime: 60000 // 1 minute
   })
 
+  const handleAddInstallment = async () => {
+    const N = parseInt(numCuotas)
+    const total = parseFloat(newAmount)
+    if (!selectedConceptId || !(N >= 1) || !(total >= 0)) return
+    const conceptName = conceptTypes.find((c) => c.id === selectedConceptId)?.label || conceptTypes.find((c) => c.id === selectedConceptId)?.name
+    const ok = confirm(
+      `Se cargará "${conceptName}" en ${N} cuotas desde este mes (${record.periodMonth}/${record.periodYear}). Monto total ${total} repartido en ${N}. ¿Continuar?`
+    )
+    if (!ok) return
+    try {
+      setSavingInstallment(true)
+      await api.post(`/groups/${groupId}/monthly-records/installment-service`, {
+        contractId: record.contractId || record.contract?.id,
+        conceptTypeId: selectedConceptId,
+        totalCuotas: N,
+        startMonth: record.periodMonth,
+        startYear: record.periodYear,
+        montoTotal: total,
+      })
+      queryClient.invalidateQueries({ queryKey: ['monthlyServices', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] })
+      setSelectedConceptId('')
+      setNewAmount('')
+    } catch (e) {
+      alert(`Error al cargar cuotas: ${e?.response?.data?.message || e.message}`)
+    } finally {
+      setSavingInstallment(false)
+    }
+  }
+
   const handleAddService = () => {
+    if (installmentMode) return handleAddInstallment()
     if (!selectedConceptId || !newAmount) return
     if (propagateForward) {
       const ok = confirm(
@@ -567,23 +604,44 @@ function ServiceManagerInline({ record, groupId }) {
         </select>
         <input
           type="number"
-          placeholder="Monto"
+          placeholder={installmentMode ? 'Monto total' : 'Monto'}
           className="input input-sm input-bordered w-32"
           value={newAmount}
           onChange={(e) => setNewAmount(e.target.value)}
         />
+        {installmentMode && (
+          <input
+            type="number"
+            min="1"
+            placeholder="Cuotas"
+            className="input input-sm input-bordered w-20"
+            value={numCuotas}
+            onChange={(e) => setNumCuotas(e.target.value)}
+            title="Cantidad de cuotas"
+          />
+        )}
         <button
           className="btn btn-sm btn-primary"
           onClick={handleAddService}
-          disabled={!selectedConceptId || !newAmount}
+          disabled={!selectedConceptId || !newAmount || savingInstallment || (installmentMode && !(parseInt(numCuotas) >= 1))}
         >
-          Agregar
+          {savingInstallment ? 'Cargando...' : (installmentMode ? 'Cargar cuotas' : 'Agregar')}
         </button>
         <label className="flex items-center gap-1 text-xs cursor-pointer select-none">
           <input
             type="checkbox"
             className="checkbox checkbox-xs checkbox-primary"
+            checked={installmentMode}
+            onChange={(e) => { setInstallmentMode(e.target.checked); if (e.target.checked) setPropagateForward(false) }}
+          />
+          En cuotas
+        </label>
+        <label className={`flex items-center gap-1 text-xs select-none ${installmentMode ? 'opacity-40' : 'cursor-pointer'}`}>
+          <input
+            type="checkbox"
+            className="checkbox checkbox-xs checkbox-primary"
             checked={propagateForward}
+            disabled={installmentMode}
             onChange={(e) => setPropagateForward(e.target.checked)}
           />
           Aplicar a meses siguientes

@@ -577,6 +577,8 @@ model MonthlyService {
   conceptTypeId     String   @map("concept_type_id")
   amount            Float
   description       String?
+  cuotaNumber       Int?     @map("cuota_number") // Nº de cuota de este mes (1..N); null = servicio sin cuotas
+  cuotaTotal        Int?     @map("cuota_total")   // Total de cuotas del plan (N); null = servicio sin cuotas
   createdAt         DateTime @default(now()) @map("created_at")
 
   // Relations

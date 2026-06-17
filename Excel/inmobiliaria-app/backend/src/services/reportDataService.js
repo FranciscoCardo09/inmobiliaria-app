@@ -1,6 +1,7 @@
 // Report Data Service - Prisma queries for all report types
 const { numeroATexto } = require('../utils/helpers');
 const { MONTH_NAMES } = require('../utils/constants');
+const { formatServiceLabel } = require('../utils/serviceLabel');
 
 const prisma = require('../lib/prisma');
 
@@ -206,7 +207,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     for (const svc of monthlyRecord.services) {
       if (!gastosServiceIds.has(svc.id)) continue;
       const cat = svc.conceptType?.category;
-      const label = svc.conceptType?.label || svc.description || 'Servicio';
+      const label = formatServiceLabel(svc);
       const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
       const concepto = showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]} ${anioVencido})` : label;
       const importe = Math.abs(svc.amount);
@@ -274,7 +275,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     const cat = svc.conceptType?.category;
     if (!LIQUIDACION_CATEGORIES.has(cat)) continue;
     const isDiscount = cat === 'DESCUENTO' || cat === 'BONIFICACION';
-    const label = svc.conceptType?.label || svc.description || 'Servicio';
+    const label = formatServiceLabel(svc);
     const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
     conceptos.push({
       concepto: showPeriodo ? `${label} (período ${MONTH_NAMES[mesVencido]} ${anioVencido})` : label,
@@ -1037,7 +1038,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     for (const svc of record.services) {
       const isDiscount = svc.conceptType?.category === 'DESCUENTO' || svc.conceptType?.category === 'BONIFICACION';
       const cat = svc.conceptType?.category;
-      const label = svc.conceptType?.label || svc.description || 'Servicio';
+      const label = formatServiceLabel(svc);
       const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
       conceptos.push({
         concepto: showPeriodo ? `${label} | Período: ${MONTH_NAMES[mesVencido]} ${anioVencido}` : label,

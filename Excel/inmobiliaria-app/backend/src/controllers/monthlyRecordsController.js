@@ -11,6 +11,7 @@ const {
   removeService,
   getServicesForRecord,
   bulkAssignMultiContract,
+  assignInstallmentService,
   propagateServiceForward,
   removeServiceForward,
 } = require('../services/monthlyServiceService');
@@ -491,6 +492,40 @@ const bulkLoadServices = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/monthly-records/installment-service
+const assignInstallment = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { contractId, conceptTypeId, totalCuotas, startMonth, startYear, montoTotal, description } = req.body;
+
+    if (!contractId) return ApiResponse.badRequest(res, 'contractId es requerido');
+    if (!conceptTypeId) return ApiResponse.badRequest(res, 'conceptTypeId es requerido');
+    const N = parseInt(totalCuotas);
+    if (!(N >= 1)) return ApiResponse.badRequest(res, 'totalCuotas debe ser >= 1');
+    const m = parseInt(startMonth);
+    if (!(m >= 1 && m <= 12)) return ApiResponse.badRequest(res, 'startMonth inválido');
+    const y = parseInt(startYear);
+    if (!(y >= 2000)) return ApiResponse.badRequest(res, 'startYear inválido');
+    const total = parseFloat(montoTotal);
+    if (!(total >= 0)) return ApiResponse.badRequest(res, 'montoTotal inválido');
+
+    const results = await assignInstallmentService(
+      groupId,
+      contractId,
+      conceptTypeId,
+      N,
+      m,
+      y,
+      total,
+      description ?? null
+    );
+
+    return ApiResponse.success(res, results, `Se cargaron ${results.length} cuota(s)`);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMonthlyRecords,
   getMonthlyRecordDetail,
@@ -504,5 +539,6 @@ module.exports = {
   deleteRecordService,
   batchAddServices,
   bulkLoadServices,
+  assignInstallment,
   toggleComprobante,
 };

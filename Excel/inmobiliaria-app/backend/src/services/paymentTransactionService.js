@@ -1,5 +1,6 @@
 // Payment Transaction Service - Register and manage payment transactions
 const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
+const { formatServiceLabel } = require('../utils/serviceLabel');
 const { recalculateMonthlyRecord } = require('./monthlyRecordService');
 const { canPayCurrentMonth } = require('./debtService');
 
@@ -35,7 +36,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
       },
       services: {
         select: {
-          id: true, amount: true, description: true,
+          id: true, amount: true, description: true, cuotaNumber: true, cuotaTotal: true,
           conceptType: { select: { category: true, name: true, label: true } },
         },
       },
@@ -147,7 +148,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     let skip = creditsOnServices; // porción de servicios ya cubierta por créditos previos
     for (const s of record.services) {
       const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
-      const label = s.conceptType?.label || s.description || s.conceptType?.name || 'Servicio';
+      const label = formatServiceLabel(s);
       const type = s.conceptType?.name || 'SERVICIO';
       if (isDiscount) {
         concepts.push({ type, amount: -Math.abs(s.amount), description: label });

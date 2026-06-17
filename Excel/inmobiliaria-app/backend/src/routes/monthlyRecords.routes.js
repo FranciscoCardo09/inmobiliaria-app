@@ -46,6 +46,13 @@ router.post(
   controller.bulkLoadServices
 );
 
+// Asignar un servicio "en cuotas" a un contrato (numera cuotaNumber 1..N por contrato)
+router.post(
+  '/installment-service',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  controller.assignInstallment
+);
+
 // IVA toggle
 router.patch(
   '/:recordId/iva',

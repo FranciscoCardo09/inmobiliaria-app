@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useMonthlyRecords } from '../../hooks/useMonthlyRecords'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
 import { useCategories } from '../../hooks/useCategories'
+import { formatServiceLabel } from '../../utils/serviceLabel'
 import api from '../../services/api'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
@@ -195,7 +196,7 @@ export default function MonthlyControlPage() {
   const getServicesTooltip = (record) => {
     if (!record.services || record.services.length === 0) return 'Sin servicios'
     return record.services
-      .map((s) => `${s.conceptType?.label || s.conceptType?.name}: ${formatCurrency(s.amount)}`)
+      .map((s) => `${formatServiceLabel(s)}: ${formatCurrency(s.amount)}`)
       .join('\n')
   }
 
