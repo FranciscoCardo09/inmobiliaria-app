@@ -75,14 +75,20 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
-  // Base de punitorios: la bonificación (servicesTotal negativo) NO debe reducir
-  // la base de punitorios del alquiler. Regla: mes abierto = solo alquiler.
-  // Clampeamos servicesTotal a >=0 para que un neto negativo no se reste como si
-  // fuera alquiler ya pagado (esto solo cambia el caso de bonificación; con
-  // servicios positivos da idéntico a unpaidRent).
+  // Base de punitorios:
+  // - Mientras el total NO-punitorio (alquiler + servicios netos + IVA) NO esté
+  //   cubierto, los punitorios van sobre el alquiler bruto: la bonificación
+  //   (servicesTotal negativo) NO reduce la base (clamp a >=0).
+  // - Una vez que los créditos cubren ese total neto, la base pasa a 0: no se
+  //   acumulan más punitorios sobre la parte bonificada (que nunca se paga).
+  const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
+  const netNonPunitoryOwed = round2(Math.max(record.rentAmount + servicesTotal + ivaForPunitory, 0));
+  const rentFullyCovered = totalCredits >= netNonPunitoryOwed - 0.01;
   const servicesOwedForPunitory = Math.max(servicesTotal, 0);
   const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
-  const unpaidRentForPunitory = round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
+  const unpaidRentForPunitory = rentFullyCovered
+    ? 0
+    : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
 
   // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
   const frozenPunitory = record.punitoryAmount || 0;
@@ -248,7 +254,12 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
       where: { id: monthlyRecordId },
       data: {
         punitoryAmount,
-        punitoryDays: forgivePunitorios ? 0 : punitory.days,
+        // Si este pago no acumula días nuevos pero sigue habiendo punitorios
+        // (frozen/acumulados), preservar los días que ya tenía el record en lugar
+        // de pisarlos con 0 (si no, el recibo mostraría "Punitorios (0 días)").
+        punitoryDays: forgivePunitorios
+          ? 0
+          : (punitory.days > 0 ? punitory.days : (record.punitoryDays || 0)),
         punitoryForgiven: forgivePunitorios,
       },
     });
@@ -298,11 +309,16 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
-  // Base de punitorios: la bonificación (servicesTotal negativo) NO reduce la base
-  // de punitorios del alquiler (mismo criterio que registerPayment).
+  // Base de punitorios (mismo criterio que registerPayment): la bonificación no
+  // reduce la base mientras el neto no esté cubierto; una vez cubierto, base = 0.
+  const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
+  const netNonPunitoryOwed = round2(Math.max(record.rentAmount + servicesTotal + ivaForPunitory, 0));
+  const rentFullyCovered = totalCredits >= netNonPunitoryOwed - 0.01;
   const servicesOwedForPunitory = Math.max(servicesTotal, 0);
   const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
-  const unpaidRentForPunitory = round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
+  const unpaidRentForPunitory = rentFullyCovered
+    ? 0
+    : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
 
   // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
   const frozenPunitoryPreview = record.punitoryAmount || 0;
