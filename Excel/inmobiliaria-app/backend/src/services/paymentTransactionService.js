@@ -74,6 +74,15 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
+  // Base de punitorios: la bonificación (servicesTotal negativo) NO debe reducir
+  // la base de punitorios del alquiler. Regla: mes abierto = solo alquiler.
+  // Clampeamos servicesTotal a >=0 para que un neto negativo no se reste como si
+  // fuera alquiler ya pagado (esto solo cambia el caso de bonificación; con
+  // servicios positivos da idéntico a unpaidRent).
+  const servicesOwedForPunitory = Math.max(servicesTotal, 0);
+  const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
+  const unpaidRentForPunitory = round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
+
   // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
   const frozenPunitory = record.punitoryAmount || 0;
   const _crReg = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
@@ -90,7 +99,7 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     paymentDate,
     record.periodMonth,
     record.periodYear,
-    unpaidRent,  // Only calculate on unpaid rent
+    unpaidRentForPunitory,  // Only calculate on unpaid rent (bonificación no reduce la base)
     contract.punitoryStartDay,
     contract.punitoryGraceDay,
     contract.punitoryPercent,
@@ -288,6 +297,12 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
+  // Base de punitorios: la bonificación (servicesTotal negativo) NO reduce la base
+  // de punitorios del alquiler (mismo criterio que registerPayment).
+  const servicesOwedForPunitory = Math.max(servicesTotal, 0);
+  const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
+  const unpaidRentForPunitory = round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
+
   // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
   const frozenPunitoryPreview = record.punitoryAmount || 0;
   const _crPrev = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
@@ -300,7 +315,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
     paymentDate,
     record.periodMonth,
     record.periodYear,
-    unpaidRent,  // Only calculate on unpaid rent
+    unpaidRentForPunitory,  // Only calculate on unpaid rent (bonificación no reduce la base)
     record.contract.punitoryStartDay,
     record.contract.punitoryGraceDay,
     record.contract.punitoryPercent,
@@ -315,6 +330,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
     amount: round2(unpaidFrozenPunitoryPreview + result.amount),
     baseRent: record.rentAmount,
     unpaidRent,
+    unpaidRentForPunitory, // base real sobre la que se calculan los punitorios
     punitoryPercent: record.contract.punitoryPercent,
     punitoryStartDay: record.contract.punitoryStartDay,
     punitoryGraceDay: record.contract.punitoryGraceDay,

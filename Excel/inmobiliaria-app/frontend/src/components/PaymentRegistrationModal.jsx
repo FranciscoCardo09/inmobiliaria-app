@@ -397,7 +397,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                 <div>Vencimiento: día {punitoryPreview.punitoryGraceDay} ({formatDateLocal(punitoryPreview.graceDate)})</div>
                 {punitoryPreview.days > 0 && (
                   <>
-                    <div>Tasa diaria: {((punitoryPreview.punitoryPercent || 0) * 100).toFixed(2)}% sobre {formatCurrency(punitoryPreview.unpaidRent != null ? punitoryPreview.unpaidRent : punitoryPreview.baseRent)}</div>
+                    <div>Tasa diaria: {((punitoryPreview.punitoryPercent || 0) * 100).toFixed(2)}% sobre {formatCurrency(punitoryPreview.unpaidRentForPunitory != null ? punitoryPreview.unpaidRentForPunitory : (punitoryPreview.unpaidRent != null ? punitoryPreview.unpaidRent : punitoryPreview.baseRent))}</div>
                     {punitoryPreview.fromDate && punitoryPreview.toDate && (
                       <div>Calculados desde <span className="font-semibold">{formatDateLocal(punitoryPreview.fromDate)}</span> hasta <span className="font-semibold">{formatDateLocal(punitoryPreview.toDate)}</span></div>
                     )}

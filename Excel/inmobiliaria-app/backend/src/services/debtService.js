@@ -113,7 +113,12 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       const ivaAmount = monthlyRecord.ivaAmount || 0;
       const prevBalance = monthlyRecord.previousBalance || 0;
       const totalCredits = amountPaid + prevBalance;
-      const paidTowardRent = Math.max(totalCredits - servicesTotal - ivaAmount, 0);
+      // La bonificación (servicesTotal negativo) NO debe reducir la base de
+      // punitorios del alquiler acumulados durante el mes abierto (mismo criterio
+      // que paymentTransactionService). Clampeamos a >=0 para que un neto negativo
+      // no se reste como si fuera alquiler ya pagado.
+      const servicesOwedForPunitory = Math.max(servicesTotal, 0);
+      const paidTowardRent = Math.max(totalCredits - servicesOwedForPunitory - ivaAmount, 0);
       const unpaidRent = Math.max(monthlyRecord.rentAmount - paidTowardRent, 0);
 
       // Get last payment date (if partial payment was made)
