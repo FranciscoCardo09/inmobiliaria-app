@@ -10,6 +10,8 @@ const {
   getDebtById,
   getDebtPunitoryPreview,
   payDebtHandler,
+  bulkDebtPreviewHandler,
+  payDebtsBulkHandler,
   cancelDebtPaymentHandler,
   forgiveDebtHandler,
   checkCanPayCurrentMonth,
@@ -23,6 +25,8 @@ router.use(authenticate);
 router.get('/debts', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getAllDebts);
 router.get('/debts/open', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getOpen);
 router.get('/debts/summary', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getSummary);
+router.post('/debts/pay-bulk/preview', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), bulkDebtPreviewHandler);
+router.post('/debts/pay-bulk', requireGroupAccess(['ADMIN', 'OPERATOR']), payDebtsBulkHandler);
 router.get('/debts/:id', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getDebtById);
 router.get('/debts/:id/punitory-preview', requireGroupAccess(['ADMIN', 'OPERATOR', 'VIEWER']), getDebtPunitoryPreview);
 router.post('/debts/:id/pay', requireGroupAccess(['ADMIN', 'OPERATOR']), payDebtHandler);

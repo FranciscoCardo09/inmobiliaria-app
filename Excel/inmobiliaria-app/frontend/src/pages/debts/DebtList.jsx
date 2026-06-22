@@ -6,6 +6,7 @@ import Card from '../../components/ui/Card'
 import { LoadingPage } from '../../components/ui/Loading'
 import EmptyState from '../../components/ui/EmptyState'
 import DebtPaymentModal from '../../components/DebtPaymentModal'
+import BulkDebtPaymentModal from '../../components/BulkDebtPaymentModal'
 import SendNotificationModal from '../../components/notifications/SendNotificationModal'
 import { useNotifications } from '../../hooks/useNotifications'
 import {
@@ -40,13 +41,19 @@ export default function DebtList() {
   const [paymentModal, setPaymentModal] = useState({ open: false, debt: null })
   const [selectedDebtIds, setSelectedDebtIds] = useState([])
   const [showSendModal, setShowSendModal] = useState(false)
+  const [showBulkPayModal, setShowBulkPayModal] = useState(false)
   const { sendDebtors } = useNotifications(currentGroupId)
 
-  const { debts, isLoading, summary, payDebt, isPaying, forgiveDebt, isForgiving } = useDebts(currentGroupId, {
+  const { debts, isLoading, summary, payDebt, isPaying, payDebtsBulk, isPayingBulk, forgiveDebt, isForgiving } = useDebts(currentGroupId, {
     status: statusFilter || undefined,
   })
 
   if (isLoading) return <LoadingPage />
+
+  // Deudas seleccionadas (objetos). El pago múltiple exige un único contrato.
+  const selectedDebts = debts.filter((d) => selectedDebtIds.includes(d.id) && d.status !== 'PAID')
+  const selectedContractIds = [...new Set(selectedDebts.map((d) => d.contractId))]
+  const canBulkPay = selectedDebts.length > 0 && selectedContractIds.length === 1
 
   const openDebts = debts.filter((d) => d.status !== 'PAID')
   const blockedContracts = [...new Set(openDebts.map((d) => d.contractId))]
@@ -139,14 +146,29 @@ export default function DebtList() {
             <option value="PARTIAL">Parciales</option>
             <option value="PAID">Pagadas</option>
           </select>
-          {selectedDebtIds.length > 0 && (
-            <button
-              className="btn btn-sm btn-primary gap-1 ml-auto"
-              onClick={() => setShowSendModal(true)}
-            >
-              <BellIcon className="w-4 h-4" />
-              Avisar {selectedDebtIds.length} deudores
-            </button>
+          {selectedDebts.length > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              <div
+                className={!canBulkPay ? 'tooltip tooltip-left' : ''}
+                data-tip={!canBulkPay ? 'Seleccioná deudas de un solo inquilino' : undefined}
+              >
+                <button
+                  className="btn btn-sm btn-success gap-1"
+                  disabled={!canBulkPay}
+                  onClick={() => setShowBulkPayModal(true)}
+                >
+                  <CurrencyDollarIcon className="w-4 h-4" />
+                  Pagar {selectedDebts.length} seleccionadas
+                </button>
+              </div>
+              <button
+                className="btn btn-sm btn-primary gap-1"
+                onClick={() => setShowSendModal(true)}
+              >
+                <BellIcon className="w-4 h-4" />
+                Avisar {selectedDebtIds.length} deudores
+              </button>
+            </div>
           )}
         </div>
       </Card>
@@ -315,6 +337,20 @@ export default function DebtList() {
           onPay={payDebt}
           isPaying={isPaying}
           onClose={() => setPaymentModal({ open: false, debt: null })}
+        />
+      )}
+
+      {/* Bulk Payment Modal */}
+      {showBulkPayModal && canBulkPay && (
+        <BulkDebtPaymentModal
+          debts={selectedDebts}
+          groupId={currentGroupId}
+          onPay={payDebtsBulk}
+          isPaying={isPayingBulk}
+          onClose={() => {
+            setShowBulkPayModal(false)
+            setSelectedDebtIds([])
+          }}
         />
       )}
 

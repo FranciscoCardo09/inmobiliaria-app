@@ -5,6 +5,8 @@ const {
   getDebts,
   getDebtsSummary,
   payDebt,
+  payDebtsBulk,
+  previewBulkDebtPayment,
   cancelDebtPayment,
   forgiveDebt,
   canPayCurrentMonth,
@@ -118,6 +120,57 @@ const payDebtHandler = async (req, res, next) => {
     return ApiResponse.success(res, result, 'Pago de deuda registrado');
   } catch (error) {
     if (error.message === 'Esta deuda ya está pagada' || error.code === 'ORDER_BLOCK') {
+      return ApiResponse.badRequest(res, error.message);
+    }
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/debts/pay-bulk/preview
+const bulkDebtPreviewHandler = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { debtIds, paymentDate } = req.body;
+
+    if (!Array.isArray(debtIds) || debtIds.length === 0) {
+      return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
+    }
+
+    const preview = await previewBulkDebtPayment(groupId, debtIds, paymentDate);
+    return ApiResponse.success(res, preview);
+  } catch (error) {
+    if (error.code === 'ORDER_BLOCK' || error.message?.includes('deuda')) {
+      return ApiResponse.badRequest(res, error.message);
+    }
+    next(error);
+  }
+};
+
+// POST /api/groups/:groupId/debts/pay-bulk
+const payDebtsBulkHandler = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { debtIds, amount, paymentDate, paymentMethod, observations } = req.body;
+
+    if (!Array.isArray(debtIds) || debtIds.length === 0) {
+      return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
+    }
+    if (!amount || parseFloat(amount) <= 0) {
+      return ApiResponse.badRequest(res, 'Monto inválido');
+    }
+
+    const result = await payDebtsBulk(
+      groupId,
+      debtIds,
+      parseFloat(amount),
+      paymentDate || new Date().toISOString(),
+      paymentMethod || 'EFECTIVO',
+      observations
+    );
+
+    return ApiResponse.success(res, result, 'Pago múltiple registrado');
+  } catch (error) {
+    if (error.code === 'ORDER_BLOCK' || error.message?.includes('deuda') || error.message?.includes('contrato') || error.message?.includes('Monto')) {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
@@ -269,6 +322,8 @@ module.exports = {
   getDebtById,
   getDebtPunitoryPreview,
   payDebtHandler,
+  bulkDebtPreviewHandler,
+  payDebtsBulkHandler,
   cancelDebtPaymentHandler,
   forgiveDebtHandler,
   checkCanPayCurrentMonth,

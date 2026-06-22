@@ -61,6 +61,20 @@ export const useDebts = (groupId, filters = {}) => {
     },
   })
 
+  const payDebtsBulkMutation = useMutation({
+    mutationFn: async ({ debtIds, ...data }) => {
+      const response = await api.post(`/groups/${groupId}/debts/pay-bulk`, { debtIds, ...data })
+      return { result: response.data.data, debtIds }
+    },
+    onSuccess: async (data, variables) => {
+      await Promise.all((variables.debtIds || []).map((id) => invalidateDebtRelated(id)))
+      toast.success('Pago múltiple registrado')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al registrar el pago múltiple')
+    },
+  })
+
   const cancelPaymentMutation = useMutation({
     mutationFn: async ({ debtId, paymentId }) => {
       const response = await api.delete(`/groups/${groupId}/debts/${debtId}/payments/${paymentId}`)
@@ -96,6 +110,8 @@ export const useDebts = (groupId, filters = {}) => {
     isSummaryLoading: summaryQuery.isLoading,
     payDebt: payDebtMutation.mutateAsync,
     isPaying: payDebtMutation.isPending,
+    payDebtsBulk: payDebtsBulkMutation.mutateAsync,
+    isPayingBulk: payDebtsBulkMutation.isPending,
     cancelPayment: cancelPaymentMutation.mutateAsync,
     isCancelingPayment: cancelPaymentMutation.isPending,
     forgiveDebt: forgiveDebtMutation.mutateAsync,
@@ -147,6 +163,23 @@ export const useDebtPunitoryPreview = (groupId, debtId, paymentDate) => {
       return response.data.data
     },
     enabled: !!groupId && !!debtId && !!paymentDate,
+    staleTime: 30 * 1000,
+  })
+}
+
+export const useBulkDebtPreview = (groupId, debtIds, paymentDate) => {
+  // Sorted+joined key so the query is stable regardless of selection order
+  const idsKey = [...(debtIds || [])].sort().join(',')
+  return useQuery({
+    queryKey: ['bulkDebtPreview', groupId, idsKey, paymentDate],
+    queryFn: async () => {
+      const response = await api.post(`/groups/${groupId}/debts/pay-bulk/preview`, {
+        debtIds,
+        paymentDate,
+      })
+      return response.data.data
+    },
+    enabled: !!groupId && (debtIds?.length || 0) > 0 && !!paymentDate,
     staleTime: 30 * 1000,
   })
 }

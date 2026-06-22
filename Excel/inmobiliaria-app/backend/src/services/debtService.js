@@ -609,6 +609,151 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   return { debt: updatedDebt, payment: debtPayment };
 };
 
+// Normaliza una fecha de pago a Date. Acepta "YYYY-MM-DD" (la fija al mediodía local
+// para evitar corrimientos de zona) o un ISO completo / Date.
+const toPaymentDate = (paymentDate) => {
+  if (!paymentDate) return new Date();
+  if (typeof paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+    return new Date(paymentDate + 'T12:00:00');
+  }
+  return new Date(paymentDate);
+};
+
+/**
+ * Cargar y validar un conjunto de deudas seleccionadas para pago múltiple.
+ * Reglas: todas del mismo grupo, mismo contrato (o misma cadena de renovación),
+ * ninguna pagada, y deben formar un prefijo contiguo de los períodos impagos
+ * (empezar en el más antiguo, sin saltear meses) para no romper el orden cronológico.
+ *
+ * @returns {{ debts: object[], contractId: string }} deudas ordenadas más viejo→más nuevo
+ */
+const loadAndValidateBulkDebts = async (groupId, debtIds) => {
+  if (!Array.isArray(debtIds) || debtIds.length === 0) {
+    throw new Error('Debe seleccionar al menos una deuda');
+  }
+
+  const debts = await prisma.debt.findMany({
+    where: { id: { in: debtIds } },
+    include: { payments: true },
+  });
+
+  if (debts.length !== debtIds.length) {
+    throw new Error('Alguna de las deudas seleccionadas no existe');
+  }
+  if (debts.some((d) => d.groupId !== groupId)) {
+    throw new Error('Alguna deuda no pertenece a este grupo');
+  }
+  if (debts.some((d) => d.status === 'PAID')) {
+    throw new Error('Alguna de las deudas seleccionadas ya está pagada');
+  }
+
+  // Mismo contrato (admitiendo la cadena de renovación)
+  const chain = await expandToChain(debts[0].contractId);
+  const chainSet = new Set(chain);
+  if (debts.some((d) => !chainSet.has(d.contractId))) {
+    throw new Error('El pago múltiple solo admite deudas de un mismo inquilino/contrato');
+  }
+
+  // Ordenar más viejo → más nuevo
+  debts.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+
+  // Validar contigüidad: todo período impago anterior al más nuevo seleccionado
+  // debe estar incluido en la selección (si no, payDebt bloquearía por orden).
+  const unpaidPeriods = await getUnpaidPeriods(groupId, debts[0].contractId);
+  const selectedKeys = new Set(debts.map((d) => periodKey(d)));
+  const newestSelectedKey = Math.max(...debts.map((d) => periodKey(d)));
+  const missing = unpaidPeriods.find(
+    (p) => periodKey(p) <= newestSelectedKey && !selectedKeys.has(periodKey(p))
+  );
+  if (missing) {
+    const error = new Error(`Debe incluir ${missing.periodLabel} en la selección (es un período impago anterior).`);
+    error.code = 'ORDER_BLOCK';
+    error.blockingPeriod = missing;
+    throw error;
+  }
+
+  return { debts, contractId: debts[0].contractId };
+};
+
+/**
+ * Preview del pago múltiple: total a pagar de cada deuda a la fecha elegida.
+ * El frontend usa estos totales para repartir el monto en vivo (waterfall).
+ */
+const previewBulkDebtPayment = async (groupId, debtIds, paymentDate) => {
+  const { debts } = await loadAndValidateBulkDebts(groupId, debtIds);
+  const date = toPaymentDate(paymentDate);
+
+  const items = [];
+  for (const debt of debts) {
+    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate } =
+      await calculateDebtPunitory(debt, date);
+    items.push({
+      id: debt.id,
+      periodLabel: debt.periodLabel,
+      periodMonth: debt.periodMonth,
+      periodYear: debt.periodYear,
+      remainingServices: remainingServices || 0,
+      remainingRent: remainingRent || 0,
+      punitory: amount,
+      punitoryDays: days,
+      totalToPay: round2(remainingDebt + amount),
+      fromDate: startDate,
+      toDate: endDate,
+    });
+  }
+
+  const total = round2(items.reduce((s, it) => s + it.totalToPay, 0));
+  return { debts: items, total };
+};
+
+/**
+ * Pago múltiple de deudas (waterfall): reparte un monto entre varias deudas del
+ * mismo contrato, de la más vieja a la más nueva, reutilizando payDebt por cada una.
+ * El excedente (si el monto supera el total) se aplica a la última deuda como
+ * sobrepago → saldo a favor del próximo mes.
+ */
+const payDebtsBulk = async (groupId, debtIds, totalAmount, paymentDate, paymentMethod = 'EFECTIVO', observations = null) => {
+  const amount = parseFloat(totalAmount);
+  if (!amount || amount <= 0) throw new Error('Monto inválido');
+
+  const { debts } = await loadAndValidateBulkDebts(groupId, debtIds);
+  const date = toPaymentDate(paymentDate);
+
+  // Total a pagar de cada deuda a la fecha elegida (mismo cálculo que hará payDebt)
+  const totals = [];
+  for (const debt of debts) {
+    const { amount: punitory, remainingDebt } = await calculateDebtPunitory(debt, date);
+    totals.push(round2(remainingDebt + punitory));
+  }
+
+  let remaining = amount;
+  const results = [];
+  for (let i = 0; i < debts.length; i++) {
+    if (remaining <= 0) break;
+    const debt = debts[i];
+    const isLast = i === debts.length - 1;
+    // A la última deuda alcanzada se le asigna todo lo que reste (excedente → SOBREPAGO)
+    let alloc = isLast ? remaining : Math.min(remaining, totals[i]);
+    alloc = round2(alloc);
+    if (alloc <= 0) continue;
+
+    const { debt: updatedDebt } = await payDebt(debt.id, alloc, paymentDate, paymentMethod, observations);
+    results.push({
+      debtId: debt.id,
+      periodLabel: debt.periodLabel,
+      allocated: alloc,
+      status: updatedDebt.status,
+    });
+    remaining = round2(remaining - alloc);
+  }
+
+  return {
+    results,
+    totalApplied: round2(amount - Math.max(remaining, 0)),
+    remaining: Math.max(remaining, 0),
+  };
+};
+
 /**
  * Obtener deudas abiertas (OPEN o PARTIAL) para un grupo.
  * Opcionalmente filtrar por contrato.
@@ -1223,6 +1368,8 @@ module.exports = {
   calculateImputation,
   preloadDebtDependencies,
   payDebt,
+  payDebtsBulk,
+  previewBulkDebtPayment,
   cancelDebtPayment,
   forgiveDebt,
   recalculateDebtFromMonthlyRecord,
