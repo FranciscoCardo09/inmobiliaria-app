@@ -1034,7 +1034,13 @@ const _recalculateCore = async (recordIds, tx) => {
     where: { OR: orConditions },
     include: {
       services: { include: { conceptType: { select: { category: true } } } },
-      transactions: true,
+      // Ordenadas por fecha para que "la última transacción" (punitorio congelado del
+      // último pago) sea determinista. `concepts` se usa para sumar los punitorios
+      // efectivamente imputados a lo largo de TODAS las transacciones del mes.
+      transactions: {
+        orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+        include: { concepts: { select: { type: true, amount: true } } },
+      },
     },
     orderBy: [
       { contractId: 'asc' },
@@ -1059,14 +1065,33 @@ const _recalculateCore = async (recordIds, tx) => {
 
     const amountPaid = record.transactions.reduce((sum, t) => sum + t.amount, 0);
 
+    // `punitoryAmount` PERSISTIDO: sigue siendo el punitorio congelado del ÚLTIMO pago.
+    // Otros consumidores (creación de deuda, arrastre de unpaidFrozenPunitory, recibos)
+    // dependen de esta semántica "frozen del último pago"; no se debe cambiar.
     let punitoryAmount = record.punitoryAmount;
     let punitoryDays = record.punitoryDays;
     let punitoryForgiven = false;
+    // `totalPunitory`: punitorios efectivamente IMPUTADOS a lo largo de TODAS las
+    // transacciones del mes (suma de conceptos 'PUNITORIOS'). Es lo que se usa en
+    // `totalDue` para que `balance` no genere un saldo a favor falso cuando los
+    // punitorios se pagan en varias tandas (caso típico de deudores: un pago de deuda
+    // más un pago posterior de punitorios). Para un mes con una sola transacción esta
+    // suma equivale al punitorio de esa única transacción → comportamiento idéntico.
+    let totalPunitory = 0;
     if (record.transactions.length > 0) {
       const lastTx = record.transactions[record.transactions.length - 1];
       punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
       punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
       punitoryForgiven = lastTx.punitoryForgiven;
+      totalPunitory = Math.round(
+        record.transactions.reduce((sum, t) => {
+          if (t.punitoryForgiven) return sum;
+          const txPunitory = (t.concepts || [])
+            .filter((c) => c.type === 'PUNITORIOS')
+            .reduce((a, c) => a + c.amount, 0);
+          return sum + txPunitory;
+        }, 0) * 100
+      ) / 100;
     } else {
       punitoryAmount = 0;
       punitoryDays = 0;
@@ -1085,7 +1110,10 @@ const _recalculateCore = async (recordIds, tx) => {
       : runningPreviousBalance;
 
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
-    const totalDue = record.rentAmount + servicesTotal + punitoryAmount + ivaAmount - activePreviousBalance;
+    // Usar `totalPunitory` (suma de punitorios imputados en todas las transacciones),
+    // NO `punitoryAmount` (solo el del último pago), para que `balance` refleje los
+    // punitorios realmente pagados y no genere saldo a favor falso en deudores.
+    const totalDue = record.rentAmount + servicesTotal + totalPunitory + ivaAmount - activePreviousBalance;
     const balance = Math.round((amountPaid - Math.max(totalDue, 0)) * 100) / 100;
     const effectiveBalance = balance + (record.balanceForgiven || 0);
 

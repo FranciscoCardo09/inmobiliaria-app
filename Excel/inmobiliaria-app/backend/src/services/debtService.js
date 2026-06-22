@@ -362,14 +362,21 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
   const holidays = await getHolidays();
 
   if (remainingBase <= 0) {
-    // Todo el base pagado; pueden quedar punitorios acumulados
+    // Todo el alquiler+servicios pagado; pueden quedar punitorios acumulados impagos.
     const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : new Date(debt.punitoryStartDate);
+
+    // Los punitorios nuevos se calculan SOBRE EL SALDO PENDIENTE REAL = punitorio impago
+    // (acumulado − lo ya pagado a punitorios), NO sobre el acumulado total. Usar el total
+    // cobraría punitorios sobre punitorios YA pagados (regla confirmada: "de cada saldo
+    // pendiente hay que cobrar punitorios").
+    const amountPaidToPunitory = round2(Math.max(0, debt.amountPaid - totalBase));
+    const unpaidAccumulated = round2(Math.max(0, accumulatedPunitory - amountPaidToPunitory));
 
     const newPunitorios = calculatePunitoryV2(
       paymentDate,
       debt.periodMonth,
       debt.periodYear,
-      accumulatedPunitory,
+      unpaidAccumulated,
       contract.punitoryStartDay,
       contract.punitoryGraceDay,
       contract.punitoryPercent,
@@ -378,7 +385,6 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     );
 
     const totalPunitory = round2(accumulatedPunitory + newPunitorios.amount);
-    const amountPaidToPunitory = round2(Math.max(0, debt.amountPaid - totalBase));
     const unpaidPunitory = round2(Math.max(0, totalPunitory - amountPaidToPunitory));
 
     if (unpaidPunitory <= 0) {
