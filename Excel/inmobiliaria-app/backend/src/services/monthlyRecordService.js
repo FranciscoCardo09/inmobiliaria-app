@@ -1126,10 +1126,13 @@ const _recalculateCore = async (recordIds, tx) => {
       where: { monthlyRecordId: record.id, status: { in: ['OPEN', 'PARTIAL'] } },
     });
 
+    // Un saldo condonado (balanceForgiven) salda el registro aunque no haya pago real:
+    // permite "perdonar multa"/condonar el total de un registro nunca pagado (status COMPLETE).
+    const isForgiven = (record.balanceForgiven || 0) > 0;
     let status = 'PENDING';
     if (openDebt) {
       status = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
-    } else if (effectiveBalance >= -1 && amountPaid > 0) {
+    } else if (effectiveBalance >= -1 && (amountPaid > 0 || isForgiven)) {
       status = 'COMPLETE';
     } else if (amountPaid > 0) {
       status = 'PARTIAL';

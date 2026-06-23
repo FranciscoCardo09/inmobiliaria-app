@@ -400,10 +400,24 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
             <button
               className="btn btn-xs btn-warning btn-outline"
               onClick={() => {
-                if (window.confirm(`¿Revertir condonación de ${formatCurrency(record.balanceForgiven)}?`))
+                const msg = isPenalty
+                  ? `¿Revertir perdón de multa de ${formatCurrency(record.balanceForgiven)}?`
+                  : `¿Revertir condonación de ${formatCurrency(record.balanceForgiven)}?`
+                if (window.confirm(msg))
                   onForgiveBalance({ recordId: record.id, forgive: false })
               }}
-              title="Revertir condonación"
+              title={isPenalty ? 'Revertir perdón de multa' : 'Revertir condonación'}
+            >
+              <NoSymbolIcon className="w-3 h-3" />
+            </button>
+          ) : isPenalty && record.status !== 'COMPLETE' && !record.debtInfo && record.balance < 0 && !record.needsRecalculation ? (
+            <button
+              className="btn btn-xs btn-warning btn-outline"
+              onClick={() => {
+                if (window.confirm(`¿Perdonar multa de ${formatCurrency(Math.abs(record.balance))}?`))
+                  onForgiveBalance({ recordId: record.id, forgive: true })
+              }}
+              title="Perdonar multa"
             >
               <NoSymbolIcon className="w-3 h-3" />
             </button>
