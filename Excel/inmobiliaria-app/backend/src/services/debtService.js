@@ -333,12 +333,15 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
   const totalBase = round2(unpaidRentAmount + unpaidServicesAmount);
   const remainingBase = round2(Math.max(totalBase - debt.amountPaid, 0));
 
-  // Regla de base para punitorios (confirmada con el usuario):
-  // los punitorios se calculan sobre TODO lo que falta pagar = alquiler + servicios
-  // (los servicios incluyen IVA y ya vienen netos de descuentos), menos lo pagado.
-  // unpaidServicesAmount = "Servicios + IVA impagos" (ver createDebtFromMonthlyRecord),
-  // por eso remainingBase ya contempla servicios e IVA.
-  const punitoryBase = remainingBase;
+  // Regla de base para punitorios:
+  //  - Si NUNCA hubo un pago (ni del MonthlyRecord original → previousRecordPayment,
+  //    ni de la deuda → amountPaid): los punitorios van SOLO sobre el alquiler.
+  //  - Si hubo algún pago: van sobre el saldo restante = (alquiler + servicios) - pagos.
+  // (unpaidServicesAmount = servicios + IVA impagos; ya viene neto de descuentos.)
+  const hasPayment = (debt.amountPaid || 0) > 0 || (debt.previousRecordPayment || 0) > 0;
+  const punitoryBase = hasPayment
+    ? remainingBase
+    : round2(Math.max(unpaidRentAmount - (debt.amountPaid || 0), 0));
 
   // Para display: cuánto queda de servicios vs alquiler (imputación servicios → alquiler)
   const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);

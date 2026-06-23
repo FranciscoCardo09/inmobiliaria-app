@@ -131,6 +131,7 @@ async function setupContracts() {
   await createContract('C19_credit_consume', { baseRent: 300000 });
   await createContract('C20_everything', { baseRent: 450000, pagaIva: true, comprobantes: ['RECIBO'], services: [['LUZ', 12000], ['MUNI', 6000]] });
   await createContract('C21_credit_to_debt', { baseRent: 300000 }); // sobrepaga mes 1 → crédito; mes 2 no paga → deuda con crédito aplicado
+  await createContract('C22_none_services', { baseRent: 300000, services: [['LUZ', 40000], ['MUNI', 10000]] }); // nunca paga + servicios → punitorios SOLO sobre alquiler
 
   // C15: ajuste de alquiler a partir del mes 3 (Marzo) → 360000
   await prisma.rentHistory.create({
@@ -231,6 +232,7 @@ async function run() {
     for (const [key, cfg] of Object.entries(C)) {
       for (const [cname, amount] of (cfg.services || [])) {
         await svcSvc.bulkAssign(GID, cfg.id, CT[cname], amount, [{ month: m, year: y }], `sim ${cname}`);
+        await flush(); // recalc de servicios es async (dirty); drenar antes del próximo para evitar carrera
       }
     }
     await flush();
@@ -516,6 +518,20 @@ async function verifyAll() {
   {
     const debts = await prisma.debt.count({ where: { contractId: C.C06_none.id } });
     check('C06: genera deudas (nunca paga)', debts >= 1, `deudas=${debts}`);
+  }
+  // C22: nunca paga PERO tiene servicios → punitorios SOLO sobre el alquiler (servicios NO en la base).
+  {
+    const d = await prisma.debt.findFirst({ where: { contractId: C.C22_none_services.id, status: 'OPEN' }, orderBy: { periodMonth: 'asc' } });
+    if (d) {
+      check('C22: deuda nunca pagada tiene servicios impagos', r2(d.unpaidServicesAmount) > 0, `unpaidServ=${fmt(d.unpaidServicesAmount)}`);
+      const cur = await debtSvc.calculateDebtPunitory(d, '2026-06-22', null, true);
+      const days = cur.days || 0;
+      const punitSoloAlquiler = r2(d.unpaidRentAmount * 0.006 * days);
+      const punitConServicios = r2((d.unpaidRentAmount + d.unpaidServicesAmount) * 0.006 * days);
+      check('C22: punitorios SIN pago van solo sobre alquiler (no servicios)',
+        Math.abs(r2(cur.newPunitoryAmount) - punitSoloAlquiler) < Math.abs(r2(cur.newPunitoryAmount) - punitConServicios),
+        `punit=${fmt(cur.newPunitoryAmount)} soloAlq=${fmt(punitSoloAlquiler)} conServ=${fmt(punitConServicios)}`);
+    } else check('C22: tiene deuda OPEN', false, 'sin deuda');
   }
   // C21: saldo a favor (100000) NO reduce la base de punitorios; se aplica al total.
   // La deuda de Febrero debe tener unpaidRentAmount = alquiler COMPLETO (300000) y
