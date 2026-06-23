@@ -368,6 +368,11 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
   const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
+  // Total adeudado consolidado = lo impago del mes actual + deudas formales de meses anteriores.
+  // previousBalance solo acarrea SALDO A FAVOR (crédito), nunca deuda → no hay doble conteo con totalDeuda.
+  const totalDeuda = (contract.debts || []).reduce((sum, d) => sum + d.currentTotal, 0);
+  const totalSinAbonar = pendingAmount + totalDeuda;
+
   // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - descuentos
   // DESCUENTO reduce el alquiler cobrado (y por ende los honorarios). BONIFICACION no.
   // El saldo a favor previo (prevCredit) representa alquiler de este mes pagado con crédito de
@@ -448,7 +453,8 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
       pendiente: d.currentTotal,
       status: d.status,
     })),
-    totalDeuda: (contract.debts || []).reduce((sum, d) => sum + d.currentTotal, 0),
+    totalDeuda,
+    totalSinAbonar,
     transacciones: monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
       inquilino: getTenantsName(contract), propiedad: contract.property.address,
@@ -622,6 +628,113 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         });
       }
     }
+  }
+
+  // ============================================
+  // COBRADO DE DEUDAS ANTERIORES (vista de caja)
+  // ============================================
+  // Pagos cuya FECHA REAL (paymentDate) cae dentro del mes/año seleccionado
+  // pero cuyo MonthlyRecord pertenece a OTRO período (deudas/meses anteriores).
+  // Esto incluye los pagos de deudas, que debtService.payDebt() registra como
+  // PaymentTransaction apuntando al MonthlyRecord del período original.
+  const cobrosByContract = await (async () => {
+    const map = new Map();
+    // Rango del mes en fecha LOCAL (paymentDate se guarda a mediodía local)
+    const fromDate = new Date(year, month - 1, 1, 0, 0, 0);
+    const toDate = new Date(year, month, 0, 23, 59, 59);
+
+    // Reusar el mismo filtro de contrato que la query principal
+    const recordWhere = buildBaseWhere(); // { groupId, contract:{...}, [contractId], [isCancelled] }
+    delete recordWhere.isCancelled;       // queremos todos los cobros, no solo registros cancelados
+
+    const txs = await prisma.paymentTransaction.findMany({
+      where: {
+        groupId,
+        paymentDate: { gte: fromDate, lte: toDate },
+        monthlyRecord: {
+          ...recordWhere,
+          // Solo períodos ANTERIORES al seleccionado (no el propio mes ni meses futuros adelantados)
+          OR: [
+            { periodYear: { lt: year } },
+            { periodYear: year, periodMonth: { lt: month } },
+          ],
+        },
+      },
+      include: {
+        concepts: true,
+        monthlyRecord: {
+          select: {
+            periodMonth: true,
+            periodYear: true,
+            contractId: true,
+            contract: {
+              select: {
+                contractType: true,
+                tenant: { select: { name: true } },
+                contractTenants: { select: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
+                property: { select: { address: true, floor: true, apartment: true, owner: { select: { name: true } } } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    for (const tx of txs) {
+      const rec = tx.monthlyRecord;
+      if (!rec) continue;
+      const cid = rec.contractId;
+      const punitorios = (tx.concepts || [])
+        .filter((c) => c.type === 'PUNITORIOS')
+        .reduce((s, c) => s + (c.amount || 0), 0);
+      if (!map.has(cid)) map.set(cid, { total: 0, detalle: [], contract: rec.contract });
+      const entry = map.get(cid);
+      entry.total += tx.amount || 0;
+      let det = entry.detalle.find((d) => d.periodMonth === rec.periodMonth && d.periodYear === rec.periodYear);
+      if (!det) {
+        det = { periodLabel: `${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear}`, periodMonth: rec.periodMonth, periodYear: rec.periodYear, monto: 0, punitorios: 0 };
+        entry.detalle.push(det);
+      }
+      det.monto += tx.amount || 0;
+      det.punitorios += punitorios;
+    }
+    for (const entry of map.values()) {
+      entry.detalle.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+    }
+    return map;
+  })();
+
+  // Adjuntar a cada liquidación su bloque de cobros de otros períodos
+  const cobrosAttached = new Set();
+  for (const liq of result) {
+    const entry = cobrosByContract.get(liq.contractId);
+    if (entry && entry.total > 0.009) {
+      liq.cobradoOtrosPeriodos = { total: entry.total, detalle: entry.detalle };
+      cobrosAttached.add(liq.contractId);
+    } else {
+      liq.cobradoOtrosPeriodos = null;
+    }
+  }
+
+  // Contratos que cobraron deudas viejas en el período pero no figuran en el resultado del período
+  for (const [cid, entry] of cobrosByContract.entries()) {
+    if (cobrosAttached.has(cid) || entry.total <= 0.009) continue;
+    const c = entry.contract || {};
+    const isProp = c.contractType === 'PROPIETARIO';
+    const nombre = isProp
+      ? (c.property?.owner?.name || 'Propietario')
+      : (c.contractTenants?.length ? c.contractTenants.map((ct) => ct.tenant.name).join(' / ') : (c.tenant?.name || 'Sin inquilino'));
+    result.push({
+      contractId: cid,
+      contractType: c.contractType || 'INQUILINO',
+      propiedad: { direccion: c.property?.address || 'Sin dirección', piso: c.property?.floor, depto: c.property?.apartment },
+      inquilino: { nombre },
+      periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}` },
+      conceptos: [], serviciosDisponibles: [], deudas: [], totalDeuda: 0,
+      total: 0, amountPaid: 0, paymentStatus: 'SOLO DEUDAS ANTERIORES',
+      cobradoOtrosPeriodos: { total: entry.total, detalle: entry.detalle },
+    });
   }
 
   // Natural sort by address: handles numbers correctly (Torre 1, Torre 2, ..., Torre 10)

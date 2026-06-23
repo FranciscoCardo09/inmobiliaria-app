@@ -1337,7 +1337,14 @@ const generateLiquidacionAllPDF = (dataArray) => {
       if (data.deudas && data.deudas.length > 0) {
         deudasH = 15 + data.deudas.length * 15 + 15 + 20 + 15;
       }
-      const cardH = 42 + cardRows * 15 + deudasH;
+      const cobr = data.cobradoOtrosPeriodos;
+      let cobradosH = 0;
+      if (cobr && cobr.total > 0) {
+        cobradosH = 4 + 15 + cobr.detalle.length * 15 + 18;
+      }
+      const showSinAbonar = (data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0;
+      const sinAbonarH = showSinAbonar ? 18 : 0;
+      const cardH = 42 + cardRows * 15 + deudasH + cobradosH + sinAbonarH;
       checkNewPage(cardH + 8);
 
       // Property card - thin border; colored by status
@@ -1402,7 +1409,29 @@ const generateLiquidacionAllPDF = (dataArray) => {
         iy += 15;
       }
 
+      // Total combinado sin abonar: deudas anteriores + mes actual impago
+      if (showSinAbonar) {
+        iy += 3;
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text('TOTAL SIN ABONAR (deudas + mes actual)', PAGE.margin + 12, iy, { width: W * 0.6 });
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.totalSinAbonar, currency), PAGE.margin + 12, iy, { width: W - 24, align: 'right' });
+        iy += 15;
+      }
 
+      // Cobrado de deudas anteriores (vista de caja del período)
+      if (cobr && cobr.total > 0) {
+        iy += 4;
+        doc.font(F.b).fontSize(8).fillColor('#0066CC')
+          .text(`Cobrado de deudas anteriores (en ${data.periodo.label})`, PAGE.margin + 12, iy, { width: W - 24 });
+        iy += 15;
+        for (const d of cobr.detalle) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodLabel}`, PAGE.margin + 24, iy, { width: W * 0.4 });
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.monto, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+          iy += 15;
+        }
+        doc.font(F.b).fontSize(8).fillColor('#0066CC').text('Total cobrado períodos ant.', PAGE.margin + 24, iy);
+        doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(cobr.total, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+        iy += 18;
+      }
 
       y += cardH + 8;
     }

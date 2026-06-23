@@ -530,7 +530,7 @@ function LiquidacionTab({ groupId }) {
 
           <Card title={`Detalle - ${monthNames[month]} ${year}`}>
             {effectiveData
-              .filter((d) => !soloConPago || d.paymentStatus === 'PAGADO' || d.paymentStatus === 'SALDO A FAVOR' || d.noData)
+              .filter((d) => !soloConPago || d.paymentStatus === 'PAGADO' || d.paymentStatus === 'SALDO A FAVOR' || d.noData || (d.cobradoOtrosPeriodos && d.cobradoOtrosPeriodos.total > 0))
               .map((data, idx) => {
               const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ')
               const selState = gastosAMiCargo[data.contractId] || { serviceIds: [], extras: [] }
@@ -562,7 +562,55 @@ function LiquidacionTab({ groupId }) {
                 'SALDO A FAVOR': { cls: 'badge-info',   label: 'SALDO A FAVOR' },
                 'PAGO PARCIAL': { cls: 'badge-warning',  label: 'PAGO PARCIAL' },
                 'NO COBRADO':   { cls: 'badge-error',   label: 'SIN ABONAR' },
+                'SOLO DEUDAS ANTERIORES': { cls: 'badge-info', label: 'COBRÓ DEUDAS ANT.' },
               }[data.paymentStatus]
+
+              // Bloque "Cobrado de deudas anteriores" (vista de caja del período seleccionado)
+              const cobrados = data.cobradoOtrosPeriodos
+              const cobradosBlock = (cobrados && cobrados.total > 0) ? (
+                <div className="mb-4">
+                  <h4 className="font-semibold text-sm mb-2">Cobrado de deudas anteriores (en {data.periodo.label})</h4>
+                  <div className="overflow-x-auto bg-info/10 rounded-lg">
+                    <table className="table table-xs">
+                      <thead>
+                        <tr>
+                          <th className="pl-4">Período de la deuda</th>
+                          <th className="text-right">Punitorios</th>
+                          <th className="text-right">Cobrado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cobrados.detalle.map((d, di) => (
+                          <tr key={di}>
+                            <td className="pl-4">{d.periodLabel}</td>
+                            <td className="text-right">{formatCurrency(d.punitorios)}</td>
+                            <td className="text-right font-semibold">{formatCurrency(d.monto)}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-base-300">
+                          <td colSpan="2" className="pl-4 text-right font-bold">TOTAL COBRADO DE PERÍODOS ANTERIORES</td>
+                          <td className="text-right font-bold text-info">{formatCurrency(cobrados.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null
+
+              // Entrada sintética: solo cobró deudas anteriores en el período, sin liquidación propia del mes
+              if (data.paymentStatus === 'SOLO DEUDAS ANTERIORES') {
+                return (
+                  <div key={data.contractId || idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
+                      {statusBadge && <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>}
+                      {periodSelector}
+                    </div>
+                    <p className="text-xs text-base-content/60 mb-2">Sin liquidación propia de {data.periodo.label}; durante el período se cobraron deudas de meses anteriores.</p>
+                    {cobradosBlock}
+                  </div>
+                )
+              }
 
               if (data.noData) {
                 return (
@@ -620,6 +668,8 @@ function LiquidacionTab({ groupId }) {
                     </div>
                   )}
 
+                  {cobradosBlock}
+
                   {/* Conceptos table */}
                   {data.deudas && data.deudas.length > 0 && (
                     <h4 className="font-semibold text-sm mt-2 mb-2">Liquidación Actual</h4>
@@ -644,6 +694,14 @@ function LiquidacionTab({ groupId }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Total combinado sin abonar: deudas anteriores + mes actual impago */}
+                  {data.totalDeuda > 0 && data.pendingAmount > 0 && (
+                    <div className="mt-2 p-2 bg-error/10 rounded-lg flex justify-between items-center">
+                      <span className="text-sm font-bold text-error">TOTAL SIN ABONAR (deudas + mes actual)</span>
+                      <span className="text-sm font-bold text-error">{formatCurrency(data.totalSinAbonar)}</span>
+                    </div>
+                  )}
 
                   {/* Payment breakdown */}
                   {(data.amountPaid > 0) && (

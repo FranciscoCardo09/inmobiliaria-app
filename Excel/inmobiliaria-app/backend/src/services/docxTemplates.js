@@ -383,6 +383,7 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
         ...(data.paymentStatus === 'NO COBRADO' ? [new TextRun({ text: '  [NO COBRADO]', bold: true, size: 16, font: 'Arial', color: 'CC0000' })] : []),
         ...(data.paymentStatus === 'PAGO PARCIAL' ? [new TextRun({ text: `  [PARCIAL ${fmt(data.amountPaid, currency)} / ${fmt(data.total, currency)}]`, bold: true, size: 16, font: 'Arial', color: '8B6914' })] : []),
         ...(data.paymentStatus === 'SALDO A FAVOR' ? [new TextRun({ text: `  [SALDO A FAVOR: ${fmt(data.saldoAFavor || 0, currency)}]`, bold: true, size: 16, font: 'Arial', color: '0066CC' })] : []),
+        ...(data.paymentStatus === 'SOLO DEUDAS ANTERIORES' ? [new TextRun({ text: '  [COBRÓ DEUDAS ANTERIORES]', bold: true, size: 16, font: 'Arial', color: '0066CC' })] : []),
       ],
       spacing: { before: 80, after: 40 },
     }));
@@ -398,14 +399,54 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       }));
     }
 
-    children.push(new Paragraph({
-      children: [
-        new TextRun({ text: '    Subtotal', bold: true, size: 18, font: 'Arial', color: BLACK }),
-        new TextRun({ text: `\t${fmt(data.total, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
-      ],
-      tabStops: [{ type: 'right', position: 9000 }],
-      spacing: { after: 60 },
-    }));
+    if (conceptosFiltered.length > 0 || data.paymentStatus !== 'SOLO DEUDAS ANTERIORES') {
+      children.push(new Paragraph({
+        children: [
+          new TextRun({ text: '    Subtotal', bold: true, size: 18, font: 'Arial', color: BLACK }),
+          new TextRun({ text: `\t${fmt(data.total, currency)}`, bold: true, size: 18, font: 'Arial', color: BLACK }),
+        ],
+        tabStops: [{ type: 'right', position: 9000 }],
+        spacing: { after: 60 },
+      }));
+    }
+
+    // Total combinado sin abonar: deudas anteriores + mes actual impago
+    if ((data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0) {
+      children.push(new Paragraph({
+        children: [
+          new TextRun({ text: '    TOTAL SIN ABONAR (deudas + mes actual)', bold: true, size: 18, font: 'Arial', color: 'CC0000' }),
+          new TextRun({ text: `\t${fmt(data.totalSinAbonar, currency)}`, bold: true, size: 18, font: 'Arial', color: 'CC0000' }),
+        ],
+        tabStops: [{ type: 'right', position: 9000 }],
+        spacing: { after: 60 },
+      }));
+    }
+
+    // Cobrado de deudas anteriores (vista de caja del período)
+    const cobr = data.cobradoOtrosPeriodos;
+    if (cobr && cobr.total > 0) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: `    Cobrado de deudas anteriores (en ${data.periodo.label})`, bold: true, size: 16, font: 'Arial', color: '0066CC' })],
+        spacing: { before: 40, after: 20 },
+      }));
+      for (const d of cobr.detalle) {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `        ${d.periodLabel}`, size: 16, font: 'Arial', color: MEDIUM }),
+            new TextRun({ text: `\t${fmt(d.monto, currency)}`, size: 16, font: 'Arial', color: DARK }),
+          ],
+          tabStops: [{ type: 'right', position: 9000 }],
+        }));
+      }
+      children.push(new Paragraph({
+        children: [
+          new TextRun({ text: '    Total cobrado períodos anteriores', bold: true, size: 16, font: 'Arial', color: '0066CC' }),
+          new TextRun({ text: `\t${fmt(cobr.total, currency)}`, bold: true, size: 16, font: 'Arial', color: '0066CC' }),
+        ],
+        tabStops: [{ type: 'right', position: 9000 }],
+        spacing: { after: 60 },
+      }));
+    }
 
     children.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { after: 80 } }));
   }

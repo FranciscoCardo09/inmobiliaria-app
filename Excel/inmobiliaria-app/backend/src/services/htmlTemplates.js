@@ -182,6 +182,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const statusColors = {
       'PAGADO': '#228B22', 'PAGO PARCIAL': '#8B6914',
       'NO COBRADO': '#CC0000', 'SALDO A FAVOR': '#0066CC',
+      'SOLO DEUDAS ANTERIORES': '#0066CC',
     };
     const statusColor = statusColors[data.paymentStatus] || '#666';
     const statusBadge = `<span style="font-family:Arial;font-size:8pt;font-weight:bold;color:${statusColor};margin-left:8px">${data.paymentStatus}</span>`;
@@ -205,6 +206,29 @@ const generateLiquidacionAllHTML = (dataArray) => {
       breakdownHtml = `<table style="width:100%;margin-top:4px;border-top:1px solid #E0E0E0;padding-top:4px">${bRows.join('')}</table>`;
     }
 
+    // Total combinado sin abonar: deudas anteriores + mes actual impago
+    let sinAbonarHtml = '';
+    if ((data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0) {
+      sinAbonarHtml = `<div style="margin-top:4px;padding:4px 8px;background:#FBEAEA;display:flex;justify-content:space-between">
+        <strong style="font-family:Arial;font-size:9pt;color:#CC0000">TOTAL SIN ABONAR (deudas + mes actual)</strong>
+        <strong style="font-family:Arial;font-size:9pt;color:#CC0000">${fmt(data.totalSinAbonar, currency)}</strong>
+      </div>`;
+    }
+
+    // Cobrado de deudas anteriores (vista de caja del período)
+    let cobradosHtml = '';
+    const cobr = data.cobradoOtrosPeriodos;
+    if (cobr && cobr.total > 0) {
+      const cRows = cobr.detalle.map(d =>
+        `<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;color:#666">${escHtml(d.periodLabel)}</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;color:#333;text-align:right">${fmt(d.monto, currency)}</td></tr>`
+      ).join('');
+      cobradosHtml = `<table style="width:100%;margin-top:4px;border-top:1px solid #A0D0FF;padding-top:4px">
+        <tr><td colspan="2" style="padding:2px 12px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC">Cobrado de deudas anteriores (en ${escHtml(data.periodo.label)})</td></tr>
+        ${cRows}
+        <tr><td style="padding:2px 12px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC">Total cobrado períodos anteriores</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC;text-align:right">${fmt(cobr.total, currency)}</td></tr>
+      </table>`;
+    }
+
     return `
     <div style="margin-bottom:10px;padding:10px;background:#FAFAFA;border:1px solid ${borderColor};page-break-inside:avoid;break-inside:avoid">
       <div style="display:flex;justify-content:space-between">
@@ -216,7 +240,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
           ${data.paymentStatus === 'PAGO PARCIAL' ? `${fmt(data.amountPaid || 0, currency)} <span style="font-weight:normal;font-size:9pt;color:#666">/ ${fmt(data.total, currency)}</span>` : fmt(data.total, currency)}
         </strong>
       </div>
-      <table style="width:100%;margin-top:6px">${rows}</table>${breakdownHtml}
+      <table style="width:100%;margin-top:6px">${rows}</table>${sinAbonarHtml}${breakdownHtml}${cobradosHtml}
     </div>`;
   }).join('');
 

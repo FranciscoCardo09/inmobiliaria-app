@@ -192,8 +192,16 @@ const generateLiquidacionExcel = async (dataArray) => {
   }
 
   // Individual sheets per tenant
+  const usedSheetNames = new Set();
   dataArray.forEach((data) => {
-    const sheetName = data.inquilino.nombre.substring(0, 30).replace(/[*?/\\[\]]/g, '');
+    let sheetName = data.inquilino.nombre.substring(0, 30).replace(/[*?/\\[\]]/g, '') || 'Inquilino';
+    if (usedSheetNames.has(sheetName)) {
+      let n = 2;
+      let candidate = `${sheetName.substring(0, 27)} (${n})`;
+      while (usedSheetNames.has(candidate)) { n += 1; candidate = `${sheetName.substring(0, 27)} (${n})`; }
+      sheetName = candidate;
+    }
+    usedSheetNames.add(sheetName);
     const sheet = workbook.addWorksheet(sheetName);
 
     // Header info
@@ -245,6 +253,31 @@ const generateLiquidacionExcel = async (dataArray) => {
       const alqRow = sheet.addRow(['Alquileres', '', data.subtotalAlquileres]);
       alqRow.getCell(1).font = { bold: true };
       alqRow.getCell(3).numFmt = CURRENCY_FORMAT;
+    }
+
+    // Total combinado sin abonar: deudas anteriores + mes actual impago
+    if ((data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0) {
+      const sinAbonarRow = sheet.addRow(['TOTAL SIN ABONAR (deudas + mes actual)', '', data.totalSinAbonar]);
+      sinAbonarRow.getCell(1).font = { bold: true, color: { argb: 'FFCC0000' } };
+      sinAbonarRow.getCell(3).font = { bold: true, color: { argb: 'FFCC0000' } };
+      sinAbonarRow.getCell(3).numFmt = CURRENCY_FORMAT;
+    }
+
+    // Cobrado de deudas anteriores (vista de caja del período)
+    const cobr = data.cobradoOtrosPeriodos;
+    if (cobr && cobr.total > 0) {
+      sheet.addRow([]);
+      const cobrHeader = sheet.addRow([`Cobrado de deudas anteriores (en ${data.periodo.label})`, 'Punitorios', 'Cobrado']);
+      applyHeaderStyle(cobrHeader);
+      cobr.detalle.forEach((d, i) => {
+        const row = sheet.addRow([d.periodLabel, d.punitorios, d.monto]);
+        applyDataRowStyle(row, i);
+        row.getCell(2).numFmt = CURRENCY_FORMAT;
+        row.getCell(3).numFmt = CURRENCY_FORMAT;
+      });
+      const cobrTotal = sheet.addRow(['Total cobrado períodos anteriores', '', cobr.total]);
+      applyTotalRowStyle(cobrTotal);
+      cobrTotal.getCell(3).numFmt = CURRENCY_FORMAT;
     }
 
     // Status
