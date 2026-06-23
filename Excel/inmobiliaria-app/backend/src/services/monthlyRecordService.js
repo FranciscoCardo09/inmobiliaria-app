@@ -819,12 +819,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     if (debtInfo && record.debt) {
       // Punitorios del periodo tomados de la DEUDA (fuente de verdad), SIN duplicar:
-      //  - Anteriores = punitorio acumulado/congelado de la deuda (ya cargado, pagado o no).
-      //  - Actuales   = punitorios nuevos en vivo desde el último pago.
-      // (El código anterior sumaba recordPunitoriosPaid + debtPunitoriosPagados, que son el
-      //  MISMO dinero —los pagos del record SON los pagos de la deuda—, duplicando el monto.)
-      punitoriosAnteriores = record.debt.accumulatedPunitory || 0;
-      punitoriosActuales = debtInfo.newPunitoryAmount || 0;
+      if (record.debt.status === 'PAID') {
+        // Deuda saldada: los punitorios cargados (y pagados) = acumulado de la deuda.
+        punitoriosAnteriores = record.debt.accumulatedPunitory || 0;
+        punitoriosActuales = 0;
+      } else {
+        // Deuda viva: punitorios IMPAGOS = viejos impagos (anteriores) + nuevos en vivo (actuales).
+        // OJO: NO usar accumulatedPunitory + newPunitoryAmount. Para una deuda NUNCA pagada,
+        // newPunitoryAmount ya cuenta desde el inicio del período, así que incluye lo que
+        // accumulatedPunitory (congelado al cierre) representa → se duplicaría (caso Airaldi).
+        // unpaidAccumulatedPunitory es 0 cuando no hubo pagos, y el viejo impago cuando sí.
+        punitoriosAnteriores = debtInfo.unpaidAccumulatedPunitory || 0;
+        punitoriosActuales = debtInfo.newPunitoryAmount || 0;
+      }
       totalPunitoriosHistoricos = Math.round((punitoriosAnteriores + punitoriosActuales) * 100) / 100;
 
       // Días de mora para mostrar en el frontend

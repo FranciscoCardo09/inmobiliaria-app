@@ -251,6 +251,8 @@ async function run() {
   }
 
   console.log('\n===== VERIFICACIÓN =====');
+  // Fijar un "hoy" consistente para toda la verificación (punitorios en vivo deterministas).
+  global.__setNow(2026, 6, 22);
   await verifyAll();
   await verifyReports();
   await verifyEnrichedHistorico();
@@ -604,10 +606,23 @@ async function verifyEnrichedHistorico() {
       const expHist = Math.max(r2(r.rentAmount + r.servicesTotal + (r.totalPunitoriosHistoricos || 0) + iva - r.previousBalance), 0);
       check(`[${tag}] totalHistorico = adeudado (no incluye sobrepago)`, Math.abs(r2(r.totalHistorico) - expHist) <= 2,
         `hist=${fmt(r.totalHistorico)} esperado=${fmt(expHist)}`);
-      // 2) sin doble conteo: para records con deuda, punitoriosAnteriores = accumulated de la deuda
+      // 2) sin doble conteo de punitorios en la grilla: totalPunitoriosHistoricos debe igualar
+      //    el punitorio REAL de la deuda (no accumulated + live, que duplica en deudas nunca pagadas).
       if (r.debt) {
-        check(`[${tag}] punitoriosAnteriores = acumulado deuda (sin duplicar)`, Math.abs(r2(r.punitoriosAnteriores) - r2(r.debt.accumulatedPunitory || 0)) <= 2,
-          `ant=${fmt(r.punitoriosAnteriores)} accum=${fmt(r.debt.accumulatedPunitory)}`);
+        if (r.debt.status === 'PAID') {
+          check(`[${tag}] punitorios histórico = acumulado (deuda saldada)`, Math.abs(r2(r.totalPunitoriosHistoricos) - r2(r.debt.accumulatedPunitory || 0)) <= 2,
+            `hist=${fmt(r.totalPunitoriosHistoricos)} accum=${fmt(r.debt.accumulatedPunitory)}`);
+        } else {
+          const cur = await debtSvc.calculateDebtPunitory(r.debt, '2026-06-22', null, true);
+          const realPunit = r2((cur.unpaidAccumulatedPunitory || 0) + (cur.newPunitoryAmount || 0));
+          check(`[${tag}] punitorios histórico = impago real (sin duplicar)`, Math.abs(r2(r.totalPunitoriosHistoricos) - realPunit) <= 2,
+            `hist=${fmt(r.totalPunitoriosHistoricos)} real=${fmt(realPunit)}`);
+          // nunca pagada → no debe haber "anteriores" (todo es "actual")
+          if (r2(r.debt.amountPaid || 0) === 0) {
+            check(`[${tag}] deuda nunca pagada: punitoriosAnteriores = 0`, r2(r.punitoriosAnteriores) <= 1,
+              `anteriores=${fmt(r.punitoriosAnteriores)}`);
+          }
+        }
       }
       // 3) saldo a favor mostrado (aFavorNextMonth) sólo si sobrepago real
       if ((r.aFavorNextMonth || 0) > 1) {
