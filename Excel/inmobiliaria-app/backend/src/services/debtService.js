@@ -47,11 +47,12 @@ function calculateImputation(monthlyRecord) {
   const punitoryAmount = monthlyRecord.punitoryAmount || 0;
   const ivaAmount = monthlyRecord.ivaAmount || 0;
   const amountPaid = monthlyRecord.amountPaid || 0;
-  const previousBalance = monthlyRecord.previousBalance || 0;
 
-  // Imputar primero a servicios, luego a IVA, luego a alquiler, luego a punitorios
-  // previousBalance (saldo a favor anterior) cuenta como crédito igual que amountPaid
-  let remaining = amountPaid + previousBalance;
+  // Imputar primero a servicios, luego a IVA, luego a alquiler, luego a punitorios.
+  // IMPORTANTE: el saldo a favor del mes anterior (previousBalance) NO se imputa acá:
+  // no debe reducir la base de los punitorios. Se aplica al TOTAL al final (appliedCredit).
+  // Solo los pagos REALES (amountPaid) cubren conceptos para determinar lo impago.
+  let remaining = amountPaid;
 
   // 1. Cubrir servicios
   const servicesCovered = Math.min(remaining, servicesTotal);
@@ -111,8 +112,9 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       const amountPaid = monthlyRecord.amountPaid || 0;
       const servicesTotal = monthlyRecord.servicesTotal || 0;
       const ivaAmount = monthlyRecord.ivaAmount || 0;
-      const prevBalance = monthlyRecord.previousBalance || 0;
-      const totalCredits = amountPaid + prevBalance;
+      // Base de punitorios: SOLO los pagos reales (amountPaid). El saldo a favor del
+      // mes anterior NO reduce la base (se aplica al total al final).
+      const totalCredits = amountPaid;
       // La bonificación (servicesTotal negativo) NO debe reducir la base de
       // punitorios del alquiler acumulados durante el mes abierto (mismo criterio
       // que paymentTransactionService). Clampeamos a >=0 para que un neto negativo
@@ -160,8 +162,14 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   const { unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, totalUnpaid } = calculateImputation(recordWithCurrentPunitorios);
 
+  // Saldo a favor del mes anterior: se aplica al TOTAL (no a la base de punitorios).
+  // unpaidRent/unpaidServices/unpaidPunitory ya están calculados con la base completa
+  // (sin restar el crédito); acá descontamos el crédito del total adeudado.
+  const appliedCredit = round2(Math.min(Math.max(monthlyRecord.previousBalance || 0, 0), totalUnpaid));
+  const netUnpaid = round2(totalUnpaid - appliedCredit);
+
   // Si no queda nada impago (ni alquiler ni punitorios), o queda menos de $1 por decimales, no crear deuda
-  if (totalUnpaid <= 1) {
+  if (netUnpaid <= 1) {
     return null;
   }
 
@@ -203,8 +211,9 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       unpaidRentAmount: unpaidRent,
       unpaidServicesAmount: unpaidServices, // Servicios + IVA impagos
       previousRecordPayment, // Cuánto pagó antes de cerrar (para mostrar al usuario)
+      appliedCredit, // Saldo a favor del mes anterior (se resta del total, no de la base de punitorios)
       accumulatedPunitory: unpaidPunitory, // Punitorios impagos del MonthlyRecord
-      currentTotal: unpaidRent + unpaidServices + unpaidPunitory, // Total impago
+      currentTotal: round2(unpaidRent + unpaidServices + unpaidPunitory - appliedCredit), // Total impago neto del crédito
       amountPaid: initialDebtPaid, // Siempre 0 al crear (pagos de la deuda)
       punitoryPercent: contract.punitoryPercent,
       punitoryStartDate,
@@ -446,7 +455,9 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
     newPunitoryAmount: result.amount,
     accumulatedPunitory,
     unpaidAccumulatedPunitory,
-    remainingDebt: remainingBase,
+    // remainingDebt (para mostrar el total adeudado) va NETO del saldo a favor.
+    // La base de punitorios usó `remainingBase` completo (sin el crédito) más arriba.
+    remainingDebt: round2(Math.max(remainingBase - (debt.appliedCredit || 0), 0)),
     remainingServices,
     remainingRent,
     startDate: result.fromDate,
@@ -542,7 +553,8 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   // Actualizar deuda
   const newAmountPaid = round2(debt.amountPaid + parsedAmount);
   const newAccumulatedPunitory = punitoryAmount;
-  const newCurrentTotal = round2(debt.unpaidRentAmount + unpaidServicesNow + newAccumulatedPunitory - newAmountPaid);
+  // El saldo a favor (appliedCredit) reduce el TOTAL, no la base de punitorios.
+  const newCurrentTotal = round2(debt.unpaidRentAmount + unpaidServicesNow + newAccumulatedPunitory - (debt.appliedCredit || 0) - newAmountPaid);
 
   let status = 'OPEN';
   let closedAt = null;
@@ -1158,7 +1170,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     data: {
       amountPaid: newAmountPaid,
       accumulatedPunitory: newAccumulatedPunitory,
-      currentTotal: Math.max(debt.unpaidRentAmount + (debt.unpaidServicesAmount || 0) + newAccumulatedPunitory - newAmountPaid, 0),
+      currentTotal: Math.max(debt.unpaidRentAmount + (debt.unpaidServicesAmount || 0) + newAccumulatedPunitory - (debt.appliedCredit || 0) - newAmountPaid, 0),
       lastPaymentDate: newLastPaymentDate,
       status: newStatus,
       closedAt: newStatus === 'PAID' ? debt.closedAt : null,
@@ -1271,7 +1283,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
       unpaidRentAmount: unpaidRent,
       unpaidServicesAmount: unpaidServices,
       previousRecordPayment: monthlyRecord.amountPaid || 0,
-      currentTotal: Math.max(totalBase + debt.accumulatedPunitory - debt.amountPaid, 0),
+      currentTotal: Math.max(totalBase + debt.accumulatedPunitory - (debt.appliedCredit || 0) - debt.amountPaid, 0),
       status: newStatus,
       closedAt,
     },

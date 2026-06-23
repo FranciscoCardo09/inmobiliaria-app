@@ -130,6 +130,7 @@ async function setupContracts() {
   await createContract('C18_two_debts', { baseRent: 250000 });
   await createContract('C19_credit_consume', { baseRent: 300000 });
   await createContract('C20_everything', { baseRent: 450000, pagaIva: true, comprobantes: ['RECIBO'], services: [['LUZ', 12000], ['MUNI', 6000]] });
+  await createContract('C21_credit_to_debt', { baseRent: 300000 }); // sobrepaga mes 1 → crédito; mes 2 no paga → deuda con crédito aplicado
 
   // C15: ajuste de alquiler a partir del mes 3 (Marzo) → 360000
   await prisma.rentHistory.create({
@@ -319,6 +320,9 @@ async function doMonthPayments(y, m, i) {
   // C20: todo junto — mes par parcial, impar full late
   if (i % 2 === 0) await payFullLate('C20_everything', y, m, 25);
   else await pay('C20_everything', y, m, r2((await net('C20_everything')) * 0.5), 8);
+  // C21: mes 1 sobrepaga (+100000 crédito); mes 2 NO paga → deuda con saldo a favor aplicado
+  if (i === 0) await pay('C21_credit_to_debt', y, m, (await net('C21_credit_to_debt')) + 100000, 5);
+  // meses 2-4: no paga (queda deuda con el crédito aplicado al total, punitorios sobre alquiler completo)
 }
 
 // pagos de deuda — se ejecutan después de cerrar el mes `m`
@@ -439,7 +443,7 @@ async function verifyAll() {
   }
 
   // F) NO saldo a favor falso: balance>1 sólo en contratos con sobrepago real (C08, C19)
-  const creditAllowed = new Set([C.C08_overpay.id, C.C19_credit_consume.id]);
+  const creditAllowed = new Set([C.C08_overpay.id, C.C19_credit_consume.id, C.C21_credit_to_debt.id]);
   for (const r of recs) {
     if (r2(r.balance) > 1) {
       check(`[${labelOf(r.contractId)} ${MN[r.periodMonth]}] saldo a favor sólo si sobrepago real`,
@@ -510,6 +514,26 @@ async function verifyAll() {
   {
     const debts = await prisma.debt.count({ where: { contractId: C.C06_none.id } });
     check('C06: genera deudas (nunca paga)', debts >= 1, `deudas=${debts}`);
+  }
+  // C21: saldo a favor (100000) NO reduce la base de punitorios; se aplica al total.
+  // La deuda de Febrero debe tener unpaidRentAmount = alquiler COMPLETO (300000) y
+  // appliedCredit ≈ 100000, con punitorios calculados sobre el alquiler completo.
+  {
+    const feb = await recordFor('C21_credit_to_debt', 2026, 2);
+    const d = feb.debt;
+    check('C21: deuda con base de alquiler COMPLETA (crédito no reduce la base)', d && Math.abs(r2(d.unpaidRentAmount) - 300000) <= 1,
+      d ? `unpaidRent=${fmt(d.unpaidRentAmount)} (esperado 300000)` : 'sin deuda Febrero');
+    check('C21: saldo a favor aplicado al total (appliedCredit≈100000)', d && Math.abs(r2(d.appliedCredit) - 100000) <= 1,
+      d ? `appliedCredit=${fmt(d.appliedCredit)}` : 'sin deuda');
+    // punitorios deben calcularse sobre 300000 (no sobre 200000): comparar con la base reducida
+    if (d) {
+      const cur = await debtSvc.calculateDebtPunitory(d, '2026-06-22', null, true);
+      const punitFull = r2(300000 * 0.006 * (cur.days || 0));
+      const punitReduced = r2(200000 * 0.006 * (cur.days || 0));
+      check('C21: punitorios sobre alquiler completo, no sobre (alquiler-crédito)',
+        Math.abs(r2(cur.amount) - punitFull) <= Math.abs(r2(cur.amount) - punitReduced),
+        `punit=${fmt(cur.amount)} full=${fmt(punitFull)} reducido=${fmt(punitReduced)}`);
+    }
   }
 }
 

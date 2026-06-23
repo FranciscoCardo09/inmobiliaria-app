@@ -666,6 +666,7 @@ model Debt {
   unpaidRentAmount       Float     @map("unpaid_rent_amount")       // Alquiler impago post imputación
   unpaidServicesAmount   Float     @default(0) @map("unpaid_services_amount") // Servicios + IVA impagos
   previousRecordPayment  Float     @default(0) @map("previous_record_payment") // Cuánto pagó del MonthlyRecord antes de cerrar
+  appliedCredit          Float     @default(0) @map("applied_credit") // Saldo a favor del mes anterior, aplicado al TOTAL (no a la base de punitorios)
   accumulatedPunitory    Float     @default(0) @map("accumulated_punitory")
 
   currentTotal           Float     @map("current_total")            // unpaidRentAmount + punitorios - pagos

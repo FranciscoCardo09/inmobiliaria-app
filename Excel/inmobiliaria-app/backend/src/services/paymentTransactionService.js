@@ -81,11 +81,14 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   //   (servicesTotal negativo) NO reduce la base (clamp a >=0).
   // - Una vez que los créditos cubren ese total neto, la base pasa a 0: no se
   //   acumulan más punitorios sobre la parte bonificada (que nunca se paga).
+  // IMPORTANTE: la base de punitorios usa SOLO los pagos reales (amountPaidSoFar),
+  // NUNCA el saldo a favor del mes anterior. El crédito se aplica al total al final,
+  // no a la base (restarlo antes bajaría indebidamente los punitorios).
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const netNonPunitoryOwed = round2(Math.max(record.rentAmount + servicesTotal + ivaForPunitory, 0));
-  const rentFullyCovered = totalCredits >= netNonPunitoryOwed - 0.01;
+  const rentFullyCovered = amountPaidSoFar >= netNonPunitoryOwed - 0.01;
   const servicesOwedForPunitory = Math.max(servicesTotal, 0);
-  const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
+  const paidTowardRentForPunitory = round2(Math.max(amountPaidSoFar - servicesOwedForPunitory, 0));
   const unpaidRentForPunitory = rentFullyCovered
     ? 0
     : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
@@ -309,13 +312,15 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
-  // Base de punitorios (mismo criterio que registerPayment): la bonificación no
-  // reduce la base mientras el neto no esté cubierto; una vez cubierto, base = 0.
+  // Base de punitorios: SOLO los pagos reales (amountPaid), NUNCA el saldo a favor del
+  // mes anterior. El crédito se resta del total al final, no de la base de punitorios
+  // (si se restara antes, los punitorios saldrían más bajos). La bonificación no reduce
+  // la base mientras el neto no esté cubierto; una vez cubierto, base = 0.
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const netNonPunitoryOwed = round2(Math.max(record.rentAmount + servicesTotal + ivaForPunitory, 0));
-  const rentFullyCovered = totalCredits >= netNonPunitoryOwed - 0.01;
+  const rentFullyCovered = amountPaid >= netNonPunitoryOwed - 0.01;
   const servicesOwedForPunitory = Math.max(servicesTotal, 0);
-  const paidTowardRentForPunitory = round2(Math.max(totalCredits - servicesOwedForPunitory, 0));
+  const paidTowardRentForPunitory = round2(Math.max(amountPaid - servicesOwedForPunitory, 0));
   const unpaidRentForPunitory = rentFullyCovered
     ? 0
     : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));

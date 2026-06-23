@@ -739,18 +739,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       try {
         const amountPaid = record.amountPaid || 0;
         const servicesTotal = record.servicesTotal || 0;
-        const prevBalance = record.previousBalance || 0;
         const frozenPunitory = record.punitoryAmount || 0;
-        const totalCredits = amountPaid + prevBalance;
+        // Base de punitorios: SOLO pagos reales, NUNCA el saldo a favor del mes anterior.
+        // El crédito (previousBalance) se aplica al total al final (liveTotalDue), no acá.
+        const totalCredits = amountPaid;
         const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
 
-        // Saldo restante base (sin punitorios)
+        // Saldo restante base (sin punitorios), considerando solo pagos reales
         const baseNonPunitory = record.rentAmount + servicesTotal + ivaForPunitory;
         const remainingBalance = Math.max(baseNonPunitory - totalCredits, 0);
 
         // Regla de base para punitorios:
-        // - Sin pagos ni crédito: solo sobre alquiler
-        // - Con pagos: sobre el saldo restante total
+        // - Sin pagos: solo sobre alquiler
+        // - Con pagos: sobre el saldo restante total (sin contar el saldo a favor)
         const punitoryBase = totalCredits <= 0 ? record.rentAmount : remainingBalance;
 
         // Punitorios congelados no cubiertos (para sumar a los nuevos)
