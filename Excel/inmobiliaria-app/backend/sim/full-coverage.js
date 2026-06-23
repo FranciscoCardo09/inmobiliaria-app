@@ -252,6 +252,7 @@ async function run() {
   console.log('\n===== VERIFICACIÓN =====');
   await verifyAll();
   await verifyReports();
+  await verifyEnrichedHistorico();
   await invariantScan();
 
   // ---------- resumen ----------
@@ -561,6 +562,40 @@ async function verifyReports() {
     const ec = await reportSvc.getEstadoCuentasData(GID, C.C05_partial.id);
     check('Reporte Estado de Cuentas corre', !!ec, '');
   } catch (e) { check('Reporte Estado de Cuentas', false, e.message); }
+}
+
+// ---------------- campos "histórico" del Control Mensual (front) ----------------
+// El front usa getOrCreateMonthlyRecords (enriquecido): totalHistorico, punitoriosAnteriores,
+// punitoriosActuales, aFavorNextMonth, debeNextMonth. Verifica que no haya doble conteo de
+// punitorios ni "total" inflado por sobrepago, y que el saldo a favor mostrado sea real.
+async function verifyEnrichedHistorico() {
+  const creditAllowed = new Set([C.C08_overpay.id, C.C19_credit_consume.id]);
+  for (const [y, m] of MONTHS) {
+    const recs = await mrSvc.getOrCreateMonthlyRecords(GID, m, y);
+    await flush();
+    for (const r of recs) {
+      const tag = `${labelOf(r.contractId)} ${MN[m]}`;
+      const iva = r.includeIva ? r.rentAmount * 0.21 : 0;
+      // 1) totalHistorico = alquiler + servicios + iva + punitorios totales - aFavorAnt (lo ADEUDADO)
+      const expHist = Math.max(r2(r.rentAmount + r.servicesTotal + (r.totalPunitoriosHistoricos || 0) + iva - r.previousBalance), 0);
+      check(`[${tag}] totalHistorico = adeudado (no incluye sobrepago)`, Math.abs(r2(r.totalHistorico) - expHist) <= 2,
+        `hist=${fmt(r.totalHistorico)} esperado=${fmt(expHist)}`);
+      // 2) sin doble conteo: para records con deuda, punitoriosAnteriores = accumulated de la deuda
+      if (r.debt) {
+        check(`[${tag}] punitoriosAnteriores = acumulado deuda (sin duplicar)`, Math.abs(r2(r.punitoriosAnteriores) - r2(r.debt.accumulatedPunitory || 0)) <= 2,
+          `ant=${fmt(r.punitoriosAnteriores)} accum=${fmt(r.debt.accumulatedPunitory)}`);
+      }
+      // 3) saldo a favor mostrado (aFavorNextMonth) sólo si sobrepago real
+      if ((r.aFavorNextMonth || 0) > 1) {
+        check(`[${tag}] aFavorNextMonth sólo si sobrepago real`, creditAllowed.has(r.contractId) || r2(r.totalAbonado) > r2(r.totalHistorico),
+          `aFavor=${fmt(r.aFavorNextMonth)} abonado=${fmt(r.totalAbonado)} hist=${fmt(r.totalHistorico)}`);
+      }
+      // 4) aFavor - debe = abonado - totalHistorico (coherencia)
+      const net = r2((r.aFavorNextMonth || 0) - (r.debeNextMonth || 0));
+      const expNet = r2((r.totalAbonado || 0) - r2(r.totalHistorico));
+      check(`[${tag}] aFavor-debe coherente con abonado-total`, Math.abs(net - expNet) <= 2, `net=${fmt(net)} esperado=${fmt(expNet)}`);
+    }
+  }
 }
 
 // ---------------- invariant scan (del harness) ----------------

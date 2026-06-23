@@ -817,33 +817,24 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let totalHistorico = liveTotalDue; // Total con punitorios del record + IVA
 
     if (debtInfo && record.debt) {
-      // Punitorios realmente pagados en el MonthlyRecord (imputación correcta en vez de sumar transacciones crudas)
-      const totalCredits = record.amountPaid + record.previousBalance;
-      const servicesCovered = Math.min(totalCredits, record.servicesTotal);
-      const ivaCovered = Math.min(totalCredits - servicesCovered, record.ivaAmount);
-      const rentCovered = Math.min(totalCredits - servicesCovered - ivaCovered, record.rentAmount);
-      const recordPunitoriosPaid = Math.max(0, totalCredits - servicesCovered - ivaCovered - rentCovered);
-
-      // En la deuda, dividimos claramente entre lo viejo (congelado) y lo nuevo (en vivo)
-      const debtPunitoriosPagados = Math.max(0, record.debt.amountPaid - record.debt.unpaidRentAmount - (record.debt.unpaidServicesAmount || 0));
-      
-      // El total acumulado impago de la deuda que ya existía (antes de nuevos punitorios)
-      const unpaidAccumulated = debtInfo.accumulatedPunitory - debtPunitoriosPagados;
-      
-      // Punitorios Anteriores: Lo pagado históricamente + lo viejo no pagado
-      punitoriosAnteriores = recordPunitoriosPaid + debtPunitoriosPagados + Math.max(0, unpaidAccumulated);
-      
-      // Punitorios Actuales: Exclusivamente los nuevos punitorios en vivo
+      // Punitorios del periodo tomados de la DEUDA (fuente de verdad), SIN duplicar:
+      //  - Anteriores = punitorio acumulado/congelado de la deuda (ya cargado, pagado o no).
+      //  - Actuales   = punitorios nuevos en vivo desde el último pago.
+      // (El código anterior sumaba recordPunitoriosPaid + debtPunitoriosPagados, que son el
+      //  MISMO dinero —los pagos del record SON los pagos de la deuda—, duplicando el monto.)
+      punitoriosAnteriores = record.debt.accumulatedPunitory || 0;
       punitoriosActuales = debtInfo.newPunitoryAmount || 0;
+      totalPunitoriosHistoricos = Math.round((punitoriosAnteriores + punitoriosActuales) * 100) / 100;
 
-      // El total de punitorios en la historia
-      totalPunitoriosHistoricos = punitoriosAnteriores + punitoriosActuales;
-
-      // Corrección de días de mora para mostrar en el frontend
+      // Días de mora para mostrar en el frontend
       livePunitoryDays = debtInfo.livePunitoryDays || 0;
 
-      // Total coherente: lo pagado hasta ahora + lo que todavía se debe
-      totalHistorico = Math.round((record.amountPaid + debtInfo.liveCurrentTotal) * 100) / 100;
+      // Total ADEUDADO real = alquiler + servicios + IVA + punitorios totales - a favor anterior.
+      // NO usar amountPaid: incluiría el sobrepago e inflaría el total ocultando el saldo a favor.
+      totalHistorico = Math.max(
+        Math.round((record.rentAmount + record.servicesTotal + ivaAmount + totalPunitoriosHistoricos - record.previousBalance) * 100) / 100,
+        0
+      );
     }
 
     records.push({
