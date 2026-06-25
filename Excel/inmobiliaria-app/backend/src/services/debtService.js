@@ -498,9 +498,14 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   }
 
   // Calcular punitorios al momento del pago
-  const { amount: punitoryAmount, days, remainingDebt: remainingBase } = await calculateDebtPunitory(debt, paymentDate);
+  const { amount: punitoryAmount, days, remainingDebt: remainingBase, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, paymentDate);
 
-  const totalWithPunitory = remainingBase + punitoryAmount;
+  // Punitorio TOTAL adeudado al momento del pago = acumulado impago de pagos previos
+  // (unpaidAccumulatedPunitory) + nuevo en vivo (punitoryAmount). Antes se usaba solo el
+  // nuevo, por lo que un pago del total real dejaba sin imputar el acumulado y generaba
+  // un saldo a favor falso (y el modal mostraba menos plata que el Control Mensual).
+  const totalPunitoryOwed = round2((unpaidAccumulatedPunitory || 0) + punitoryAmount);
+  const totalWithPunitory = remainingBase + totalPunitoryOwed;
 
   // Crear registro de pago
   const debtPayment = await prisma.debtPayment.create({
@@ -508,7 +513,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
       debtId,
       paymentDate: parseLocalDate(paymentDate),
       amount: parseFloat(amount),
-      punitoryAtPayment: punitoryAmount,
+      punitoryAtPayment: totalPunitoryOwed,
       paymentMethod,
       observations,
     },
@@ -529,7 +534,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   // Topear la porción de punitorios al punitorio REAL adeudado. Lo que sobre es
   // pago en exceso → saldo a favor del próximo mes (NO inflar punitorios, porque
   // eso inflaría el totalDue del MonthlyRecord en el recálculo y anularía el saldo).
-  const punitoryPortion = round2(Math.min(afterRent, punitoryAmount));
+  const punitoryPortion = round2(Math.min(afterRent, totalPunitoryOwed));
   const overpay = round2(Math.max(afterRent - punitoryPortion, 0));
 
   const transaction = await prisma.paymentTransaction.create({
@@ -555,7 +560,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
 
   // Actualizar deuda
   const newAmountPaid = round2(debt.amountPaid + parsedAmount);
-  const newAccumulatedPunitory = punitoryAmount;
+  const newAccumulatedPunitory = totalPunitoryOwed;
   // El saldo a favor (appliedCredit) reduce el TOTAL, no la base de punitorios.
   const newCurrentTotal = round2(debt.unpaidRentAmount + unpaidServicesNow + newAccumulatedPunitory - (debt.appliedCredit || 0) - newAmountPaid);
 
@@ -700,8 +705,11 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate) => {
 
   const items = [];
   for (const debt of debts) {
-    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate } =
+    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate, unpaidAccumulatedPunitory } =
       await calculateDebtPunitory(debt, date);
+    // Punitorios totales impagos = acumulado impago (de pagos previos) + nuevo en vivo.
+    // Sin sumar el acumulado el total quedaba por debajo del real (mismo bug que el preview individual).
+    const totalPunitory = round2((unpaidAccumulatedPunitory || 0) + amount);
     items.push({
       id: debt.id,
       periodLabel: debt.periodLabel,
@@ -709,9 +717,9 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate) => {
       periodYear: debt.periodYear,
       remainingServices: remainingServices || 0,
       remainingRent: remainingRent || 0,
-      punitory: amount,
+      punitory: totalPunitory,
       punitoryDays: days,
-      totalToPay: round2(remainingDebt + amount),
+      totalToPay: round2(remainingDebt + totalPunitory),
       fromDate: startDate,
       toDate: endDate,
     });
