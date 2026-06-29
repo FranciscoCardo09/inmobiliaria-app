@@ -430,18 +430,6 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
       : null;
   }
 
-  const result = calculatePunitoryV2(
-    paymentDate,
-    debt.periodMonth,
-    debt.periodYear,
-    punitoryBase,  // sin pagos → alquiler; con pagos → saldo restante total
-    contract.punitoryStartDay,
-    contract.punitoryGraceDay,
-    contract.punitoryPercent,
-    holidays,
-    effectiveLastPaymentDate
-  );
-
   // Punitorios históricos impagos que no están cubiertos por el cálculo live.
   // Cuando amountPaid === 0: liveAccumulatedPunitory ya cubre desde punitoryStartDate,
   //   por lo que accumulatedPunitory está contenido en él → no sumar.
@@ -451,6 +439,26 @@ const calculateDebtPunitory = async (debt, paymentDate = new Date(), preloaded =
   const unpaidAccumulatedPunitory = debt.amountPaid > 0
     ? round2(Math.max(accumulatedPunitory - paidToPunitory, 0))
     : 0;
+
+  // INTERÉS COMPUESTO: una vez que hubo un pago, los punitorios corren sobre el saldo
+  // restante TOTAL = (alquiler + servicios pendientes) + punitorios acumulados impagos.
+  // Sin ningún pago todavía, la base es solo el alquiler (sin componer) — punitoryBase ya
+  // lo refleja (rama hasPayment=false más arriba).
+  const compoundBase = hasPayment
+    ? round2(punitoryBase + unpaidAccumulatedPunitory)
+    : punitoryBase;
+
+  const result = calculatePunitoryV2(
+    paymentDate,
+    debt.periodMonth,
+    debt.periodYear,
+    compoundBase,  // sin pago → solo alquiler; con pago → saldo restante + punitorios impagos (compuesto)
+    contract.punitoryStartDay,
+    contract.punitoryGraceDay,
+    contract.punitoryPercent,
+    holidays,
+    effectiveLastPaymentDate
+  );
 
   return {
     days: result.days,
