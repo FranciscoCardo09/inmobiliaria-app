@@ -3,6 +3,7 @@ const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/pu
 const { calculateDebtPunitory } = require('./debtService');
 const { calculateNextAdjustmentMonth } = require('./adjustmentService');
 const { MONTH_NAMES } = require('../utils/constants');
+const { sumPunitoryConcepts } = require('../utils/helpers');
 
 const prisma = require('../lib/prisma');
 
@@ -804,6 +805,15 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
     }
 
+    // Registro COMPLETE (sin condonar): el punitorio a MOSTRAR es la SUMA real de los
+    // conceptos PUNITORIOS de todas las transacciones, no el congelado del último pago
+    // (record.punitoryAmount). Si el mes se pagó en varias tandas, el congelado subestima
+    // los punitorios efectivamente cobrados → liveTotalDue/totalHistorico quedaban bajos.
+    // El branch de deuda (más abajo) sobrescribe esto para COMPLETE-con-deuda.
+    if (isFullyPaid && !record.punitoryForgiven) {
+      livePunitoryAmount = sumPunitoryConcepts(record.transactions);
+    }
+
     // Calculate IVA (21% of rent if includeIva is true)
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
 
@@ -1082,15 +1092,7 @@ const _recalculateCore = async (recordIds, tx) => {
       punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
       punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
       punitoryForgiven = lastTx.punitoryForgiven;
-      totalPunitory = Math.round(
-        record.transactions.reduce((sum, t) => {
-          if (t.punitoryForgiven) return sum;
-          const txPunitory = (t.concepts || [])
-            .filter((c) => c.type === 'PUNITORIOS')
-            .reduce((a, c) => a + c.amount, 0);
-          return sum + txPunitory;
-        }, 0) * 100
-      ) / 100;
+      totalPunitory = sumPunitoryConcepts(record.transactions);
     } else {
       punitoryAmount = 0;
       punitoryDays = 0;

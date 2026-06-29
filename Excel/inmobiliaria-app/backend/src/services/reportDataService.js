@@ -1,5 +1,6 @@
 // Report Data Service - Prisma queries for all report types
-const { numeroATexto } = require('../utils/helpers');
+const { numeroATexto, sumPunitoryConcepts } = require('../utils/helpers');
+const { round2 } = require('../utils/punitory');
 const { MONTH_NAMES } = require('../utils/constants');
 const { formatServiceLabel } = require('../utils/serviceLabel');
 
@@ -1069,6 +1070,9 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
         include: { concepts: true },
         orderBy: { paymentDate: 'asc' },
       },
+      debt: {
+        include: { payments: { orderBy: { createdAt: 'asc' } } },
+      },
     },
   });
 
@@ -1122,8 +1126,32 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     // Recibo global del registro (comportamiento original)
     fecha = txs[txs.length - 1]?.paymentDate || new Date();
     paymentMethod = txs[txs.length - 1]?.paymentMethod || 'EFECTIVO';
-    total = record.totalDue;
     receiptNumber = `REC-${record.periodYear}${String(record.periodMonth).padStart(2, '0')}-${record.monthNumber}`;
+
+    // Punitorio REAL del período a mostrar (no el congelado `record.punitoryAmount`):
+    //  - Sin deuda: suma de los conceptos PUNITORIOS de todas las transacciones.
+    //  - Con deuda: el punitorio de la deuda (fuente de verdad), igual que el enrichment
+    //    de Control Mensual (monthlyRecordService): si PAID → accumulatedPunitory; si viva
+    //    → unpaidAccumulatedPunitory + newPunitoryAmount (NO accumulated+new, que duplicaría).
+    let truePunitory = sumPunitoryConcepts(txs);
+    if (record.debt) {
+      if (record.debt.status === 'PAID') {
+        truePunitory = round2(record.debt.accumulatedPunitory || 0);
+      } else {
+        const debtService = require('./debtService');
+        const live = await debtService.calculateDebtPunitory(record.debt, new Date(), null, true);
+        truePunitory = round2((live.unpaidAccumulatedPunitory || 0) + (live.newPunitoryAmount || 0));
+      }
+    }
+
+    // Total canónico = misma fórmula que liveTotalDue/totalHistorico del enrichment,
+    // así el recibo y el modal (Historial / Control Mensual) muestran el MISMO número.
+    const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
+    const truePunitoryForTotal = record.punitoryForgiven ? 0 : truePunitory;
+    total = Math.max(
+      round2(record.rentAmount + record.servicesTotal + ivaAmount + truePunitoryForTotal - record.previousBalance),
+      0
+    );
 
     conceptos = [];
     const mesLabel = MONTH_NAMES[record.periodMonth];
@@ -1159,10 +1187,10 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       });
     }
 
-    if (record.punitoryAmount > 0 && !record.punitoryForgiven) {
+    if (truePunitory > 0 && !record.punitoryForgiven) {
       conceptos.push({
         concepto: `Punitorios (${record.punitoryDays} días)`,
-        importe: record.punitoryAmount,
+        importe: truePunitory,
       });
     }
   }

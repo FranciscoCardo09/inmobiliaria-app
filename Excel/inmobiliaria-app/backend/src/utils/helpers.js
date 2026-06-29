@@ -124,6 +124,23 @@ const getExpiryDate = (days = 7) => {
   return date;
 };
 
+// Suma de los punitorios EFECTIVAMENTE imputados a lo largo de TODAS las transacciones
+// de un mes (suma de conceptos 'PUNITORIOS'), salteando transacciones con punitorio
+// condonado. Es el punitorio REAL del mes — distinto del `record.punitoryAmount`
+// persistido, que es solo el congelado del ÚLTIMO pago. Fuente única usada por el
+// recálculo (totalDue), el enrichment de display y el recibo, para que coincidan.
+const sumPunitoryConcepts = (transactions) => {
+  return Math.round(
+    (transactions || []).reduce((sum, t) => {
+      if (t.punitoryForgiven) return sum;
+      const txPunitory = (t.concepts || [])
+        .filter((c) => c.type === 'PUNITORIOS')
+        .reduce((a, c) => a + c.amount, 0);
+      return sum + txPunitory;
+    }, 0) * 100
+  ) / 100;
+};
+
 module.exports = {
   generateSlug,
   generateInviteToken,
@@ -132,4 +149,5 @@ module.exports = {
   parseDate,
   daysBetween,
   getExpiryDate,
+  sumPunitoryConcepts,
 };

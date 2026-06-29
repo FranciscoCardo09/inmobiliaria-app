@@ -71,7 +71,7 @@ export default function TransactionHistoryModal({ record, groupId, onClose }) {
             </div>
           </div>
           <div className="flex justify-between mt-2 pt-2 border-t border-base-300">
-            <span>Total adeudado: <strong>{formatCurrency(record?.liveTotalDue || record?.totalDue)}</strong></span>
+            <span>Total adeudado: <strong>{formatCurrency(record?.totalHistorico ?? record?.liveTotalDue ?? record?.totalDue)}</strong></span>
             <span>Abonado: <strong className="text-success">{formatCurrency(record?.amountPaid)}</strong></span>
           </div>
         </div>
