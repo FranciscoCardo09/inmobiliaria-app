@@ -1,6 +1,6 @@
 // Report Data Service - Prisma queries for all report types
 const { numeroATexto, sumPunitoryConcepts } = require('../utils/helpers');
-const { round2 } = require('../utils/punitory');
+const { round2, diffCalendarDays } = require('../utils/punitory');
 const { MONTH_NAMES } = require('../utils/constants');
 const { formatServiceLabel } = require('../utils/serviceLabel');
 
@@ -1133,15 +1133,37 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
     //  - Con deuda: el punitorio de la deuda (fuente de verdad), igual que el enrichment
     //    de Control Mensual (monthlyRecordService): si PAID → accumulatedPunitory; si viva
     //    → unpaidAccumulatedPunitory + newPunitoryAmount (NO accumulated+new, que duplicaría).
+    // `punitoryDaysLabel`: días de mora a mostrar. `record.punitoryDays` es el congelado
+    // del último pago (suele quedar 0 en pagos en tandas / deuda) → mostraba "0 días" con
+    // un monto grande. Usamos los días TOTALES de mora del período (desde el inicio del
+    // punitorio hasta la fecha de corte). OJO: con pagos parciales el monto NO es
+    // días×tasa×base (cada pago baja la base sobre la que siguen corriendo), por eso los
+    // días son el tiempo transcurrido, no una reconstrucción lineal del monto.
     let truePunitory = sumPunitoryConcepts(txs);
+    let punitoryDaysLabel = record.punitoryDays || 0;
     if (record.debt) {
+      const debtStart = record.debt.punitoryStartDate ? new Date(record.debt.punitoryStartDate) : null;
       if (record.debt.status === 'PAID') {
         truePunitory = round2(record.debt.accumulatedPunitory || 0);
+        const end = record.debt.lastPaymentDate || record.debt.closedAt;
+        if (debtStart && end) punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), debtStart) + 1, 0);
       } else {
         const debtService = require('./debtService');
         const live = await debtService.calculateDebtPunitory(record.debt, new Date(), null, true);
         truePunitory = round2((live.unpaidAccumulatedPunitory || 0) + (live.newPunitoryAmount || 0));
+        const end = live.endDate || new Date();
+        if (debtStart) punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), debtStart) + 1, 0);
       }
+    } else if (truePunitory > 0 && !record.punitoryDays && contract?.punitoryStartDay) {
+      // Mes SIN deuda donde `record.punitoryDays` quedó en 0 (el último pago no sumó días
+      // nuevos) pero SÍ se pagaron punitorios en tandas anteriores → mostraría "0 días".
+      // Mostramos los días de mora transcurridos: desde el día de inicio de punitorios del
+      // período hasta el último pago que imputó punitorios. (Cuando `record.punitoryDays`
+      // ya es > 0 —el caso normal de un solo pago— se respeta ese valor congelado.)
+      const start = new Date(record.periodYear, record.periodMonth - 1, contract.punitoryStartDay);
+      const lastPunTx = [...txs].reverse().find((t) => (t.concepts || []).some((cc) => cc.type === 'PUNITORIOS'));
+      const end = lastPunTx?.paymentDate || txs[txs.length - 1]?.paymentDate || new Date();
+      punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), start) + 1, 0);
     }
 
     // Total canónico = misma fórmula que liveTotalDue/totalHistorico del enrichment,
@@ -1189,7 +1211,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
 
     if (truePunitory > 0 && !record.punitoryForgiven) {
       conceptos.push({
-        concepto: `Punitorios (${record.punitoryDays} días)`,
+        concepto: `Punitorios (${punitoryDaysLabel} días)`,
         importe: truePunitory,
       });
     }
