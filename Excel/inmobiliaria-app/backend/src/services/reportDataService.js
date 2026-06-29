@@ -25,6 +25,23 @@ const getPrimaryTenant = (contract) => {
   return contract.tenant || null;
 };
 
+/**
+ * Punitorios y total PENDIENTE de una deuda EN VIVO (a hoy), vía calculateDebtPunitory
+ * (incluye interés compuesto). Para reportes que mostraban el valor congelado guardado.
+ *  - punitorios = acumulado impago + nuevos en vivo (o accumulated si está PAID)
+ *  - pendiente  = saldo base restante (neto del crédito) + punitorios
+ * `preloaded` = preloadDebtDependencies(debts) para evitar N+1 cuando hay muchas deudas.
+ */
+const liveDebtFigures = async (debt, preloaded = null) => {
+  if (!debt) return { punitorios: 0, pendiente: 0 };
+  if (debt.status === 'PAID') return { punitorios: round2(debt.accumulatedPunitory || 0), pendiente: 0 };
+  const debtService = require('./debtService');
+  const live = await debtService.calculateDebtPunitory(debt, new Date(), preloaded, true);
+  const punitorios = round2((live.unpaidAccumulatedPunitory || 0) + (live.newPunitoryAmount || 0));
+  const pendiente = round2((live.remainingDebt || 0) + punitorios);
+  return { punitorios, pendiente };
+};
+
 // ============================================
 // EMPRESA DATA HELPER
 // ============================================
@@ -797,10 +814,16 @@ const getEstadoCuentasData = async (groupId, contractId) => {
     isPaid: r.isPaid,
   }));
 
+  // Punitorios/pendiente EN VIVO (a hoy, compuesto) por deuda — no el valor congelado.
+  const { preloadDebtDependencies } = require('./debtService');
+  const debtPreloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
+  const debtFigures = new Map();
+  for (const d of debts) debtFigures.set(d.id, await liveDebtFigures(d, debtPreloaded));
+
   const totalPagado = monthlyRecords.reduce((sum, r) => sum + r.amountPaid, 0);
   const totalAdeudado = debts
     .filter((d) => d.status !== 'PAID')
-    .reduce((sum, d) => sum + d.currentTotal, 0);
+    .reduce((sum, d) => sum + (debtFigures.get(d.id)?.pendiente || 0), 0);
 
   return {
     empresa,
@@ -830,8 +853,8 @@ const getEstadoCuentasData = async (groupId, contractId) => {
       periodo: d.periodLabel,
       original: d.originalAmount,
       pagado: d.amountPaid,
-      punitorios: d.accumulatedPunitory,
-      pendiente: d.currentTotal,
+      punitorios: debtFigures.get(d.id)?.punitorios ?? d.accumulatedPunitory,
+      pendiente: debtFigures.get(d.id)?.pendiente ?? d.currentTotal,
       status: d.status,
     })),
     currency: empresa.currency,
@@ -871,10 +894,9 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
       where: { groupId, periodMonth: month, periodYear: year },
       _count: { id: true }
     }),
-    prisma.debt.aggregate({
+    prisma.debt.findMany({
       where: { groupId, status: { not: 'PAID' } },
-      _sum: { currentTotal: true },
-      _count: { id: true }
+      include: { payments: true },
     }),
   ]);
 
@@ -892,8 +914,13 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
   const punitoryMes = monthlyRecordsAgg._sum.punitoryAmount || 0;
   const totalRecordsCount = monthlyRecordsAgg._count.id || 0;
 
-  const totalDeuda = debtsAgg._sum.currentTotal || 0;
-  const deudasAbiertas = debtsAgg._count.id || 0;
+  // Total de deuda EN VIVO (a hoy, compuesto), no el currentTotal congelado.
+  const { preloadDebtDependencies } = require('./debtService');
+  const debtPreloaded = debtsAgg.length > 0 ? await preloadDebtDependencies(debtsAgg) : null;
+  let totalDeuda = 0;
+  for (const d of debtsAgg) totalDeuda += (await liveDebtFigures(d, debtPreloaded)).pendiente;
+  totalDeuda = round2(totalDeuda);
+  const deudasAbiertas = debtsAgg.length;
 
   let pagados = 0, parciales = 0, pendientes = 0;
   for (const group of statusGroups) {
@@ -960,6 +987,18 @@ const getCartaDocumentoData = async (groupId, contractId) => {
   const empresa = await getEmpresaData(groupId);
   const primaryTenant = getPrimaryTenant(contract);
 
+  // Montos EN VIVO (a hoy, compuesto) — la carta documento debe reflejar la deuda al día.
+  const { preloadDebtDependencies } = require('./debtService');
+  const debtPreloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
+  const deudas = [];
+  let totalDeuda = 0;
+  for (const d of debts) {
+    const f = await liveDebtFigures(d, debtPreloaded);
+    deudas.push({ periodo: d.periodLabel, monto: f.pendiente, punitorios: f.punitorios });
+    totalDeuda += f.pendiente;
+  }
+  totalDeuda = round2(totalDeuda);
+
   return {
     empresa,
     deudor: {
@@ -970,12 +1009,8 @@ const getCartaDocumentoData = async (groupId, contractId) => {
     propiedad: {
       direccion: contract.property.address,
     },
-    deudas: debts.map((d) => ({
-      periodo: d.periodLabel,
-      monto: d.currentTotal,
-      punitorios: d.accumulatedPunitory,
-    })),
-    totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
+    deudas,
+    totalDeuda,
     fecha: new Date(),
     currency: empresa.currency,
   };
@@ -1333,8 +1368,10 @@ const getControlMensualData = async (groupId, month, year) => {
         include: { conceptType: true },
       },
       transactions: {
+        include: { concepts: { select: { type: true, amount: true } } },
         orderBy: { paymentDate: 'asc' },
       },
+      debt: { include: { payments: true } },
     },
     orderBy: [
       { contract: { property: { address: 'asc' } } },
@@ -1347,8 +1384,32 @@ const getControlMensualData = async (groupId, month, year) => {
     return Math.abs(rounded) < 0.005 ? 0 : rounded;
   };
 
-  const registros = records.map((r) => {
+  // Preload para punitorios EN VIVO de las deudas (evita N+1).
+  const debtsForPreload = records.map((r) => r.debt).filter(Boolean);
+  const { preloadDebtDependencies } = require('./debtService');
+  const debtPreloaded = debtsForPreload.length > 0 ? await preloadDebtDependencies(debtsForPreload) : null;
+
+  const registros = await Promise.all(records.map(async (r) => {
     const txs = r.transactions || [];
+
+    // Punitorios y total a mostrar (consistente con el Control Mensual web):
+    //  - Con deuda viva: punitorio EN VIVO (compuesto) + total = alquiler+servicios+IVA+punit−aFavor.
+    //  - Con deuda PAID: el acumulado de la deuda.
+    //  - Sin deuda: suma real de conceptos PUNITORIOS (no el congelado del último pago).
+    let punitoriosOut, totalOut, punitoryDaysOut = r.punitoryDays || 0;
+    if (r.debt && r.debt.status !== 'PAID') {
+      const f = await liveDebtFigures(r.debt, debtPreloaded);
+      punitoriosOut = r2(f.punitorios);
+      const iva = r.includeIva ? r.ivaAmount : 0;
+      totalOut = r2(r.rentAmount + r.servicesTotal + iva + f.punitorios - r.previousBalance);
+      if (r.debt.punitoryStartDate) punitoryDaysOut = Math.max(diffCalendarDays(new Date(), new Date(r.debt.punitoryStartDate)) + 1, 0);
+    } else if (r.debt) {
+      punitoriosOut = r2(r.debt.accumulatedPunitory || 0);
+      totalOut = r2(r.totalDue);
+    } else {
+      punitoriosOut = r2(r.punitoryForgiven ? 0 : sumPunitoryConcepts(txs));
+      totalOut = r2(r.totalDue);
+    }
 
     const fechasPago = txs.length > 0
       ? txs.map((t) => new Date(t.paymentDate).toLocaleDateString('es-AR')).join(', ')
@@ -1391,10 +1452,10 @@ const getControlMensualData = async (groupId, month, year) => {
       serviciosDetalle,
       iva: r2(r.includeIva ? r.ivaAmount : 0),
       aFavorAnt: r2(r.previousBalance > 0 ? r.previousBalance : 0),
-      punitorios: r2(r.punitoryAmount),
-      punitoryDays: r.punitoryDays || 0,
+      punitorios: punitoriosOut,
+      punitoryDays: punitoryDaysOut,
       punitoryForgiven: r.punitoryForgiven || false,
-      total: r2(r.totalDue),
+      total: totalOut,
       fechasPago,
       pagado: r2(r.amountPaid),
       aFavorSig,
@@ -1406,7 +1467,7 @@ const getControlMensualData = async (groupId, month, year) => {
       cancelo: r.isCancelled,
       observaciones,
     };
-  });
+  }));
 
   const totales = {
     alquiler: registros.reduce((s, r) => s + r.alquiler, 0),
