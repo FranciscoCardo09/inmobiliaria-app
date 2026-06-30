@@ -37,7 +37,10 @@ const liveDebtFigures = async (debt, preloaded = null) => {
   if (debt.status === 'PAID') return { punitorios: round2(debt.accumulatedPunitory || 0), pendiente: 0 };
   const debtService = require('./debtService');
   const live = await debtService.calculateDebtPunitory(debt, new Date(), preloaded, true);
-  const punitorios = round2((live.unpaidAccumulatedPunitory || 0) + (live.newPunitoryAmount || 0));
+  // `amount` = punitorio impago total (en la rama base-saldada incluye el acumulado;
+  // en la rama con saldo base es el tramo nuevo). `newPunitoryAmount` solo cuenta el
+  // tramo nuevo → subcontaba cuando el alquiler ya está pagado y solo quedan punitorios.
+  const punitorios = round2((live.unpaidAccumulatedPunitory || 0) + (live.amount || 0));
   const pendiente = round2((live.remainingDebt || 0) + punitorios);
   return { punitorios, pendiente };
 };
