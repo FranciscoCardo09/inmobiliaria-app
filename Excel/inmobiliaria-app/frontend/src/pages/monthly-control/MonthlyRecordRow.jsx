@@ -42,9 +42,12 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
 }) {
   const isPropietario = (record.contractType || 'INQUILINO') === 'PROPIETARIO'
   const isPenalty = !!record.isPenaltyRecord
+  const isPostExpiry = !!record.isPostExpiry
 
   const rowClass = isPenalty
     ? 'bg-warning/15 border-l-4 border-warning'
+    : isPostExpiry
+    ? 'bg-info/10 border-l-4 border-info'
     : record.status === 'COMPLETE'
     ? 'bg-success/25'
     : record.contractHasOpenDebt
@@ -102,6 +105,9 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
             {record.periodLabel}
             {isPenalty && (
               <span className="badge badge-warning badge-xs">Multa rescisión</span>
+            )}
+            {isPostExpiry && (
+              <span className="badge badge-info badge-xs" title="Mes posterior al vencimiento: solo servicios del último mes (mes vencido), sin alquiler ni punitorios">Último mes · solo servicios</span>
             )}
           </div>
         </td>

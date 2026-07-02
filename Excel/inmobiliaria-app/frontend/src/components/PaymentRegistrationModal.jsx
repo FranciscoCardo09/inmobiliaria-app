@@ -69,10 +69,10 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const { sendCashReceipt } = useNotifications(groupId)
 
   // Get fresh record data in real-time
-  // Preserve isPenaltyRecord from the list record since the detail endpoint doesn't compute it
+  // Preserve isPenaltyRecord / isPostExpiry from the list record since the detail endpoint doesn't compute them
   const { data: freshRecord } = useMonthlyRecordDetail(groupId, recordProp?.id)
   const record = freshRecord
-    ? { ...freshRecord, isPenaltyRecord: !!recordProp?.isPenaltyRecord }
+    ? { ...freshRecord, isPenaltyRecord: !!recordProp?.isPenaltyRecord, isPostExpiry: !!recordProp?.isPostExpiry }
     : recordProp
 
   const { registerPayment, isRegistering } = usePaymentTransactions(groupId)

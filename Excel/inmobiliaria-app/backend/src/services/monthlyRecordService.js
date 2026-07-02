@@ -207,6 +207,43 @@ async function copyRescissionMonthServices(contract, penaltyRecordId) {
 }
 
 /**
+ * Copy MonthlyService records from the contract's last active month (endMonth) into
+ * the post-expiry record. Servicios se pagan a mes vencido, así que el mes posterior
+ * al vencimiento cobra los servicios del último mes.
+ * Returns the computed servicesTotal (discounts subtracted).
+ */
+async function copyLastMonthServices(contract, postExpiryRecordId) {
+  const endMonth = contract.startMonth + contract.durationMonths - 1;
+  const { periodMonth: lastMonth, periodYear: lastYear } = getCalendarPeriod(contract, endMonth);
+
+  const lastRecord = await prisma.monthlyRecord.findFirst({
+    where: { contractId: contract.id, periodMonth: lastMonth, periodYear: lastYear },
+    include: {
+      services: {
+        include: { conceptType: { select: { id: true, category: true } } },
+      },
+    },
+  });
+
+  if (!lastRecord?.services?.length) return 0;
+
+  await prisma.monthlyService.createMany({
+    data: lastRecord.services.map(s => ({
+      monthlyRecordId: postExpiryRecordId,
+      conceptTypeId: s.conceptTypeId,
+      amount: s.amount,
+      description: s.description,
+    })),
+    skipDuplicates: true,
+  });
+
+  return lastRecord.services.reduce((sum, s) => {
+    const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
+    return sum + (isDiscount ? -Math.abs(s.amount) : s.amount);
+  }, 0);
+}
+
+/**
  * Get or create monthly records for all active contracts in a group for a given period.
  * This is the core auto-generation function.
  *
@@ -261,7 +298,23 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       }
     }
 
-    if (!isContractInRangeForMonth(contract, monthNumber)) continue;
+    if (!isContractInRangeForMonth(contract, monthNumber)) {
+      // Mes extra post-vencimiento (mes vencido de servicios): el mes calendario
+      // siguiente al último mes del contrato. Alquiler $0, solo se cobran los
+      // servicios del último mes (se pagan a mes vencido). No aplica a contratos
+      // renovados (continúan con un contrato nuevo) ni rescindidos (ya tienen su
+      // mes de penalidad).
+      const endMonth = contract.startMonth + contract.durationMonths - 1;
+      if (
+        monthNumber === endMonth + 1 &&
+        contract.active &&
+        !contract.renewedAt &&
+        !contract.rescindedAt
+      ) {
+        activeContracts.push({ contract, monthNumber, isPostExpiry: true, canCreate: true });
+      }
+      continue;
+    }
     activeContracts.push({
       contract,
       monthNumber,
@@ -356,12 +409,36 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   // --- BATCH 5: Bulk-create missing records (1 createMany instead of N creates) ---
   const recordsToCreate = [];
   const penaltyContractsToSetup = []; // penalty records that need prev-month services copied
-  for (const { contract, monthNumber, isPenaltyRecord, canCreate } of activeContracts) {
+  const postExpiryContractsToSetup = []; // post-expiry records that need last-month services copied
+  for (const { contract, monthNumber, isPenaltyRecord, isPostExpiry, canCreate } of activeContracts) {
     if (recordsByContractId.has(contract.id)) continue;
     // Renewed/inactive contracts only expose existing records; never create new ones.
     if (!canCreate) continue;
 
-    if (isPenaltyRecord) {
+    if (isPostExpiry) {
+      // Mes extra post-vencimiento: alquiler $0, IVA $0. Solo se cobran los
+      // servicios del último mes (mes vencido), que se copian luego del bulk-create.
+      recordsToCreate.push({
+        groupId,
+        contractId: contract.id,
+        monthNumber,
+        periodMonth: month,
+        periodYear: year,
+        rentAmount: 0,
+        includeIva: false,
+        ivaAmount: 0,
+        servicesTotal: 0,
+        previousBalance: 0,
+        punitoryAmount: 0,
+        punitoryDays: 0,
+        totalDue: 0,
+        amountPaid: 0,
+        balance: 0,
+        isPostExpiry: true,
+        comprobantesStatus: [],
+      });
+      postExpiryContractsToSetup.push(contract);
+    } else if (isPenaltyRecord) {
       // Penalty month: rent = penalty amount (replaces alquiler for this month)
       // Services from the rescission month will be copied after bulk-create
       const penalty = contract.rescissionPenalty || 0;
@@ -552,6 +629,35 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         recordsByContractId.set(r.contractId, r);
       }
     }
+
+    // Copy last-month services into newly created post-expiry records (mes vencido)
+    if (postExpiryContractsToSetup.length > 0) {
+      for (const contract of postExpiryContractsToSetup) {
+        const postExpiryRecord = recordsByContractId.get(contract.id);
+        if (!postExpiryRecord) continue;
+        const svcTotal = await copyLastMonthServices(contract, postExpiryRecord.id);
+        if (svcTotal !== 0) {
+          const newTotalDue = round2(svcTotal);
+          await prisma.monthlyRecord.update({
+            where: { id: postExpiryRecord.id },
+            data: { servicesTotal: svcTotal, totalDue: newTotalDue, balance: -newTotalDue },
+          });
+        }
+      }
+      // Re-fetch post-expiry records so they include the copied services
+      const postExpiryContractIds = postExpiryContractsToSetup.map(c => c.id);
+      const updatedPostExpiryRecords = await prisma.monthlyRecord.findMany({
+        where: { groupId, periodMonth: month, periodYear: year, contractId: { in: postExpiryContractIds } },
+        include: {
+          services: { include: { conceptType: { select: { id: true, name: true, label: true, category: true } } } },
+          transactions: { include: { concepts: true }, orderBy: { createdAt: 'asc' } },
+          debt: { include: { payments: { orderBy: { createdAt: 'asc' } } } },
+        },
+      });
+      for (const r of updatedPostExpiryRecords) {
+        recordsByContractId.set(r.contractId, r);
+      }
+    }
   }
 
   // Batch: contratos con deudas abiertas (para marcar filas del mes actual)
@@ -578,7 +684,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const updatesToPerform = [];
   const records = [];
 
-  for (const { contract, monthNumber, isPenaltyRecord } of activeContracts) {
+  for (const { contract, monthNumber, isPenaltyRecord, isPostExpiry } of activeContracts) {
     let record = recordsByContractId.get(contract.id);
 
     if (!record) {
@@ -609,10 +715,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         });
         Object.assign(record, { rentAmount: penalty, servicesTotal: svcTotal, services: refreshed, totalDue: newTotalDue, balance: newBalance });
       }
-    } else if (record && !isPenaltyRecord && contract.active) {
+    } else if (record && !isPenaltyRecord && !isPostExpiry && contract.active) {
       // Renewed/inactive contracts have frozen historical records: do not
       // recalculate rent/IVA/balance from the current contract config — that
       // would clobber legitimate historical values.
+      // Post-expiry records (alquiler $0, solo servicios) tampoco se recalculan:
+      // recomputaríamos el alquiler desde el historial y romperíamos el $0.
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 
@@ -736,7 +844,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let punitoriosAnteriores = 0;
     let punitoriosActuales = 0;
 
-    if (!isFullyPaid && !record.punitoryForgiven) {
+    // Mes extra post-vencimiento: nunca genera punitorios (solo servicios del mes vencido).
+    if (!isFullyPaid && !record.punitoryForgiven && !isPostExpiry) {
       try {
         const amountPaid = record.amountPaid || 0;
         const servicesTotal = record.servicesTotal || 0;
@@ -950,6 +1059,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         return {};
       })(),
       isPenaltyRecord: !!isPenaltyRecord,
+      isPostExpiry: !!isPostExpiry,
     });
   }
 

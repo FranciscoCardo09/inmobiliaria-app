@@ -23,6 +23,8 @@ const previewCloseMonth = async (groupId, month, year) => {
       periodMonth,
       periodYear,
       status: { in: ['PENDING', 'PARTIAL'] },
+      // El mes extra post-vencimiento (solo servicios) nunca genera deuda ni punitorios.
+      isPostExpiry: false,
     },
     include: {
       contract: {
@@ -104,6 +106,8 @@ const closeMonth = async (groupId, month, year) => {
       periodMonth,
       periodYear,
       status: { in: ['PENDING', 'PARTIAL'] },
+      // El mes extra post-vencimiento (solo servicios) nunca genera deuda ni punitorios.
+      isPostExpiry: false,
     },
     include: {
       contract: true,

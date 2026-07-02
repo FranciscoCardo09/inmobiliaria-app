@@ -545,6 +545,7 @@ model MonthlyRecord {
   status              String    @default("PENDING")           // PENDING, PARTIAL, COMPLETE
   isPaid              Boolean   @default(false) @map("is_paid")       // PAGÓ (TRUE/FALSE)
   isCancelled         Boolean   @default(false) @map("is_cancelled")  // CANCELÓ (SI/NO)
+  isPostExpiry        Boolean   @default(false) @map("is_post_expiry") // Mes extra post-vencimiento: alquiler 0, solo servicios del último mes (mes vencido), sin punitorios
 
   observations        String?
   comprobantesStatus  Json?     @default("[]") // Estado de comprobantes en este mes [{ id: string, name: string, presented: boolean }]
