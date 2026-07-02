@@ -527,22 +527,35 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
     },
   });
 
-  // Orden de imputación: servicios → alquiler → punitorios
+  // Orden de imputación: servicios → alquiler → punitorios.
+  // El saldo a favor aplicado (appliedCredit) cubre esos mismos conceptos ANTES que el
+  // efectivo (misma convención que los pagos normales: créditos cubren servicios primero).
+  // Sin esto, los targets de efectivo incluyen la parte ya cubierta por el crédito, la
+  // porción de punitorios queda corta por ese monto (se va a SOBREPAGO) y el mes termina
+  // con un falso saldo a favor igual al crédito (caso Brunello Mayo 2026).
   const parsedAmount = parseFloat(amount);
+  const credit = debt.appliedCredit || 0;
   const unpaidServicesNow = debt.unpaidServicesAmount || 0;
-  const servicePaidSoFar = Math.min(debt.amountPaid, unpaidServicesNow);
-  const remainingServicesBefore = unpaidServicesNow - servicePaidSoFar;
-  const rentPaidSoFar = Math.max(debt.amountPaid - unpaidServicesNow, 0);
-  const remainingRentBefore = Math.max(debt.unpaidRentAmount - rentPaidSoFar, 0);
+  const creditOnServices = Math.min(credit, unpaidServicesNow);
+  const creditOnRent = Math.min(credit - creditOnServices, debt.unpaidRentAmount || 0);
+  const creditOnPunitory = round2(credit - creditOnServices - creditOnRent);
+
+  const cashServicesTarget = round2(unpaidServicesNow - creditOnServices);
+  const cashRentTarget = round2(Math.max((debt.unpaidRentAmount || 0) - creditOnRent, 0));
+  const servicePaidSoFar = Math.min(debt.amountPaid, cashServicesTarget);
+  const remainingServicesBefore = cashServicesTarget - servicePaidSoFar;
+  const rentPaidSoFar = Math.max(debt.amountPaid - cashServicesTarget, 0);
+  const remainingRentBefore = Math.max(cashRentTarget - rentPaidSoFar, 0);
 
   const servicesPortion = round2(Math.min(remainingServicesBefore, parsedAmount));
   const afterServices = round2(parsedAmount - servicesPortion);
   const rentPortion = round2(Math.min(remainingRentBefore, afterServices));
   const afterRent = round2(Math.max(afterServices - rentPortion, 0));
-  // Topear la porción de punitorios al punitorio REAL adeudado. Lo que sobre es
-  // pago en exceso → saldo a favor del próximo mes (NO inflar punitorios, porque
-  // eso inflaría el totalDue del MonthlyRecord en el recálculo y anularía el saldo).
-  const punitoryPortion = round2(Math.min(afterRent, totalPunitoryOwed));
+  // Topear la porción de punitorios al punitorio REAL adeudado (neto de lo que cubra el
+  // crédito). Lo que sobre es pago en exceso → saldo a favor del próximo mes (NO inflar
+  // punitorios, porque eso inflaría el totalDue del MonthlyRecord en el recálculo y
+  // anularía el saldo).
+  const punitoryPortion = round2(Math.min(afterRent, Math.max(totalPunitoryOwed - creditOnPunitory, 0)));
   const overpay = round2(Math.max(afterRent - punitoryPortion, 0));
 
   const transaction = await prisma.paymentTransaction.create({
@@ -750,11 +763,13 @@ const payDebtsBulk = async (groupId, debtIds, totalAmount, paymentDate, paymentM
   const { debts } = await loadAndValidateBulkDebts(groupId, debtIds);
   const date = toPaymentDate(paymentDate);
 
-  // Total a pagar de cada deuda a la fecha elegida (mismo cálculo que hará payDebt)
+  // Total a pagar de cada deuda a la fecha elegida (mismo cálculo que hará payDebt).
+  // Incluye el punitorio acumulado impago de pagos previos (igual que el preview):
+  // sin sumarlo, las deudas intermedias quedaban PARTIAL y el resto iba a SOBREPAGO.
   const totals = [];
   for (const debt of debts) {
-    const { amount: punitory, remainingDebt } = await calculateDebtPunitory(debt, date);
-    totals.push(round2(remainingDebt + punitory));
+    const { amount: punitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, date);
+    totals.push(round2(remainingDebt + (unpaidAccumulatedPunitory || 0) + punitory));
   }
 
   let remaining = amount;
