@@ -157,16 +157,30 @@ async function calculateRentForMonth(contract, monthNumber) {
       contractId: contract.id,
       effectiveFromMonth: { lte: monthNumber },
     },
-    orderBy: {
-      effectiveFromMonth: 'desc',
-    },
+    orderBy: [
+      { effectiveFromMonth: 'desc' },
+      { createdAt: 'desc' },
+    ],
   });
 
   if (rentHistory) {
     return rentHistory.rentAmount;
   }
 
-  // Si no hay historial, usar baseRent (caso de contratos viejos sin historial)
+  // Hay historial pero ninguno cubre este mes (contrato sin fila INICIAL, p.ej.
+  // renovaciones viejas o startMonth reseteado por una edición): usar el registro
+  // MÁS ANTIGUO, que es el alquiler más viejo conocido. NUNCA baseRent, porque
+  // baseRent muta con cada ajuste y reescribiría meses pasados (caso Rezzonico).
+  const oldestHistory = await prisma.rentHistory.findFirst({
+    where: { contractId: contract.id },
+    orderBy: [
+      { effectiveFromMonth: 'asc' },
+      { createdAt: 'asc' },
+    ],
+  });
+  if (oldestHistory) return oldestHistory.rentAmount;
+
+  // Sin historial en absoluto: baseRent es lo único disponible
   return contract.baseRent;
 }
 
@@ -364,6 +378,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     orderBy: [
       { contractId: 'asc' },
       { effectiveFromMonth: 'desc' },
+      { createdAt: 'desc' }, // desempate: si hay 2 filas con el mismo mes, gana la más nueva
     ],
   });
   // Group by contractId, sorted desc by effectiveFromMonth
@@ -381,6 +396,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     for (const rh of histories) {
       if (rh.effectiveFromMonth <= monthNumber) return rh.rentAmount;
     }
+    // Hay historial pero ninguno cubre este mes: usar el MÁS ANTIGUO (último del
+    // array, ordenado desc) = alquiler más viejo conocido. NUNCA baseRent: muta
+    // con cada ajuste y reescribiría el alquiler de meses pasados (caso Rezzonico).
+    if (histories.length > 0) return histories[histories.length - 1].rentAmount;
     return baseRent;
   }
 
@@ -864,14 +883,17 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         // - Con pagos: sobre el saldo restante total (sin contar el saldo a favor)
         const punitoryBase = totalCredits <= 0 ? record.rentAmount : remainingBalance;
 
-        // Punitorios congelados no cubiertos (para sumar a los nuevos)
-        let remaining = totalCredits;
-        const servicesCovered = Math.min(remaining, servicesTotal);
-        remaining -= servicesCovered;
-        const rentCovered = Math.min(remaining, record.rentAmount);
-        remaining -= rentCovered;
-        const punitoryCovered = Math.min(remaining, frozenPunitory);
-        const unpaidFrozenPunitory = Math.max(frozenPunitory - punitoryCovered, 0);
+        // Punitorios congelados IMPAGOS = congelado del último pago MENOS lo que ese
+        // pago imputó realmente a punitorios (concepto PUNITORIOS). Misma lógica que
+        // registerPayment — la estimación por orden de imputación fallaba cuando un
+        // pago de deuda cubrió solo punitorios (caso Etica S.A.).
+        const lastTxForPunitory = record.transactions?.[record.transactions.length - 1] || null;
+        const lastTxPunitoryPaid = (lastTxForPunitory?.concepts || [])
+          .filter((c) => c.type === 'PUNITORIOS')
+          .reduce((s, c) => s + c.amount, 0);
+        const unpaidFrozenPunitory = lastTxForPunitory?.punitoryForgiven
+          ? 0
+          : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
 
         // Get last payment date (if partial payment was made)
         let lastPaymentDate = null;
@@ -1228,10 +1250,14 @@ const _recalculateCore = async (recordIds, tx) => {
     const balance = Math.round((amountPaid - Math.max(totalDue, 0)) * 100) / 100;
     const effectiveBalance = balance + (record.balanceForgiven || 0);
 
-    // Update tracking variables for the next iteration
+    // Update tracking variables for the next iteration.
+    // IMPORTANTE: solo se arrastra el saldo A FAVOR (positivo). El saldo negativo
+    // (deuda) se gestiona con entidades Debt en el cierre mensual; arrastrarlo acá
+    // duplicaría la deuda en el totalDue del mes siguiente (y los caminos de
+    // creación/refresh de getOrCreateMonthlyRecords ya clampean a >= 0).
     currentContractId = record.contractId;
     expectedNextMonthNumber = record.monthNumber + 1;
-    runningPreviousBalance = effectiveBalance;
+    runningPreviousBalance = Math.max(effectiveBalance, 0);
 
     // Simple check for open debt
     const openDebt = await tx.debt.findFirst({

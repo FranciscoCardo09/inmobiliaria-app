@@ -238,6 +238,18 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
           if (monthNumber > rescMonthNumber) continue;
         }
 
+        // Alquiler del mes según el HISTORIAL (no baseRent, que muta con cada
+        // ajuste): la fila vigente para ese mes, o la más antigua si ninguna lo
+        // cubre, o baseRent solo si el contrato no tiene historial.
+        const rentRow = await client.rentHistory.findFirst({
+          where: { contractId, effectiveFromMonth: { lte: monthNumber } },
+          orderBy: [{ effectiveFromMonth: 'desc' }, { createdAt: 'desc' }],
+        }) || await client.rentHistory.findFirst({
+          where: { contractId },
+          orderBy: [{ effectiveFromMonth: 'asc' }, { createdAt: 'asc' }],
+        });
+        const monthRent = rentRow ? rentRow.rentAmount : contract.baseRent;
+
         record = await client.monthlyRecord.create({
           data: {
             groupId,
@@ -245,9 +257,9 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
             monthNumber,
             periodMonth: parseInt(month),
             periodYear: parseInt(year),
-            rentAmount: contract.baseRent,
-            totalDue: contract.baseRent,
-            balance: -contract.baseRent,
+            rentAmount: monthRent,
+            totalDue: monthRent,
+            balance: -monthRent,
             // Inicializar estado de comprobantes desde el contrato, igual que
             // getOrCreateMonthlyRecords. Sin esto, los meses creados al asignar
             // servicios (propagateServiceForward) quedaban con comprobantesStatus=[]

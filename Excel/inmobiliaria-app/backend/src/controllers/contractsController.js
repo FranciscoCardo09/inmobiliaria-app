@@ -406,6 +406,29 @@ const updateContract = async (req, res, next) => {
       data.nextAdjustmentMonth = null;
     }
 
+    // Si cambió el cronograma (startMonth se resetea a 1), REMAPEAR el historial de
+    // alquileres a la numeración nueva. Sin esto, las filas quedan huérfanas (p.ej.
+    // effectiveFromMonth=36 con startMonth nuevo=1) y los meses del contrato caen en
+    // el fallback de baseRent → un ajuste posterior reescribe el alquiler de meses
+    // pasados (caso Rezzonico).
+    if ((startDate || durationMonths || currentMonth) && data.startMonth !== undefined) {
+      const oldSm = contract.startMonth || 1;
+      const newSm = data.startMonth;
+      const oldStart = new Date(contract.startDate);
+      const newStart = new Date(data.startDate || contract.startDate);
+      const histories = await prisma.rentHistory.findMany({ where: { contractId: id } });
+      for (const h of histories) {
+        // Mes calendario que representaba la fila con la numeración vieja
+        const cal = new Date(oldStart.getFullYear(), oldStart.getMonth() + (h.effectiveFromMonth - oldSm), 1);
+        const diff = (cal.getFullYear() - newStart.getFullYear()) * 12 + (cal.getMonth() - newStart.getMonth());
+        // Antes del inicio nuevo → rige desde el inicio (alquiler más viejo conocido)
+        const newEff = Math.max(newSm, newSm + diff);
+        if (newEff !== h.effectiveFromMonth) {
+          await prisma.rentHistory.update({ where: { id: h.id }, data: { effectiveFromMonth: newEff } });
+        }
+      }
+    }
+
     // If baseRent changed, create/update a RentHistory entry for the current contract month
     // so that getBatchedRentForMonth() picks up the new value instead of stale history
     if (baseRent && parseFloat(baseRent) !== contract.baseRent) {
@@ -417,6 +440,25 @@ const updateContract = async (req, res, next) => {
       const dur = data.durationMonths || contract.durationMonths;
       const endMonth = sm + dur - 1;
       const currentMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+
+      // Baseline: si ningún historial cubre los meses ANTERIORES al cambio, crear la
+      // fila INICIAL con el alquiler VIEJO para que esos meses no hereden el nuevo.
+      if (currentMonthNumber > sm) {
+        const coversBefore = await prisma.rentHistory.findFirst({
+          where: { contractId: id, effectiveFromMonth: { lt: currentMonthNumber } },
+          select: { id: true },
+        });
+        if (!coversBefore) {
+          await prisma.rentHistory.create({
+            data: {
+              contractId: id,
+              effectiveFromMonth: sm,
+              rentAmount: contract.baseRent,
+              reason: 'INICIAL',
+            },
+          });
+        }
+      }
 
       const existingHistory = await prisma.rentHistory.findFirst({
         where: { contractId: id, effectiveFromMonth: currentMonthNumber },
