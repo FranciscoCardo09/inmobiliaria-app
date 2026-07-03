@@ -1137,6 +1137,7 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       ALQUILER: 'Alquiler',
       MULTA_RESCISION: 'Multa Rescisión',
       PUNITORIOS: 'Punitorios',
+      IVA: 'IVA 21%',
       A_FAVOR: 'Saldo a favor',
       SOBREPAGO: 'Pago en exceso',
     };

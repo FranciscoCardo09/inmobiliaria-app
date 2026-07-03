@@ -148,7 +148,9 @@ function calculatePunitoryV2(
     if (payDateNorm <= lastPayNorm) {
       return { amount: 0, days: 0, graceDate, fromDate: null, toDate: null };
     }
-    // Count days from lastPaymentDate to paymentDate (both endpoints inclusive)
+    // REGLA CONFIRMADA POR EL USUARIO (2026-07): el tramo cuenta desde la fecha del
+    // último pago hasta la fecha de este pago, AMBAS INCLUSIVE (por eso el +1).
+    // No cambiar a exclusivo aunque parezca "doble conteo" del día del pago anterior.
     const diasPunitorios = diffCalendarDays(payDateNorm, lastPayNorm) + 1;
     const dailyRate = baseRent * punitoryPercent;
     const amount = Math.round(dailyRate * diasPunitorios * 100) / 100;

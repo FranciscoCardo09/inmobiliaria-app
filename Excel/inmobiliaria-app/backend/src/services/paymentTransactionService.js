@@ -93,17 +93,28 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
     ? 0
     : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
 
-  // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
-  const frozenPunitory = record.punitoryAmount || 0;
-  const _crReg = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
-  const unpaidFrozenPunitory = Math.max(frozenPunitory - Math.min(_crReg, frozenPunitory), 0);
-
   // Get last payment date for this record (if partial payment was made)
   const lastTransaction = await prisma.paymentTransaction.findFirst({
     where: { monthlyRecordId },
     orderBy: { paymentDate: 'desc' },
-    select: { paymentDate: true },
+    select: {
+      paymentDate: true,
+      punitoryForgiven: true,
+      concepts: { select: { type: true, amount: true } },
+    },
   });
+
+  // Punitorios congelados IMPAGOS = congelado del último pago MENOS lo que ese pago
+  // imputó realmente a punitorios (concepto PUNITORIOS). Antes se estimaba por orden de
+  // imputación sobre el total pagado, lo que fallaba cuando un pago de deuda cubrió SOLO
+  // punitorios (caso Etica S.A.: se volvían a cobrar/etiquetar punitorios ya pagados).
+  const frozenPunitory = record.punitoryAmount || 0;
+  const lastTxPunitoryPaid = (lastTransaction?.concepts || [])
+    .filter((c) => c.type === 'PUNITORIOS')
+    .reduce((s, c) => s + c.amount, 0);
+  const unpaidFrozenPunitory = lastTransaction?.punitoryForgiven
+    ? 0
+    : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
 
   const punitory = calculatePunitoryV2(
     paymentDate,
@@ -132,13 +143,19 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   const creditsOnServices = round2(Math.min(alreadyPaid, Math.max(servicesTotal, 0)));
   const remainingServicesOwed = round2(Math.max(servicesTotal - creditsOnServices, 0));
   const remainingRentOwed = unpaidRent; // ya calculado arriba (neto de créditos)
+  // IVA: créditos que exceden servicios + alquiler cubren el IVA antes que los punitorios.
+  // Sin este concepto, en contratos con IVA el 21% del pago quedaba etiquetado como
+  // SOBREPAGO ("a favor próximo mes") en recibos, aunque el balance fuera correcto.
+  const creditsBeyondRent = round2(Math.max(alreadyPaid - servicesTotal - record.rentAmount, 0));
+  const remainingIvaOwed = round2(Math.max(ivaForPunitory - creditsBeyondRent, 0));
   const remainingPunitoryOwed = round2(Math.max(punitoryAmount, 0)); // ya neto de créditos/frozen
 
-  // Cuánto de ESTE pago se imputa a cada concepto (servicios → alquiler → punitorios → excedente)
+  // Cuánto de ESTE pago se imputa a cada concepto (servicios → alquiler → IVA → punitorios → excedente)
   const servicesPay = round2(Math.min(remainingServicesOwed, paymentAmount));
   const rentPay = round2(Math.min(remainingRentOwed, paymentAmount - servicesPay));
-  const punitoryPay = round2(Math.min(remainingPunitoryOwed, paymentAmount - servicesPay - rentPay));
-  const overpay = round2(Math.max(paymentAmount - servicesPay - rentPay - punitoryPay, 0));
+  const ivaPay = round2(Math.min(remainingIvaOwed, paymentAmount - servicesPay - rentPay));
+  const punitoryPay = round2(Math.min(remainingPunitoryOwed, paymentAmount - servicesPay - rentPay - ivaPay));
+  const overpay = round2(Math.max(paymentAmount - servicesPay - rentPay - ivaPay - punitoryPay, 0));
 
   // 1. Saldo a favor del mes anterior (crédito)
   if (prevBalance > 0) {
@@ -195,6 +212,15 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
       description: isMultaRescision
         ? `Multa Rescisión mes ${record.monthNumber}${isPartialRent ? ' (pago parcial)' : ''}`
         : `Alquiler mes ${record.monthNumber}${isPartialRent ? ' (pago parcial)' : ''}`,
+    });
+  }
+
+  // 3b. IVA (21% del alquiler, contratos con pagaIva)
+  if (ivaPay > 0) {
+    concepts.push({
+      type: 'IVA',
+      amount: ivaPay,
+      description: 'IVA 21% sobre alquiler',
     });
   }
 
@@ -294,7 +320,12 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
       transactions: {
         orderBy: { paymentDate: 'desc' },
         take: 1,
-        select: { paymentDate: true, amount: true },
+        select: {
+          paymentDate: true,
+          amount: true,
+          punitoryForgiven: true,
+          concepts: { select: { type: true, amount: true } },
+        },
       },
     },
   });
@@ -325,13 +356,18 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
     ? 0
     : round2(Math.max(record.rentAmount - paidTowardRentForPunitory, 0));
 
-  // Compute accumulated unpaid punitorios from previous transactions (imputacion: servicios -> alquiler -> punitorios)
-  const frozenPunitoryPreview = record.punitoryAmount || 0;
-  const _crPrev = Math.max(totalCredits - servicesTotal - record.rentAmount, 0);
-  const unpaidFrozenPunitoryPreview = Math.max(frozenPunitoryPreview - Math.min(_crPrev, frozenPunitoryPreview), 0);
-
   // Last payment date (transactions ordered desc, so [0] is most recent)
   const lastTx = record.transactions[0] || null;
+
+  // Punitorios congelados IMPAGOS = congelado del último pago MENOS lo que ese pago
+  // imputó realmente a punitorios (misma lógica que registerPayment; ver caso Etica).
+  const frozenPunitoryPreview = record.punitoryAmount || 0;
+  const lastTxPunitoryPaidPrev = (lastTx?.concepts || [])
+    .filter((c) => c.type === 'PUNITORIOS')
+    .reduce((s, c) => s + c.amount, 0);
+  const unpaidFrozenPunitoryPreview = lastTx?.punitoryForgiven
+    ? 0
+    : Math.max(frozenPunitoryPreview - lastTxPunitoryPaidPrev, 0);
 
   const result = calculatePunitoryV2(
     paymentDate,
