@@ -131,20 +131,21 @@ export const AdjustmentIndexList = () => {
       return
     }
 
-    // Filtrar contratos para este índice
+    // Filtrar contratos para este índice que NO tengan el ajuste ya aplicado:
+    // el masivo solo confirma las propiedades pendientes (las aplicadas no se tocan)
     const affectedContracts = contractsForMonth.filter(
-      (c) => c.adjustmentIndex?.id === index.id
+      (c) => c.adjustmentIndex?.id === index.id && !c.applied
     )
     const count = affectedContracts.length
 
     if (count === 0) {
-      toast.error(`No hay contratos con "${index.name}" que ajusten en ${monthNames[periodMonth]} ${periodYear}`)
+      toast.error(`No hay contratos pendientes de ajuste con "${index.name}" en ${monthNames[periodMonth]} ${periodYear}`)
       return
     }
 
     // Preparar datos para el modal
     const contractsWithCalculations = affectedContracts.map((contract) => {
-      const currentRent = contract.baseRent
+      const currentRent = contract.rentBeforeAdjustment ?? contract.baseRent
       const newRent = Math.round(currentRent * (1 + value / 100))
       const increase = newRent - currentRent
 
@@ -174,19 +175,66 @@ export const AdjustmentIndexList = () => {
     setShowModal(true)
   }
 
+  // Aplicar el ajuste a UNA sola propiedad (fila de la tabla)
+  const handleApplySingle = (contract) => {
+    const index = indices.find((i) => i.id === contract.adjustmentIndex?.id)
+    if (!index) return
+    const value = parseFloat(indexValues[index.id])
+
+    if (isNaN(value) || value <= 0) {
+      toast.error('Ingrese un porcentaje válido mayor a 0 en el índice correspondiente')
+      return
+    }
+
+    const currentRent = contract.rentBeforeAdjustment ?? contract.baseRent
+    const newRent = Math.round(currentRent * (1 + value / 100))
+
+    setConfirmData({
+      index,
+      percentage: value,
+      contracts: [{ ...contract, currentRent, newRent, increase: newRent - currentRent }],
+      totalIncrease: newRent - currentRent,
+      count: 1,
+      contractId: contract.id, // aplicar SOLO a este contrato
+      calendarMonth: periodMonth,
+      calendarYear: periodYear,
+      monthName: `${monthNames[periodMonth]} ${periodYear}`,
+    })
+    setShowModal(true)
+  }
+
+  // Deshacer el ajuste de UNA sola propiedad (fila de la tabla)
+  const handleUndoSingle = (contract) => {
+    const index = indices.find((i) => i.id === contract.adjustmentIndex?.id)
+    if (!index) return
+
+    setUndoData({
+      index,
+      calendarMonth: periodMonth,
+      calendarYear: periodYear,
+      monthName: `${monthNames[periodMonth]} ${periodYear}`,
+      count: 1,
+      contracts: [contract],
+      contractId: contract.id, // deshacer SOLO este contrato
+      contractLabel: `${contract.tenant?.name || ''} — ${contract.property?.address || ''}`,
+    })
+    setShowUndoModal(true)
+  }
+
   const confirmApply = async () => {
     if (!confirmData) return
 
     try {
       const response = await api.post(
         `/groups/${currentGroup.id}/adjustment-indices/${confirmData.index.id}/apply-to-calendar`,
-        { 
+        {
           percentageIncrease: confirmData.percentage,
           calendarMonth: confirmData.calendarMonth,
-          calendarYear: confirmData.calendarYear
+          calendarYear: confirmData.calendarYear,
+          ...(confirmData.contractId ? { contractId: confirmData.contractId } : {})
         }
       )
-      
+
       toast.success(
         `Ajuste del ${confirmData.percentage}% aplicado a ${confirmData.count} contrato(s) para ${confirmData.monthName}`,
         { duration: 4000 }
@@ -234,9 +282,10 @@ export const AdjustmentIndexList = () => {
     try {
       await api.post(
         `/groups/${currentGroup.id}/adjustment-indices/${undoData.index.id}/undo-calendar`,
-        { 
+        {
           calendarMonth: undoData.calendarMonth,
-          calendarYear: undoData.calendarYear
+          calendarYear: undoData.calendarYear,
+          ...(undoData.contractId ? { contractId: undoData.contractId } : {})
         }
       )
       
@@ -511,6 +560,7 @@ export const AdjustmentIndexList = () => {
                     <th className="text-right">Alquiler Actual</th>
                     <th className="text-right">Ajuste Aplicado</th>
                     <th>Estado</th>
+                    <th className="text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -556,6 +606,29 @@ export const AdjustmentIndexList = () => {
                             <span className="badge badge-sm badge-warning">
                               Pendiente
                             </span>
+                          )}
+                        </td>
+                        <td className="text-center">
+                          {hasHistory ? (
+                            <button
+                              className="btn btn-ghost btn-xs text-warning"
+                              onClick={() => handleUndoSingle(contract)}
+                              disabled={isUndoingMonth}
+                              title="Deshacer el ajuste solo de esta propiedad"
+                            >
+                              <ArrowUturnLeftIcon className="w-4 h-4" />
+                              Deshacer
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-primary btn-xs"
+                              onClick={() => handleApplySingle(contract)}
+                              disabled={isApplyingToMonth}
+                              title="Aplicar el ajuste solo a esta propiedad"
+                            >
+                              <CheckCircleIcon className="w-4 h-4" />
+                              Aplicar
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -675,7 +748,9 @@ export const AdjustmentIndexList = () => {
                 {' '}para {undoData.monthName}?
               </p>
               <p className="text-sm text-gray-500 mt-2">
-                Se revertirán {undoData.count} contrato(s) al valor anterior.
+                {undoData.contractId
+                  ? <>Solo se revertirá: <span className="font-semibold">{undoData.contractLabel}</span></>
+                  : <>Se revertirán {undoData.count} contrato(s) al valor anterior.</>}
               </p>
             </div>
 

@@ -384,7 +384,8 @@ const undoAdjustmentForMonth = async (req, res, next) => {
 const applyAdjustmentToCalendar = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { percentageIncrease, calendarMonth, calendarYear } = req.body;
+    // contractId (opcional): aplicar SOLO a ese contrato en vez de a todos los del índice
+    const { percentageIncrease, calendarMonth, calendarYear, contractId } = req.body;
 
     if (percentageIncrease === undefined || percentageIncrease === null) {
       return ApiResponse.badRequest(res, 'Porcentaje de aumento es requerido');
@@ -418,7 +419,7 @@ const applyAdjustmentToCalendar = async (req, res, next) => {
 
     // Apply to contracts for specific calendar month
     const { applyAdjustmentToCalendar } = require('../services/adjustmentService');
-    const results = await applyAdjustmentToCalendar(groupId, id, percentage, month, year);
+    const results = await applyAdjustmentToCalendar(groupId, id, percentage, month, year, contractId || null);
 
     return ApiResponse.success(
       res,
@@ -444,7 +445,8 @@ const applyAdjustmentToCalendar = async (req, res, next) => {
 const undoAdjustmentForCalendar = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { calendarMonth, calendarYear } = req.body;
+    // contractId (opcional): deshacer SOLO para ese contrato
+    const { calendarMonth, calendarYear, contractId } = req.body;
 
     if (!calendarMonth || isNaN(parseInt(calendarMonth, 10))) {
       return ApiResponse.badRequest(res, 'Mes es requerido');
@@ -464,7 +466,7 @@ const undoAdjustmentForCalendar = async (req, res, next) => {
 
     // Undo adjustments for specific calendar month
     const { undoAdjustmentForCalendar } = require('../services/adjustmentService');
-    const results = await undoAdjustmentForCalendar(groupId, id, month, year);
+    const results = await undoAdjustmentForCalendar(groupId, id, month, year, contractId || null);
 
     return ApiResponse.success(
       res,
