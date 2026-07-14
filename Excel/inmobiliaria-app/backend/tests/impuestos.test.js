@@ -40,7 +40,19 @@ const prismaMock = {
 };
 
 const reportDataService = proxyquire('../src/services/reportDataService', {
-  '../lib/prisma': prismaMock
+  '../lib/prisma': prismaMock,
+  // getImpuestosData ahora calcula deudas "en vivo" vía debtService.computeLiveDebtTotal
+  // (liveDebtFigures). Sin datos precargados, ese código cae a un prisma.contract.findUnique
+  // real para resolver el contrato de la deuda — prismaMock no lo define. Como este test solo
+  // valida el mapeo INQUILINO/PROPIETARIO (no la matemática de punitorios en vivo), el stub
+  // simplemente devuelve los totales ya conocidos de la deuda (mismo comportamiento que el
+  // código pre-WIP, que usaba d.currentTotal/d.accumulatedPunitory directamente).
+  './debtService': {
+    computeLiveDebtTotal: async (debt) => ({
+      liveAccumulatedPunitory: debt.accumulatedPunitory || 0,
+      liveCurrentTotal: debt.currentTotal || 0,
+    }),
+  },
 });
 
 describe('getImpuestosData logic', () => {

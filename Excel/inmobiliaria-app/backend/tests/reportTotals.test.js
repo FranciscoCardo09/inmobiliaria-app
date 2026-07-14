@@ -81,7 +81,7 @@ const YEAR = 2026;
 
 describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
 
-  test('1. paid rental: isRentPaid=true, subtotalAlquileresCobrado equals rent+punitory', () => {
+  test('1. paid rental: isRentPaid=true, subtotalAlquileresCobrado equals rent+punitory', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       punitoryAmount: 5000,
@@ -93,7 +93,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: true,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.isRentPaid, true, 'isRentPaid should be true when isCancelled');
     assert.strictEqual(
@@ -105,7 +105,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.strictEqual(result.subtotalAlquileres, 100000, 'subtotalAlquileres (due) is rent only');
   });
 
-  test('2. unpaid rental: isRentPaid=false, cobrado fields are 0, due fields intact', () => {
+  test('2. unpaid rental: isRentPaid=false, cobrado fields are 0, due fields intact', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 0,
@@ -115,7 +115,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: false,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.isRentPaid, false, 'isRentPaid should be false when not isCancelled');
     assert.strictEqual(result.subtotalAlquileresCobrado, 0, 'nothing collected on unpaid');
@@ -125,7 +125,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.ok(Array.isArray(result.conceptos) && result.conceptos.length > 0, 'conceptos present');
   });
 
-  test('3. partial payment: cobrado reflects allocated amounts, paymentStatus=PAGO PARCIAL', () => {
+  test('3. partial payment: cobrado reflects allocated amounts, paymentStatus=PAGO PARCIAL', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 60000,
@@ -135,7 +135,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: false,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.paymentStatus, 'PAGO PARCIAL', 'partial payment → PAGO PARCIAL');
     assert.strictEqual(result.isRentPaid, false, 'partial → not fully paid');
@@ -143,7 +143,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.ok(result.pendingAmount > 0, 'pending amount should be > 0');
   });
 
-  test('4. debt cleared → record settled: isCancelled=true counts as paid', () => {
+  test('4. debt cleared → record settled: isCancelled=true counts as paid', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 100000,
@@ -153,13 +153,13 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: true,  // forced by debtService when Debt.status flips to PAID
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.isRentPaid, true, 'debt-cleared record is paid');
     assert.strictEqual(result.subtotalAlquileresCobrado, 100000);
   });
 
-  test('5. forgiven punitorios excluded from cobrado total', () => {
+  test('5. forgiven punitorios excluded from cobrado total', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       punitoryAmount: 5000,
@@ -171,7 +171,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: true,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.isRentPaid, true);
     assert.strictEqual(
@@ -182,7 +182,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.strictEqual(result.subtotalAlquileres, 100000, 'subtotalAlquileres also excludes forgiven punitorios');
   });
 
-  test('6. unpaid row with punitorios contributes 0 to cobrado', () => {
+  test('6. unpaid row with punitorios contributes 0 to cobrado', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       punitoryAmount: 3000,
@@ -194,13 +194,13 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: false,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.isRentPaid, false);
     assert.strictEqual(result.subtotalAlquileresCobrado, 0, 'unpaid + punitorios → 0 cobrado');
   });
 
-  test('7a. zero-rent record contributes 0 regardless of paid status', () => {
+  test('7a. zero-rent record contributes 0 regardless of paid status', async () => {
     const record = makeRecord({
       rentAmount: 0,
       amountPaid: 0,
@@ -210,13 +210,13 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: true,
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     assert.strictEqual(result.subtotalAlquileresCobrado, 0, 'zero rent → 0 cobrado even if paid');
     assert.strictEqual(result.subtotalAlquileres, 0);
   });
 
-  test('7b. admin cancelled with amountPaid=0: paymentStatus=NO COBRADO (amountPaid drives status)', () => {
+  test('7b. admin cancelled with amountPaid=0: paymentStatus=NO COBRADO (amountPaid drives status)', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       amountPaid: 0,
@@ -226,14 +226,14 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: true,  // admin manually marked as cancelled
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     // paymentStatus is driven by amountPaid, not isCancelled
     assert.strictEqual(result.paymentStatus, 'NO COBRADO', 'amountPaid=0 → NO COBRADO regardless of isCancelled');
     assert.strictEqual(result.subtotalAlquileresCobrado, 0);
   });
 
-  test('7c. amountPaid >= totalDue but isCancelled=false: classified by amountPaid vs total', () => {
+  test('7c. amountPaid >= totalDue but isCancelled=false: classified by amountPaid vs total', async () => {
     // paymentStatus is now driven by amountPaid vs total, not by isCancelled
     const record = makeRecord({
       rentAmount: 100000,
@@ -244,7 +244,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: false,  // writer hasn't flushed yet
     });
 
-    const result = buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
+    const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR);
 
     // amountPaid (100000) >= total (100000) → PAGADO
     assert.strictEqual(result.paymentStatus, 'PAGADO', 'amountPaid >= total → PAGADO');
@@ -255,7 +255,7 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
     assert.strictEqual(result.isCancelled, false);
   });
 
-  test('honorarios computed when honorariosPercent provided, 0 for unpaid', () => {
+  test('honorarios computed when honorariosPercent provided, 0 for unpaid', async () => {
     const options = { honorariosPercent: 10 };
 
     const paidRecord = makeRecord({
@@ -276,8 +276,8 @@ describe('buildLiquidacionFromRecord — isRentPaid and cobrado fields', () => {
       isCancelled: false,
     });
 
-    const paid = buildLiquidacionFromRecord(paidRecord, EMPRESA, MONTH, YEAR, options);
-    const unpaid = buildLiquidacionFromRecord(unpaidRecord, EMPRESA, MONTH, YEAR, options);
+    const paid = await buildLiquidacionFromRecord(paidRecord, EMPRESA, MONTH, YEAR, options);
+    const unpaid = await buildLiquidacionFromRecord(unpaidRecord, EMPRESA, MONTH, YEAR, options);
 
     assert.ok(paid.honorarios !== null, 'paid row has honorarios object');
     assert.ok(paid.honorariosCobrado > 0, 'paid row has positive honorariosCobrado');
