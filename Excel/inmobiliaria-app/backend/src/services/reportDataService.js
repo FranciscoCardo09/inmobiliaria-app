@@ -3,6 +3,10 @@ const { numeroATexto, sumPunitoryConcepts } = require('../utils/helpers');
 const { round2, diffCalendarDays } = require('../utils/punitory');
 const { MONTH_NAMES } = require('../utils/constants');
 const { formatServiceLabel } = require('../utils/serviceLabel');
+// A-25: "hoy" del negocio en ART, TZ-inmune (ver dateUtils.js). El servidor
+// corre sin TZ configurada (= UTC); usar `new Date()` crudo como "hoy" en un
+// cálculo de punitorios cuenta un día de más entre las 21:00 y las 23:59 ART.
+const { getTodayLocalString, getTodayLocalDate } = require('../utils/dateUtils');
 
 const prisma = require('../lib/prisma');
 
@@ -34,15 +38,13 @@ const getPrimaryTenant = (contract) => {
  */
 const liveDebtFigures = async (debt, preloaded = null) => {
   if (!debt) return { punitorios: 0, pendiente: 0 };
-  if (debt.status === 'PAID') return { punitorios: round2(debt.accumulatedPunitory || 0), pendiente: 0 };
   const debtService = require('./debtService');
-  const live = await debtService.calculateDebtPunitory(debt, new Date(), preloaded, true);
-  // `amount` = punitorio impago total (en la rama base-saldada incluye el acumulado;
-  // en la rama con saldo base es el tramo nuevo). `newPunitoryAmount` solo cuenta el
-  // tramo nuevo → subcontaba cuando el alquiler ya está pagado y solo quedan punitorios.
-  const punitorios = round2((live.unpaidAccumulatedPunitory || 0) + (live.amount || 0));
-  const pendiente = round2((live.remainingDebt || 0) + punitorios);
-  return { punitorios, pendiente };
+  // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
+  const liveDebt = await debtService.computeLiveDebtTotal(debt, getTodayLocalString(), preloaded);
+  return { 
+    punitorios: liveDebt.liveAccumulatedPunitory || 0, 
+    pendiente: liveDebt.liveCurrentTotal || 0 
+  };
 };
 
 // ============================================
@@ -196,7 +198,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
  * Transforms a monthlyRecord (with includes) into a liquidacion data object.
  * Shared logic used by both getLiquidacionData and getLiquidacionesAllContracts.
  */
-const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options = {}) => {
+const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, options = {}) => {
   const { contract } = monthlyRecord;
   const owner = contract.property.owner;
   const isPropietario = contract.contractType === 'PROPIETARIO';
@@ -389,9 +391,21 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
   const isRentPaid = paymentStatus === 'PAGADO' || paymentStatus === 'SALDO A FAVOR';
   const pendingAmount = isRentPaid ? 0 : Math.max(0, total - amtPaid);
 
+  const deudasVivas = await Promise.all((contract.debts || []).map(async (d) => {
+    const live = await liveDebtFigures(d);
+    return {
+      periodo: d.periodLabel,
+      original: d.originalAmount,
+      pagado: d.amountPaid,
+      punitorios: live.punitorios,
+      pendiente: live.pendiente,
+      status: d.status,
+    };
+  }));
+
   // Total adeudado consolidado = lo impago del mes actual + deudas formales de meses anteriores.
   // previousBalance solo acarrea SALDO A FAVOR (crédito), nunca deuda → no hay doble conteo con totalDeuda.
-  const totalDeuda = (contract.debts || []).reduce((sum, d) => sum + d.currentTotal, 0);
+  const totalDeuda = deudasVivas.reduce((sum, d) => sum + d.pendiente, 0);
   const totalSinAbonar = pendingAmount + totalDeuda;
 
   // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - descuentos
@@ -466,14 +480,7 @@ const buildLiquidacionFromRecord = (monthlyRecord, empresa, month, year, options
     isCancelled: !!monthlyRecord.isCancelled,
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
-    deudas: (contract.debts || []).map(d => ({
-      periodo: d.periodLabel,
-      original: d.originalAmount,
-      pagado: d.amountPaid,
-      punitorios: d.accumulatedPunitory,
-      pendiente: d.currentTotal,
-      status: d.status,
-    })),
+    deudas: deudasVivas,
     totalDeuda,
     totalSinAbonar,
     transacciones: monthlyRecord.transactions.map((t) => ({
@@ -545,7 +552,15 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   // Filtros base compartidos por la query global y la de overrides (sin período)
   const buildBaseWhere = () => {
-    const w = { groupId, contract: { active: true } };
+    // M-26 (AUDITORIA_FUNCIONAL_2026-07-10.md, confirmado con el usuario 2026-07-11):
+    // un contrato RENOVADO (active:false, renewedAt seteado) sigue siendo dueño de
+    // sus períodos históricos — mismo criterio que ya usa Control Mensual
+    // (monthlyRecordService.js, "renewed/inactive contracts still own their
+    // historical periods"). Antes este filtro era `active:true` a secas, así que
+    // regenerar la Liquidación general de un mes ya cerrado hacía desaparecer a
+    // cualquier contrato renovado después de ese mes. Un contrato RESCINDIDO
+    // (active:false, renewedAt:null) sigue excluido — eso no cambia acá.
+    const w = { groupId, contract: { OR: [{ active: true }, { renewedAt: { not: null } }] } };
     if (soloConPago) w.isCancelled = true;
     if (contractIds && contractIds.length > 0) {
       w.contractId = { in: contractIds };
@@ -608,7 +623,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   const allRecords = [...globalRecords, ...overrideRecords];
 
-  const result = allRecords.map((record) => {
+  const result = await Promise.all(allRecords.map((record) => {
     // Route per-contract gastosAMiCargo if provided as a map { [contractId]: {...} }
     const contractOptions = { ...options };
     if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
@@ -619,7 +634,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     }
     // Usar el período PROPIO del registro (para overrides difiere del global; para el resto es igual)
     return buildLiquidacionFromRecord(record, empresa, record.periodMonth, record.periodYear, contractOptions);
-  });
+  }));
 
   // 3) Placeholders "sin datos" para contratos con override que no tienen registro en ese período (solo preview)
   if (includePlaceholders && overrideContractIds.length > 0) {
@@ -1147,7 +1162,14 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       (record.services || []).map(s => [s.conceptType?.name, s.conceptType?.category])
     );
     conceptos = targetTx.concepts
-      .filter(c => c.amount > 0) // excluir créditos negativos del total visible
+      // Excluye créditos negativos del total visible (comportamiento pre-existente, sin
+      // tocar). Excepción puntual: el A_FAVOR informativo que arma payDebt (amount:0,
+      // "ya descontado del total a pagar") SÍ debe pasar — antes ni siquiera se creaba
+      // ese concepto (síntoma: el recibo de pago de una deuda no mostraba el saldo a
+      // favor aplicado). No se toca el resto de A_FAVOR (p.ej. el -previousBalance del
+      // pago normal de mes, paymentTransactionService.js): ese es un problema latente
+      // aparte, fuera del alcance de este fix.
+      .filter(c => c.amount > 0 || (c.type === 'A_FAVOR' && c.amount === 0))
       .map(c => {
         const baseLabel = c.description || CONCEPT_LABELS[c.type] || c.type;
         const cat = serviceByName[c.type];
@@ -1188,9 +1210,10 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
         if (debtStart && end) punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), debtStart) + 1, 0);
       } else {
         const debtService = require('./debtService');
-        const live = await debtService.calculateDebtPunitory(record.debt, new Date(), null, true);
+        // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
+        const live = await debtService.calculateDebtPunitory(record.debt, getTodayLocalString(), null, true);
         truePunitory = round2((live.unpaidAccumulatedPunitory || 0) + (live.newPunitoryAmount || 0));
-        const end = live.endDate || new Date();
+        const end = live.endDate || getTodayLocalDate();
         if (debtStart) punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), debtStart) + 1, 0);
       }
     } else if (truePunitory > 0 && !record.punitoryDays && contract?.punitoryStartDay) {
@@ -1201,7 +1224,8 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       // ya es > 0 —el caso normal de un solo pago— se respeta ese valor congelado.)
       const start = new Date(record.periodYear, record.periodMonth - 1, contract.punitoryStartDay);
       const lastPunTx = [...txs].reverse().find((t) => (t.concepts || []).some((cc) => cc.type === 'PUNITORIOS'));
-      const end = lastPunTx?.paymentDate || txs[txs.length - 1]?.paymentDate || new Date();
+      // A-25: fallback al día ART correcto, no `new Date()` crudo del proceso.
+      const end = lastPunTx?.paymentDate || txs[txs.length - 1]?.paymentDate || getTodayLocalDate();
       punitoryDaysLabel = Math.max(diffCalendarDays(new Date(end), start) + 1, 0);
     }
 
@@ -1248,10 +1272,28 @@ const getPagoEfectivoFromRecord = async (groupId, monthlyRecordId, transactionId
       });
     }
 
+    // A-19: el TOTAL de este recibo (arriba) incluye IVA y resta el saldo a favor, pero
+    // esos renglones no estaban en el detalle → la suma visible no cuadraba con el TOTAL
+    // impreso. Se agregan acá con los mismos valores ya usados para calcular `total`
+    // (no se recalcula nada nuevo), para que Σ renglones === TOTAL.
+    if (ivaAmount > 0) {
+      conceptos.push({
+        concepto: 'IVA 21%',
+        importe: round2(ivaAmount),
+      });
+    }
+
     if (truePunitory > 0 && !record.punitoryForgiven) {
       conceptos.push({
         concepto: `Punitorios (${punitoryDaysLabel} días)`,
         importe: truePunitory,
+      });
+    }
+
+    if (record.previousBalance > 0) {
+      conceptos.push({
+        concepto: 'Saldo a favor',
+        importe: -round2(record.previousBalance),
       });
     }
   }
@@ -1406,7 +1448,8 @@ const getControlMensualData = async (groupId, month, year) => {
       punitoriosOut = r2(f.punitorios);
       const iva = r.includeIva ? r.ivaAmount : 0;
       totalOut = r2(r.rentAmount + r.servicesTotal + iva + f.punitorios - r.previousBalance);
-      if (r.debt.punitoryStartDate) punitoryDaysOut = Math.max(diffCalendarDays(new Date(), new Date(r.debt.punitoryStartDate)) + 1, 0);
+      // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
+      if (r.debt.punitoryStartDate) punitoryDaysOut = Math.max(diffCalendarDays(getTodayLocalString(), new Date(r.debt.punitoryStartDate)) + 1, 0);
     } else if (r.debt) {
       punitoriosOut = r2(r.debt.accumulatedPunitory || 0);
       totalOut = r2(r.totalDue);
@@ -1561,6 +1604,18 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
 
     coveredContractIds.add(record.contractId);
     const owner = record.contract.property.owner;
+    const deudasVivas = await Promise.all(debts.map(async (d) => {
+      const live = await liveDebtFigures(d);
+      return {
+        periodo: d.periodLabel,
+        original: d.originalAmount,
+        pagado: d.amountPaid,
+        punitorios: live.punitorios,
+        pendiente: live.pendiente,
+        status: d.status,
+      };
+    }));
+
     impuestos.push({
       inquilino: getTenantsName(record.contract),
       propiedad: record.contract.property.address,
@@ -1572,15 +1627,8 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       totalImpuestos: taxServices.reduce((sum, s) => sum + s.amount, 0),
       banco: resolveOwnerBank(owner) || empresa.banco,
       beneficiario: owner?.transferBeneficiary?.name || null,
-      deudas: debts.map((d) => ({
-        periodo: d.periodLabel,
-        original: d.originalAmount,
-        pagado: d.amountPaid,
-        punitorios: d.accumulatedPunitory,
-        pendiente: d.currentTotal,
-        status: d.status,
-      })),
-      totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
+      deudas: deudasVivas,
+      totalDeuda: deudasVivas.reduce((sum, d) => sum + d.pendiente, 0),
     });
   }
 
@@ -1613,6 +1661,18 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
 
   for (const { contract, debts } of debtsByContract.values()) {
     const owner = contract.property.owner;
+    const deudasVivas = await Promise.all(debts.map(async (d) => {
+      const live = await liveDebtFigures(d);
+      return {
+        periodo: d.periodLabel,
+        original: d.originalAmount,
+        pagado: d.amountPaid,
+        punitorios: live.punitorios,
+        pendiente: live.pendiente,
+        status: d.status,
+      };
+    }));
+
     impuestos.push({
       inquilino: getTenantsName(contract),
       propiedad: contract.property.address,
@@ -1621,15 +1681,8 @@ const getImpuestosData = async (groupId, month, year, propertyIds = null, ownerI
       totalImpuestos: 0,
       banco: resolveOwnerBank(owner) || empresa.banco,
       beneficiario: owner?.transferBeneficiary?.name || null,
-      deudas: debts.map((d) => ({
-        periodo: d.periodLabel,
-        original: d.originalAmount,
-        pagado: d.amountPaid,
-        punitorios: d.accumulatedPunitory,
-        pendiente: d.currentTotal,
-        status: d.status,
-      })),
-      totalDeuda: debts.reduce((sum, d) => sum + d.currentTotal, 0),
+      deudas: deudasVivas,
+      totalDeuda: deudasVivas.reduce((sum, d) => sum + d.pendiente, 0),
     });
   }
 
