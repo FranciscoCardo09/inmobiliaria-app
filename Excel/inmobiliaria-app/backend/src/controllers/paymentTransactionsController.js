@@ -70,7 +70,7 @@ const getPunitoryPreview = async (req, res, next) => {
       newPunitory: result.newPunitory,
       accumulatedPunitory: result.accumulatedPunitory,
       days: result.days,
-      graceDate: result.graceDate.toISOString(),
+      graceDate: result.graceDate ? result.graceDate.toISOString() : null,
       fromDate: result.fromDate ? result.fromDate.toISOString() : null,
       toDate: result.toDate ? result.toDate.toISOString() : null,
       baseRent: result.baseRent,

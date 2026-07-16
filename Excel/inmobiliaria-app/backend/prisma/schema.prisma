@@ -47,7 +47,7 @@ model Group {
   name          String
   slug          String   @unique
   description   String?
-  punitoryRate  Float    @default(0.006) @map("punitory_rate")
+  punitoryRate  Float    @default(0.006) @map("punitory_rate") // DEPRECATED: no se usa en ningún cálculo; el motor de punitorios lee siempre contract.punitoryPercent (ver A-05, AUDITORIA_FUNCIONAL_2026-07-10.md)
   currency      String   @default("ARS")
 
   // Company settings (Phase 6+)
@@ -369,9 +369,9 @@ model Contract {
   nextAdjustmentMonth Int?     @map("next_adjustment_month") // Mes del contrato del próximo ajuste
 
   // Punitorios
-  punitoryStartDay    Int      @default(4) @map("punitory_start_day")   // Día desde donde cuentan punitorios
+  punitoryStartDay    Int      @default(10) @map("punitory_start_day")  // Día desde donde cuentan punitorios
   punitoryGraceDay    Int      @default(10) @map("punitory_grace_day")  // Día límite hábil sin punitorios
-  punitoryPercent     Float    @default(0.02) @map("punitory_percent")  // % diario (0.02 = 2%)
+  punitoryPercent     Float    @default(0.006) @map("punitory_percent") // % diario (0.006 = 0.6%)
 
   pagaIva             Boolean  @default(false) @map("paga_iva")
   observations        String?
@@ -619,7 +619,22 @@ model PaymentTransaction {
 
   @@index([groupId])
   @@index([monthlyRecordId])
+  // A-15: el número de recibo debe ser único por grupo. NULL (transacciones sin
+  // recibo) no colisiona entre sí en Postgres/SQLite (NULLs no se consideran iguales).
+  @@unique([groupId, receiptNumber])
   @@map("payment_transactions")
+}
+
+// ReceiptSequence - contador monotónico de números de recibo por grupo (A-15).
+// Nunca decrece: un borrado de PaymentTransaction NO baja este contador, evitando
+// que se reemita un número ya entregado. Se incrementa dentro del mismo lock/
+// transacción que registerPayment (pg_advisory_xact_lock por contrato).
+model ReceiptSequence {
+  groupId    String   @id @map("group_id")
+  lastNumber Int      @default(0) @map("last_number")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("receipt_sequences")
 }
 
 // TransactionConcept - Desglose de cada transacción

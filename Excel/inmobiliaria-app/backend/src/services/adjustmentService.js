@@ -67,6 +67,35 @@ const getTenantsNameAdj = (contract) => {
   return contract.tenant?.name || 'Sin inquilino';
 };
 
+// A-09 (AUDITORIA_FUNCIONAL_2026-07-10.md): ninguna de las tres funciones de
+// ajuste (applyAdjustmentToCalendar, undoAdjustmentForMonth,
+// undoAdjustmentForCalendar) validaba si el mes objetivo ya estaba
+// pagado/cerrado antes de pisar rentAmount/baseRent — reabría meses ya
+// cobrados y podía generar punitorios ficticios sobre un inquilino que pagó.
+// Decisión del usuario (2026-07-12): bloquear (saltar el contrato, no abortar
+// todo el lote) si el MonthlyRecord del mes objetivo está COMPLETE, tiene
+// `amountPaid>0`, tiene transacciones registradas, o tiene una Debt asociada
+// (mes ya cerrado). Fuente única: esta es la ÚNICA implementación del chequeo;
+// las tres funciones la reutilizan.
+const isMonthLocked = async (contractId, monthNumber) => {
+  const record = await prisma.monthlyRecord.findFirst({
+    where: { contractId, monthNumber },
+    select: {
+      status: true,
+      amountPaid: true,
+      debt: { select: { id: true } },
+      transactions: { select: { id: true } },
+    },
+  });
+  if (!record) return false; // el mes todavía no existe: nada que proteger
+  return (
+    record.status === 'COMPLETE' ||
+    (record.amountPaid || 0) > 0 ||
+    !!record.debt ||
+    (record.transactions || []).length > 0
+  );
+};
+
 /**
  * Calculate the next adjustment month based on start month and frequency
  * LÓGICA CORREGIDA:
@@ -530,6 +559,18 @@ const undoAdjustmentForMonth = async (groupId, indexId, targetMonth) => {
   for (const history of rentHistories) {
     const contract = history.contract;
 
+    // A-09: no revertir el ajuste de un mes ya pagado/cerrado.
+    if (await isMonthLocked(contract.id, targetMonth)) {
+      results.push({
+        contractId: contract.id,
+        tenant: getTenantsNameAdj(contract),
+        property: contract.property.address,
+        skipped: true,
+        reason: 'El mes objetivo ya está pagado o cerrado; no se deshizo el ajuste.',
+      });
+      continue;
+    }
+
     // Buscar el alquiler anterior (el registro inmediatamente anterior en el historial)
     const previousHistory = await prisma.rentHistory.findFirst({
       where: {
@@ -623,6 +664,18 @@ const applyAdjustmentToCalendar = async (groupId, indexId, percentageIncrease, c
     
     if (existingHistory) continue; // Ya fue aplicado, no duplicar
 
+    // A-09: no reabrir un mes ya pagado/cerrado con un ajuste retroactivo.
+    if (await isMonthLocked(contract.id, contractMonth)) {
+      results.push({
+        contractId: contract.id,
+        tenant: getTenantsNameAdj(contract),
+        property: contract.property.address,
+        skipped: true,
+        reason: 'El mes objetivo ya está pagado o cerrado; no se aplicó el ajuste.',
+      });
+      continue;
+    }
+
     // Alquiler vigente según historial (no baseRent directo) + fila INICIAL si falta,
     // para que los meses anteriores al ajuste conserven su alquiler histórico.
     const currentRent = await getRentBeforeMonth(contract, contractMonth);
@@ -715,6 +768,18 @@ const undoAdjustmentForCalendar = async (groupId, indexId, calendarMonth, calend
     });
 
     if (!history) continue;
+
+    // A-09: no revertir el ajuste de un mes ya pagado/cerrado.
+    if (await isMonthLocked(contract.id, contractMonth)) {
+      results.push({
+        contractId: contract.id,
+        tenant: getTenantsNameAdj(contract),
+        property: contract.property.address,
+        skipped: true,
+        reason: 'El mes objetivo ya está pagado o cerrado; no se deshizo el ajuste.',
+      });
+      continue;
+    }
 
     // Buscar el alquiler anterior
     const previousHistory = await prisma.rentHistory.findFirst({

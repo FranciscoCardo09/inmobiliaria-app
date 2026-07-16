@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body { 
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+      background: #fff;
+      padding: 0;
+      margin: 0;
+      color: #202124;
+    }
+    
+    .container { 
+      width: 100%;
+      max-width: 100%;
+      background: white;
+      padding: 20px;
+    }
+    
+    /* Tabs */
+    .tabs { 
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #e8eaed;
+    }
+    
+    .tab { 
+      padding: 10px 20px;
+      background: transparent;
+      border: none;
+      font-size: 14px;
+      font-weight: 500;
+      color: #5f6368;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      position: relative;
+      margin-bottom: -1px;
+    }
+    
+    .tab:hover { 
+      background: #f8f9fa;
+      color: #202124;
+    }
+    
+    .tab.active { 
+      color: #1a73e8;
+      border-bottom-color: #1a73e8;
+    }
+    
+    /* Tab Content */
+    .tab-content { 
+      display: none;
+    }
+    
+    .tab-content.active { 
+      display: block;
+    }
+    
+    /* Search */
+    .search-container { 
+      margin-bottom: 16px;
+    }
+    
+    .search-label { 
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 8px;
+    }
+    
+    .search-wrapper { 
+      position: relative;
+    }
+    
+    .search-icon { 
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #5f6368;
+      font-size: 16px;
+    }
+    
+    .search-input {
+      width: 100%;
+      padding: 10px 12px 10px 40px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: all 0.2s;
+      background: white;
+      font-family: inherit;
+    }
+    
+    .search-input:hover {
+      border-color: #bdc1c6;
+    }
+    
+    .search-input:focus { 
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.3);
+    }
+    
+    .search-input::placeholder {
+      color: #80868b;
+    }
+    
+    .suggestions { 
+      position: relative;
+      margin-top: 8px;
+      background: white;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      display: none;
+    }
+    
+    .suggestions.active { 
+      display: block;
+    }
+    
+    .suggestions::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    .suggestions::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    .suggestions::-webkit-scrollbar-thumb {
+      background: #dadce0;
+      border-radius: 4px;
+    }
+    
+    .suggestions::-webkit-scrollbar-thumb:hover {
+      background: #bdc1c6;
+    }
+    
+    .suggestion-item { 
+      padding: 10px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f3f4;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      transition: background 0.1s;
+    }
+    
+    .suggestion-item:last-child { 
+      border-bottom: none;
+    }
+    
+    .suggestion-item:hover { 
+      background: #f1f3f4;
+    }
+    
+    .suggestion-item.debt { 
+      background: #fce8e6;
+      border-left: 3px solid #ea4335;
+    }
+    
+    .suggestion-item.debt:hover {
+      background: #fad2cf;
+    }
+    
+    .suggestion-item.selected { 
+      background: #e8f0fe;
+    }
+    
+    .suggestion-item.group-item {
+      background: #e8f0fe;
+      border-left: 3px solid #1a73e8;
+      font-weight: 500;
+    }
+    
+    .suggestion-item.group-item:hover {
+      background: #d2e3fc;
+    }
+    
+    .suggestion-item.paid {
+      background: #e6f4ea;
+      border-left: 3px solid #34a853;
+    }
+    
+    .suggestion-item.paid:hover {
+      background: #ceead6;
+    }
+    
+    .section-title { 
+      padding: 8px 16px;
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #5f6368;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+      position: sticky;
+      top: 0;
+    }
+    
+    /* Checkbox */
+    .checkbox { 
+      width: 18px;
+      height: 18px;
+      border: 2px solid #5f6368;
+      border-radius: 2px;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      background: white;
+    }
+    
+    .checkbox:hover {
+      border-color: #1a73e8;
+    }
+    
+    .checkbox.checked { 
+      background: #1a73e8;
+      border-color: #1a73e8;
+    }
+    
+    .checkbox.checked::after { 
+      content: '✓';
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    /* Selected items */
+    .selected-items { 
+      margin-bottom: 16px;
+    }
+    
+    .selected-items-label { 
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .selected-count {
+      background: #1a73e8;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .selected-list { 
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px;
+      border: 1px dashed #dadce0;
+      border-radius: 4px;
+      background: #f8f9fa;
+      align-items: center;
+    }
+    
+    .selected-badge { 
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: #e8f0fe;
+      color: #1967d2;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid #d2e3fc;
+    }
+    
+    .selected-badge button { 
+      background: transparent;
+      border: none;
+      color: #5f6368;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.2s;
+    }
+    
+    .selected-badge button:hover { 
+      color: #202124;
+    }
+    
+    .selected-placeholder { 
+      color: #80868b;
+      font-size: 13px;
+      text-align: center;
+      width: 100%;
+    }
+    
+    /* Form */
+    .form-fields { 
+      display: none;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e8eaed;
+    }
+    
+    .form-fields.active { 
+      display: block;
+    }
+    
+    .input-group { 
+      margin-bottom: 16px;
+    }
+    
+    .input-group label { 
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #202124;
+      font-size: 13px;
+    }
+    
+    input[type="date"],
+    input[type="number"],
+    select { 
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    
+    input[type="date"]:hover,
+    input[type="number"]:hover,
+    select:hover {
+      border-color: #bdc1c6;
+    }
+    
+    input[type="date"]:focus,
+    input[type="number"]:focus,
+    select:focus { 
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.3);
+    }
+    
+    .btn-submit { 
+      width: 100%;
+      padding: 10px 24px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+      letter-spacing: 0.25px;
+    }
+    
+    .btn-submit:hover { 
+      background: #1765cc;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-submit:active {
+      background: #1557b0;
+    }
+    
+    .btn-submit:disabled { 
+      background: #dadce0;
+      color: #80868b;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    
+    .info-box {
+      background: #e8f0fe;
+      border-left: 3px solid #1a73e8;
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #174ea6;
+      line-height: 1.4;
+    }
+    
+    .warning-box {
+      background: #fef7e0;
+      border-left: 3px solid #f9ab00;
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #7f6003;
+      line-height: 1.4;
+    }
+    
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+    
+    .status-badge.paid {
+      background: #e6f4ea;
+      color: #137333;
+    }
+    
+    .status-badge.partial {
+      background: #fef7e0;
+      color: #7f6003;
+    }
+    
+    .status-badge.providus {
+      background: #e8f0fe;
+      color: #1967d2;
+    }
+    
+    .honorarios-presets {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    
+    .preset-btn {
+      flex: 1;
+      padding: 8px;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .preset-btn:hover {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+    }
+    
+    .preset-btn.active {
+      background: #1a73e8;
+      color: white;
+      border-color: #1a73e8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('single')">Individual</button>
+      <button class="tab" onclick="switchTab('group')">Grupo</button>
+      <button class="tab" onclick="switchTab('custom')">Múltiple</button>
+    </div>
+    
+    <form onsubmit="event.preventDefault(); generar();">
+      <!-- TAB 1: Individual -->
+      <div id="tab-single" class="tab-content active">
+        <div class="info-box">
+          Genera un reporte para una sola propiedad
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar propiedad o inquilino</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="propiedad-search" placeholder="Nombre, ubicación o inquilino..." autocomplete="off" oninput="filterProperties()">
+            <input type="hidden" id="propiedad-hidden" name="propiedad">
+          </div>
+          <div id="suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      
+      <!-- TAB 2: Grupo Inteligente -->
+      <div id="tab-group" class="tab-content">
+        <div class="info-box">
+          Agrupa automáticamente por torre, edificio o ubicación
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar grupo por ubicación</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="group-search" placeholder="Ej: Torre 1, Colon 350, Oficina..." autocomplete="off" oninput="filterGroups()">
+          </div>
+          <div id="group-suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      
+      <!-- TAB 3: Selección Múltiple -->
+      <div id="tab-custom" class="tab-content">
+        <div class="info-box">
+          Selecciona manualmente las propiedades que quieras agrupar
+        </div>
+        
+        <div class="selected-items">
+          <label class="selected-items-label">
+            <span>Propiedades seleccionadas</span>
+            <span class="selected-count" id="count">0</span>
+          </label>
+          <div class="selected-list" id="selected-list">
+            <span class="selected-placeholder">Busca y selecciona propiedades abajo</span>
+          </div>
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar propiedades</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="custom-search" placeholder="Busca y marca las propiedades..." autocomplete="off" oninput="filterCustom()">
+          </div>
+          <div id="custom-suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      
+      <div id="form-fields" class="form-fields">
+        <div class="input-group">
+          <label for="fecha-pago">Fecha estimada de pago</label>
+          <input type="date" name="fechaPago" id="fecha-pago" required>
+        </div>
+        
+        <!-- NUEVO: Selector de % de honorarios -->
+        <div class="input-group">
+          <label for="porcentaje-honorarios">Porcentaje de honorarios</label>
+          <div class="honorarios-presets">
+            <button type="button" class="preset-btn" onclick="setHonorarios(10)">10%</button>
+            <button type="button" class="preset-btn" onclick="setHonorarios(9)">9%</button>
+            <button type="button" class="preset-btn" onclick="setHonorarios(8)">8%</button>
+            <button type="button" class="preset-btn" onclick="setHonorarios(7)">7%</button>
+          </div>
+          <input type="number" name="porcentajeHonorarios" id="porcentaje-honorarios" 
+                 min="0" max="100" step="0.1" placeholder="O ingresa un valor personalizado" 
+                 oninput="clearPresetSelection()">
+        </div>
+        
+        <div id="providus-warning" class="warning-box" style="display: none;">
+          ⚠️ Esta propiedad pertenece a <strong>PROVIDUS</strong>. Los datos bancarios se ajustarán automáticamente en el reporte.
+        </div>
+        
+        <button type="submit" class="btn-submit">Generar Reporte</button>
+      </div>
+    </form>
+  </div>
+  
+  <script>
+    var propertiesData = [];
+    var debtsData = [];
+    var selectedProperty = null;
+    var selectedMultiple = [];
+    var currentTab = 'single';
+    var hojaPrincipal = '<?= hojaPrincipal ?>';
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      
+      event.target.classList.add('active');
+      document.getElementById('tab-' + tab).classList.add('active');
+      
+      selectedProperty = null;
+      document.getElementById('form-fields').classList.remove('active');
+    }
+    
+    function setHonorarios(porcentaje) {
+      document.getElementById('porcentaje-honorarios').value = porcentaje;
+      
+      // Activar el botón seleccionado
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+    
+    function clearPresetSelection() {
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+    }
+
+    // === TAB 1: INDIVIDUAL ===
+    function filterProperties() {
+  var input = document.getElementById("propiedad-search");
+  var filter = input.value.toUpperCase();
+  var suggestionsDiv = document.getElementById("suggestions");
+
+  suggestionsDiv.innerHTML = "";
+
+  if (filter.length === 0) {
+    suggestionsDiv.classList.remove('active');
+    selectedProperty = null;
+    document.getElementById('form-fields').classList.remove('active');
+    return;
+  }
+
+  var filteredCurrent = propertiesData.filter(function(p) {
+    return p[1].toUpperCase().indexOf(filter) > -1;
+  });
+
+  var filteredDebts = debtsData.filter(function(p) {
+    return p[1].toUpperCase().indexOf(filter) > -1;
+  });
+
+  if (filteredCurrent.length === 0 && filteredDebts.length === 0) {
+    suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No se encontraron resultados</div>';
+    suggestionsDiv.classList.add('active');
+    return;
+  }
+
+  if (filteredCurrent.length > 0) {
+    var titleCurrent = document.createElement('div');
+    titleCurrent.className = 'section-title';
+    titleCurrent.textContent = 'Mes Actual';
+    suggestionsDiv.appendChild(titleCurrent);
+
+    filteredCurrent.forEach(function(p) {
+      var item = document.createElement('div');
+      item.className = 'suggestion-item';
+      
+      var nombre = p[1];
+      var estadoBadge = '';
+      
+      // ===== CORRECCIÓN: Usar índice [18] para inquilino =====
+      var inquilino = (p[18] || '').toLowerCase();
+      var esProvidus = inquilino.indexOf('providus') !== -1;
+      
+      if (esProvidus) {
+        estadoBadge += '<span class="status-badge providus">🏢 PROVIDUS</span>';
+      }
+      
+      // ===== CORRECCIÓN: Usar índice [17] para canceló =====
+      var cancelo = (p[17] === 'SI' || p[17] === true);
+      
+      if (cancelo) {
+        item.classList.add('paid');
+        estadoBadge += '<span class="status-badge paid">✓ Cancelado</span>';
+      } else if (p[15] === true || p[15] === 'TRUE') {
+        // Pago registrado pero no cancelado
+        estadoBadge += '<span class="status-badge partial">⏳ Pago parcial</span>';
+      }
+      
+      item.innerHTML = nombre + estadoBadge;
+      item.onclick = function() {
+        selectProperty(p);
+      };
+      suggestionsDiv.appendChild(item);
+    });
+  }
+
+  if (filteredDebts.length > 0) {
+    var titleDebts = document.createElement('div');
+    titleDebts.className = 'section-title';
+    titleDebts.textContent = 'Deudas Pendientes';
+    suggestionsDiv.appendChild(titleDebts);
+
+    filteredDebts.forEach(function(p) {
+      var item = document.createElement('div');
+      item.className = 'suggestion-item debt';
+      
+      var nombre = p[1];
+      var estadoBadge = '';
+      
+      // ===== CORRECCIÓN: Usar índice [18] para inquilino =====
+      var inquilino = (p[18] || '').toLowerCase();
+      var esProvidus = inquilino.indexOf('providus') !== -1;
+      
+      if (esProvidus) {
+        estadoBadge = '<span class="status-badge providus">🏢 PROVIDUS</span>';
+      }
+      
+      item.innerHTML = nombre + estadoBadge;
+      item.onclick = function() {
+        selectProperty(p);
+      };
+      suggestionsDiv.appendChild(item);
+    });
+  }
+
+  suggestionsDiv.classList.add('active');
+}
+    function selectProperty(p) {
+      selectedProperty = p;
+      document.getElementById('propiedad-search').value = p[1];
+      document.getElementById('propiedad-hidden').value = p[0];
+      document.getElementById('suggestions').classList.remove('active');
+      document.getElementById('form-fields').classList.add('active');
+
+      var today = new Date();
+      document.getElementById('fecha-pago').valueAsDate = today;
+      
+      // Verificar si es PROVIDUS y mostrar advertencia
+      var inquilino = (p[17] || '').toLowerCase();
+      var esProvidus = inquilino.indexOf('providus') !== -1;
+      var warningDiv = document.getElementById('providus-warning');
+      
+      if (esProvidus) {
+        warningDiv.style.display = 'block';
+      } else {
+        warningDiv.style.display = 'none';
+      }
+      
+      // Establecer honorarios por defecto en 8%
+      setHonorariosByButton(8);
+    }
+    
+    function setHonorariosByButton(porcentaje) {
+      document.getElementById('porcentaje-honorarios').value = porcentaje;
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        if (btn.textContent === porcentaje + '%') {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+
+    // === TAB 2: GRUPO INTELIGENTE ===
+    function filterGroups() {
+      var input = document.getElementById("group-search");
+      var filter = input.value.toUpperCase();
+      var suggestionsDiv = document.getElementById("group-suggestions");
+
+      suggestionsDiv.innerHTML = "";
+
+      if (filter.length < 2) {
+        suggestionsDiv.classList.remove('active');
+        return;
+      }
+
+      var grupos = {};
+      propertiesData.forEach(function(p) {
+        var nombreCompleto = p[1];
+        var partes = nombreCompleto.split(' - ');
+        var ubicacion = partes[0];
+        
+        var palabras = ubicacion.split(' ');
+        var clave = '';
+        
+        if (ubicacion.indexOf('TORRE') === 0) {
+          clave = palabras[0] + ' ' + (palabras[1] || '');
+        } else if (ubicacion.indexOf('Oficina Colon 350') === 0) {
+          clave = palabras[0] + ' ' + palabras[1] + ' ' + palabras[2];
+        } else if (ubicacion.indexOf('Oficina Colon') === 0) {
+          clave = palabras[0] + ' ' + palabras[1];
+        } else if (ubicacion.indexOf('Colon') === 0) {
+          clave = palabras[0] + ' ' + (palabras[1] || '');
+        } else {
+          clave = palabras[0];
+        }
+        
+        if (clave.toUpperCase().indexOf(filter) > -1) {
+          if (!grupos[clave]) {
+            grupos[clave] = [];
+          }
+          grupos[clave].push(p);
+        }
+      });
+
+      if (Object.keys(grupos).length === 0) {
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No se encontraron grupos</div>';
+        suggestionsDiv.classList.add('active');
+        return;
+      }
+
+      var titleCurrent = document.createElement('div');
+      titleCurrent.className = 'section-title';
+      titleCurrent.textContent = 'Grupos Encontrados';
+      suggestionsDiv.appendChild(titleCurrent);
+
+      var gruposEncontrados = 0;
+      
+      Object.keys(grupos).sort().forEach(function(clave) {
+        if (grupos[clave].length > 1) {
+          var itemGrupo = document.createElement('div');
+          itemGrupo.className = 'suggestion-item group-item';
+          itemGrupo.innerHTML = clave + ' <span style="color:#5f6368;">(' + grupos[clave].length + ' propiedades)</span>';
+          itemGrupo.onclick = function() {
+            selectPropertyGroup(grupos[clave], clave);
+          };
+          suggestionsDiv.appendChild(itemGrupo);
+          gruposEncontrados++;
+        }
+      });
+      
+      if (gruposEncontrados === 0) {
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No hay grupos con múltiples propiedades. Usa la pestaña "Múltiple" para selección manual.</div>';
+      }
+
+      suggestionsDiv.classList.add('active');
+    }
+
+    function selectPropertyGroup(propiedades, nombreGrupo) {
+      selectedProperty = {
+        esGrupo: true,
+        nombreGrupo: nombreGrupo,
+        propiedades: propiedades
+      };
+      document.getElementById('group-search').value = nombreGrupo + ' (' + propiedades.length + ' propiedades)';
+      document.getElementById('propiedad-hidden').value = 'GRUPO|' + nombreGrupo + '|' + propiedades.map(function(p) { return p[0].replace('|', ':'); }).join(',');
+      document.getElementById('group-suggestions').classList.remove('active');
+      document.getElementById('form-fields').classList.add('active');
+
+      var today = new Date();
+      document.getElementById('fecha-pago').valueAsDate = today;
+      
+      // Establecer honorarios por defecto en 8%
+      setHonorariosByButton(8);
+      
+      // Ocultar advertencia de Providus en reportes grupales
+      document.getElementById('providus-warning').style.display = 'none';
+    }
+
+    // === TAB 3: SELECCIÓN MÚLTIPLE ===
+    function filterCustom() {
+      var input = document.getElementById("custom-search");
+      var filter = input.value.toUpperCase();
+      var suggestionsDiv = document.getElementById("custom-suggestions");
+
+      suggestionsDiv.innerHTML = "";
+
+      if (filter.length === 0) {
+        suggestionsDiv.classList.remove('active');
+        return;
+      }
+
+      var filteredCurrent = propertiesData.filter(function(p) {
+        return p[1].toUpperCase().indexOf(filter) > -1;
+      });
+
+      if (filteredCurrent.length === 0) {
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No se encontraron resultados</div>';
+        suggestionsDiv.classList.add('active');
+        return;
+      }
+
+      var titleCurrent = document.createElement('div');
+      titleCurrent.className = 'section-title';
+      titleCurrent.textContent = 'Selecciona propiedades';
+      suggestionsDiv.appendChild(titleCurrent);
+
+      filteredCurrent.forEach(function(p) {
+        var item = document.createElement('div');
+        item.className = 'suggestion-item';
+        
+        var isSelected = selectedMultiple.some(function(s) { return s[0] === p[0]; });
+        if (isSelected) {
+          item.classList.add('selected');
+        }
+        
+        var checkbox = document.createElement('div');
+        checkbox.className = 'checkbox' + (isSelected ? ' checked' : '');
+        
+        var text = document.createElement('span');
+        text.textContent = p[1];
+        text.style.flex = '1';
+        
+        item.appendChild(checkbox);
+        item.appendChild(text);
+        
+        item.onclick = function(e) {
+          e.stopPropagation();
+          toggleSelection(p);
+          filterCustom();
+        };
+        
+        suggestionsDiv.appendChild(item);
+      });
+
+      suggestionsDiv.classList.add('active');
+    }
+
+    function toggleSelection(p) {
+      var index = selectedMultiple.findIndex(function(s) { return s[0] === p[0]; });
+      
+      if (index > -1) {
+        selectedMultiple.splice(index, 1);
+      } else {
+        selectedMultiple.push(p);
+      }
+      
+      updateSelectedList();
+    }
+
+    function updateSelectedList() {
+      var listDiv = document.getElementById('selected-list');
+      var countSpan = document.getElementById('count');
+      
+      countSpan.textContent = selectedMultiple.length;
+      
+      if (selectedMultiple.length === 0) {
+        listDiv.innerHTML = '<span class="selected-placeholder">Busca y selecciona propiedades abajo</span>';
+        document.getElementById('form-fields').classList.remove('active');
+      } else {
+        listDiv.innerHTML = '';
+        selectedMultiple.forEach(function(p) {
+          var badge = document.createElement('div');
+          badge.className = 'selected-badge';
+          
+          var text = document.createElement('span');
+          text.textContent = p[1];
+          
+          var btn = document.createElement('button');
+          btn.innerHTML = '×';
+          btn.type = 'button';
+          btn.onclick = function(e) {
+            e.stopPropagation();
+            toggleSelection(p);
+          };
+          
+          badge.appendChild(text);
+          badge.appendChild(btn);
+          listDiv.appendChild(badge);
+        });
+        
+        document.getElementById('form-fields').classList.add('active');
+        var today = new Date();
+        document.getElementById('fecha-pago').valueAsDate = today;
+        
+        // Establecer honorarios por defecto en 8%
+        setHonorariosByButton(8);
+        
+        // Ocultar advertencia de Providus en reportes múltiples
+        document.getElementById('providus-warning').style.display = 'none';
+      }
+    }
+
+    function generar() {
+      var button = document.querySelector('button[type="submit"]');
+      button.disabled = true;
+      button.textContent = 'Generando...';
+
+      var formData = {
+        fechaPago: document.getElementById('fecha-pago').value,
+        porcentajeHonorarios: parseFloat(document.getElementById('porcentaje-honorarios').value) || 8
+      };
+      
+      // Validar que se haya ingresado el porcentaje de honorarios
+      if (!formData.porcentajeHonorarios || formData.porcentajeHonorarios <= 0) {
+        alert('Por favor ingresa el porcentaje de honorarios');
+        button.disabled = false;
+        button.textContent = 'Generar Reporte';
+        return;
+      }
+
+      if (currentTab === 'single') {
+        if (!selectedProperty) {
+          alert('Por favor selecciona una propiedad');
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+          return;
+        }
+        formData.propiedad = document.getElementById('propiedad-hidden').value;
+        
+        google.script.run.withSuccessHandler(function(url){
+          alert("Reporte generado exitosamente");
+          window.open(url, '_blank');
+          google.script.host.close();
+        }).withFailureHandler(function(err) {
+          alert("Error al generar el reporte: " + err.message);
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+        }).generarReporteConFecha(formData);
+        
+      } else if (currentTab === 'group') {
+        if (!selectedProperty || !selectedProperty.esGrupo) {
+          alert('Por favor selecciona un grupo');
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+          return;
+        }
+        formData.propiedad = document.getElementById('propiedad-hidden').value;
+        
+        google.script.run.withSuccessHandler(function(url){
+          alert("Reporte de grupo generado exitosamente");
+          window.open(url, '_blank');
+          google.script.host.close();
+        }).withFailureHandler(function(err) {
+          alert("Error al generar el reporte de grupo: " + err.message);
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+        }).generarReporteGrupo(formData);
+        
+      } else if (currentTab === 'custom') {
+        if (selectedMultiple.length === 0) {
+          alert('Por favor selecciona al menos una propiedad');
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+          return;
+        }
+        
+        var nombreGrupo = 'Selección Personalizada';
+        formData.propiedad = 'GRUPO|' + nombreGrupo + '|' + selectedMultiple.map(function(p) { return p[0].replace('|', ':'); }).join(',');
+        
+        google.script.run.withSuccessHandler(function(url){
+          alert("Reporte personalizado generado exitosamente");
+          window.open(url, '_blank');
+          google.script.host.close();
+        }).withFailureHandler(function(err) {
+          alert("Error al generar el reporte: " + err.message);
+          button.disabled = false;
+          button.textContent = 'Generar Reporte';
+        }).generarReporteGrupo(formData);
+      }
+    }
+
+    // ============================================
+    // CARGAR DATOS - USA VERSIÓN PARA REPORTES
+    // ============================================
+    google.script.run.withSuccessHandler(function(lista){
+      console.log('Propiedades del mes actual cargadas: ' + lista.length);
+      propertiesData = lista;
+    }).withFailureHandler(function(error) {
+      alert("Error cargando propiedades: " + error.message);
+    }).getListaPropiedadesParaReporte(hojaPrincipal);
+
+    google.script.run.withSuccessHandler(function(hojasDeudas){
+      hojasDeudas.forEach(function(nombreHoja) {
+        google.script.run.withSuccessHandler(function(lista){
+          console.log('Deudas cargadas de ' + nombreHoja + ': ' + lista.length);
+          debtsData = debtsData.concat(lista);
+        }).getListaPropiedadesParaReporte(nombreHoja);
+      });
+    }).getHojasDeudas(hojaPrincipal);
+  </script>
+</body>
+</html>

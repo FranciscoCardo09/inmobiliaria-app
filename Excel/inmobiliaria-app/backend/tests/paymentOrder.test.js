@@ -21,6 +21,7 @@ function buildService(prisma) {
     // payDebt lazily requires monthlyRecordService at the end of the success path.
     './monthlyRecordService': {
       recalculateMonthlyRecord: async () => ({ status: 'COMPLETE' }),
+      recalculateMultipleRecords: async () => 0,
     },
   });
 }

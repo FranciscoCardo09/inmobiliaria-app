@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #f5f5f5; padding: 0; margin: 0; overflow: visible; }
+    .container { width: 100%; min-height: 100vh; background: white; position: relative; }
+    .header { background: #fff; border-bottom: 1px solid #e5e5e5; padding: 24px 30px; }
+    .header h2 { font-size: 20px; font-weight: 600; color: #1a1a1a; margin: 0; }
+    .content { padding: 30px; padding-bottom: 50px; }
+    .search-container { position: relative; margin-bottom: 24px; }
+    .search-label { display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px; }
+    .search-wrapper { position: relative; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9ca3af; font-size: 16px; pointer-events: none; }
+    #propiedad-search { width: 100%; padding: 12px 12px 12px 38px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; transition: all 0.15s ease; background: white; }
+    #propiedad-search:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    .suggestions { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 8px; margin-top: 4px; max-height: 280px; overflow-y: auto; overflow-x: hidden; z-index: 9999; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); display: none; }
+    .suggestions.active { display: block; }
+    .suggestion-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f3f4f6; transition: background-color 0.15s ease; }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover { background: #f9fafb; }
+    .suggestion-item.paid { background: #ecfdf5; border-left: 3px solid #10b981; }
+    .suggestion-item.paid:hover { background: #d1fae5; }
+    .suggestion-item.partial { background: #fef9c3; border-left: 3px solid #eab308; }
+    .suggestion-item.partial:hover { background: #fef08a; }
+    .suggestion-item.completed { background: #d1fae5; border-left: 3px solid #10b981; }
+    .suggestion-item.completed:hover { background: #bbf7d0; }
+    .suggestion-item.debt { background: #fee2e2; border-left: 3px solid #ef4444; }
+    .suggestion-item.debt:hover { background: #fecaca; }
+    .section-title { padding: 12px 16px; font-weight: 600; font-size: 12px; text-transform: uppercase; color: #6b7280; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 1; }
+    .suggestion-name { font-weight: 500; color: #1f2937; margin-bottom: 4px; font-size: 14px; }
+    .suggestion-total { font-size: 13px; color: #6b7280; font-weight: 500; }
+    #payment-details { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 24px; display: none; }
+    #payment-details.active { display: block; }
+    .details-header { font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #e5e7eb; }
+    .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { font-weight: 500; color: #6b7280; font-size: 14px; }
+    .detail-value { font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-weight: 600; font-size: 14px; color: #1f2937; }
+    .negative { color: #dc2626; }
+    .positive { color: #059669; }
+    .warning { color: #f59e0b; }
+    #already-paid-row { background: #ecfdf5; padding: 14px; margin: -20px -20px 16px -20px; border-radius: 8px 8px 0 0; border-bottom: 2px solid #10b981; display: none; }
+    #already-paid-row.active { display: flex; }
+    #already-paid-row .detail-label { color: #065f46; font-weight: 600; font-size: 15px; }
+    #already-paid-row .detail-value { color: #059669; font-weight: 700; font-size: 16px; }
+    #total-row { margin-top: 12px; padding-top: 12px; border-top: 2px solid #3b82f6; background: white; padding: 16px; margin: 16px -20px -20px -20px; border-radius: 0 0 8px 8px; }
+    #total-row .detail-label { font-size: 15px; color: #1f2937; font-weight: 600; }
+    #total-row .detail-value { font-size: 18px; color: #3b82f6; }
+    #payment-form { display: none; }
+    #payment-form.active { display: block; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .form-row-full { margin-bottom: 16px; }
+    .input-group { position: relative; }
+    .input-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #374151; font-size: 14px; }
+    input[type="date"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; transition: all 0.15s ease; background: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+    input[type="date"]:focus, input[type="number"]:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    
+    /* Checkbox personalizado */
+    .checkbox-container { 
+      display: flex; 
+      align-items: center; 
+      gap: 12px; 
+      padding: 14px; 
+      background: #fff3cd; 
+      border: 1px solid #ffc107; 
+      border-radius: 8px; 
+      cursor: pointer; 
+      transition: all 0.15s ease;
+      margin-bottom: 12px;
+    }
+    .checkbox-container:hover { 
+      background: #ffe69c; 
+      border-color: #ff9800;
+    }
+    
+    /* Estilo especial para el checkbox de efectivo */
+    .checkbox-container.efectivo {
+      background: #e0f2fe;
+      border-color: #0ea5e9;
+    }
+    .checkbox-container.efectivo:hover {
+      background: #bae6fd;
+      border-color: #0284c7;
+    }
+    .checkbox-container.efectivo .checkbox-custom {
+      border-color: #0ea5e9;
+    }
+    .checkbox-container.efectivo input:checked ~ .checkbox-custom {
+      background: #0ea5e9;
+      border-color: #0ea5e9;
+    }
+    .checkbox-container.efectivo .checkbox-label {
+      color: #0c4a6e;
+    }
+    .checkbox-container.efectivo .checkbox-description {
+      color: #0c4a6e;
+    }
+    
+    .checkbox-wrapper { 
+      position: relative; 
+      width: 24px; 
+      height: 24px; 
+      flex-shrink: 0;
+    }
+    input[type="checkbox"].checkbox-input { 
+      position: absolute; 
+      opacity: 0; 
+      cursor: pointer; 
+      width: 100%; 
+      height: 100%; 
+      z-index: 1; 
+      margin: 0;
+    }
+    .checkbox-custom { 
+      position: absolute; 
+      top: 0; 
+      left: 0; 
+      width: 24px; 
+      height: 24px; 
+      border: 2px solid #f59e0b; 
+      border-radius: 6px; 
+      background: white; 
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    input[type="checkbox"].checkbox-input:checked ~ .checkbox-custom { 
+      background: #f59e0b; 
+      border-color: #f59e0b;
+    }
+    .checkbox-custom::after { 
+      content: '✓'; 
+      color: white; 
+      font-size: 16px; 
+      font-weight: bold; 
+      display: none;
+    }
+    input[type="checkbox"].checkbox-input:checked ~ .checkbox-custom::after { 
+      display: block;
+    }
+    .checkbox-label { 
+      flex: 1; 
+      font-size: 14px; 
+      font-weight: 500; 
+      color: #92400e; 
+      user-select: none;
+    }
+    .checkbox-label .emoji { 
+      font-size: 16px; 
+      margin-right: 4px;
+    }
+    .checkbox-description { 
+      font-size: 12px; 
+      color: #92400e; 
+      opacity: 0.8; 
+      margin-top: 4px;
+    }
+    
+    .btn-submit { width: 100%; padding: 14px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; margin-top: 8px; }
+    .btn-submit:hover { background: #2563eb; }
+    .btn-submit:active { transform: scale(0.98); }
+    .btn-submit:disabled { background: #9ca3af; cursor: not-allowed; transform: none; }
+    .suggestions::-webkit-scrollbar { width: 6px; }
+    .suggestions::-webkit-scrollbar-track { background: #f3f4f6; }
+    .suggestions::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    .suggestions::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+    
+    /* Indicador de cálculo */
+    .punitorios-info {
+      display: none;
+      background: #fef3c7;
+      border-left: 3px solid #f59e0b;
+      padding: 10px 12px;
+      margin: 10px -20px;
+      font-size: 12px;
+      color: #92400e;
+    }
+    .punitorios-info.active { display: block; }
+    .punitorios-info .label { font-weight: 600; }
+    
+    /* Pestañas */
+    .tabs-container { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-button { flex: 1; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px; background: white; color: #6b7280; font-weight: 500; cursor: pointer; transition: all 0.15s ease; font-size: 14px; }
+    .tab-button:hover { background: #f9fafb; border-color: #d1d5db; }
+    .tab-button.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+    .tab-button.loading { opacity: 0.6; cursor: wait; }
+    .tab-badge { display: inline-block; background: rgba(255,255,255,0.3); padding: 2px 8px; border-radius: 12px; margin-left: 6px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>Registrar Pago</h2>
+    </div>
+    
+    <div class="content">
+      <form onsubmit="event.preventDefault(); enviar(this);">
+        <div class="tabs-container">
+          <button type="button" class="tab-button active" id="tab-current" onclick="switchTab('current')">
+            📅 Mes Actual <span class="tab-badge" id="badge-current">0</span>
+          </button>
+          <button type="button" class="tab-button" id="tab-debts" onclick="switchTab('debts')">
+            ⚠️ Deudas <span class="tab-badge" id="badge-debts">-</span>
+          </button>
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar propiedad o inquilino</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="propiedad-search" placeholder="Escribe para buscar..." autocomplete="off" oninput="filterProperties()" onfocus="showSuggestions()">
+            <div class="suggestions" id="suggestions"></div>
+          </div>
+        </div>
+        
+        <input type="hidden" name="propiedad" id="propiedad-hidden">
+
+        <div id="payment-details">
+          <div class="details-header">Detalle del pago</div>
+          <div id="already-paid-row" class="detail-row">
+            <span class="detail-label">✓ Ya Pagado</span>
+            <span id="det-abono" class="detail-value"></span>
+          </div>
+          <div class="detail-row"><span class="detail-label">Alquiler Base</span><span id="det-alquiler" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">IVA</span><span id="det-iva" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Impuestos</span><span id="det-impuestos" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Gastos Comunes</span><span id="det-gastos" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Rentas</span><span id="det-rentas" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Municipalidad</span><span id="det-muni" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Expensas</span><span id="det-expensas" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Agua</span><span id="det-agua" class="detail-value"></span></div>
+          <div class="detail-row"><span class="detail-label">Punitorios</span><span id="det-punitorios" class="detail-value negative"></span></div>
+          <div id="punitorios-info" class="punitorios-info">
+            <span class="label">ℹ️ Los punitorios se recalcularán según la fecha que elijas</span>
+          </div>
+          <div id="ultima-fecha-pago" class="punitorios-info" style="background: #dbeafe; border-left: 3px solid #3b82f6;">
+            <span class="label">📅 Último pago: <span id="fecha-ultimo-pago"></span></span>
+          </div>
+          <div class="detail-row"><span class="detail-label">Descuentos</span><span id="det-descuentos" class="detail-value positive"></span></div>
+          <div class="detail-row"><span class="detail-label">Saldo a Favor</span><span id="det-afavor" class="detail-value positive"></span></div>
+          <div id="total-row" class="detail-row"><span class="detail-label">Total a pagar</span><span id="det-total" class="detail-value"></span></div>
+        </div>
+        
+        <div id="payment-form">
+          <div class="form-row">
+            <div class="input-group">
+              <label for="fecha">Fecha de pago</label>
+              <input type="date" name="fecha" id="fecha" required onchange="recalcularPunitorios()">
+            </div>
+            <div class="input-group">
+              <label for="monto">Monto abonado</label>
+              <input type="number" name="monto" id="monto" step="0.01" required placeholder="0.00">
+            </div>
+          </div>
+          
+          <label class="checkbox-container" for="perdonar-punitorios">
+            <div class="checkbox-wrapper">
+              <input type="checkbox" class="checkbox-input" id="perdonar-punitorios" name="perdonarPunitorios" onchange="recalcularPunitorios()">
+              <span class="checkbox-custom"></span>
+            </div>
+            <div style="flex: 1;">
+              <div class="checkbox-label">
+                <span class="emoji">🎁</span>
+                Perdonar punitorios para este pago
+              </div>
+              <div class="checkbox-description">
+                Activa esta opción si deseas no cobrar intereses por mora
+              </div>
+            </div>
+          </label>
+          
+          <label class="checkbox-container efectivo" for="pago-efectivo">
+            <div class="checkbox-wrapper">
+              <input type="checkbox" class="checkbox-input" id="pago-efectivo" name="pagoEfectivo">
+              <span class="checkbox-custom"></span>
+            </div>
+            <div style="flex: 1;">
+              <div class="checkbox-label">
+                <span class="emoji">💵</span>
+                Pago en efectivo
+              </div>
+              <div class="checkbox-description">
+                Genera automáticamente un comprobante de recibo de efectivo
+              </div>
+            </div>
+          </label>
+          
+          <button type="submit" class="btn-submit">Confirmar pago</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <script>
+    var propertiesData = [];
+    var debtsData = [];
+    var selectedProperty = null;
+    var hojaPrincipal = '<?= hojaPrincipal ?>';
+    var punitoriosOriginales = 0;
+    var currentTab = 'current';
+    var debtsLoaded = false;
+
+    function switchTab(tab) {
+      currentTab = tab;
+      
+      document.getElementById('tab-current').classList.toggle('active', tab === 'current');
+      document.getElementById('tab-debts').classList.toggle('active', tab === 'debts');
+      
+      document.getElementById('propiedad-search').value = '';
+      document.getElementById('suggestions').innerHTML = '';
+      document.getElementById('suggestions').classList.remove('active');
+      document.getElementById('payment-details').classList.remove('active');
+      document.getElementById('payment-form').classList.remove('active');
+      
+      if (tab === 'debts' && !debtsLoaded) {
+        loadDebts();
+      }
+      
+      document.getElementById('propiedad-search').focus();
+    }
+    
+    function loadDebts() {
+      document.getElementById('badge-debts').textContent = '...';
+      
+      console.log('=== CARGANDO DEUDAS BAJO DEMANDA ===');
+      console.log('Hoja principal:', hojaPrincipal);
+      
+      google.script.run.withSuccessHandler(function(hojasDeudas){
+        console.log("✓ Hojas de deudas encontradas:", hojasDeudas.length);
+        
+        if (hojasDeudas.length === 0) {
+          console.warn("⚠️ No se encontraron hojas de deudas");
+          document.getElementById('badge-debts').textContent = '0';
+          debtsLoaded = true;
+          return;
+        }
+        
+        var loadedCount = 0;
+        var totalDebts = 0;
+        var todasLasDeudas = [];
+        
+        hojasDeudas.forEach(function(nombreHoja) {
+          google.script.run.withSuccessHandler(function(lista){
+            console.log("✓ Deudas recibidas de", nombreHoja, ":", lista.length);
+            
+            todasLasDeudas = todasLasDeudas.concat(lista);
+            totalDebts += lista.length;
+            loadedCount++;
+            
+            document.getElementById('badge-debts').textContent = totalDebts;
+            
+            if (loadedCount === hojasDeudas.length) {
+              console.log("✓ Todas las deudas cargadas:", totalDebts);
+              console.log("Total acumulado en todasLasDeudas:", todasLasDeudas.length);
+              
+              if (todasLasDeudas.length === 0) {
+                console.warn("⚠️ No se encontraron deudas en ninguna hoja");
+                debtsData = [];
+                debtsLoaded = true;
+                document.getElementById('badge-debts').textContent = '0';
+                return;
+              }
+              
+              var nombresDeudas = todasLasDeudas.map(function(d) { return d[1]; });
+              console.log("→ Solicitando fechas para", nombresDeudas.length, "propiedades");
+              
+              google.script.run.withSuccessHandler(function(fechasPorPropiedad) {
+                console.log("✓ Fechas de pago obtenidas:", Object.keys(fechasPorPropiedad).length);
+                console.log("Fechas recibidas:", fechasPorPropiedad);
+                
+                todasLasDeudas = todasLasDeudas.map(function(deuda) {
+                  var esLocal = deuda.length > 19 && deuda[19] === true;
+                  var nombrePropiedad = deuda[1];
+                  var fechaISO = fechasPorPropiedad[nombrePropiedad] || null;
+                  
+                  var fecha = fechaISO ? new Date(fechaISO) : null;
+                  
+                  if (esLocal) {
+                    deuda[21] = fecha;
+                  } else {
+                    deuda[19] = fecha;
+                  }
+                  
+                  return deuda;
+                });
+                
+                debtsData = todasLasDeudas;
+                debtsLoaded = true;
+                
+                console.log("✓✓✓ DEUDAS COMPLETAS CON FECHAS ✓✓✓");
+                console.log("debtsData.length:", debtsData.length);
+                
+              }).withFailureHandler(function(error) {
+                console.error("✗ Error obteniendo fechas:", error);
+                debtsData = todasLasDeudas;
+                debtsLoaded = true;
+                console.log("⚠️ Deudas cargadas sin fechas. Total:", debtsData.length);
+              }).obtenerUltimasFechasPagoEnLote(nombresDeudas);
+            }
+          }).withFailureHandler(function(error) {
+            console.error("✗ Error cargando deudas de", nombreHoja, ":", error);
+            loadedCount++;
+            
+            if (loadedCount === hojasDeudas.length) {
+              debtsData = todasLasDeudas;
+              debtsLoaded = true;
+              document.getElementById('badge-debts').textContent = totalDebts || '!';
+              console.log("⚠️ Proceso completado con errores. Total deudas:", debtsData.length);
+            }
+          }).getListaPropiedades(nombreHoja);
+        });
+      }).withFailureHandler(function(error) {
+        console.error("✗ Error obteniendo hojas de deudas:", error);
+        document.getElementById('badge-debts').textContent = '!';
+        debtsData = [];
+        debtsLoaded = true;
+      }).getHojasDeudas(hojaPrincipal);
+    }
+
+    function formatearFecha(fecha) {
+      if (!fecha) return 'Sin pagos';
+      if (typeof fecha === 'string') {
+        fecha = new Date(fecha);
+      }
+      var dia = ('0' + fecha.getDate()).slice(-2);
+      var mes = ('0' + (fecha.getMonth() + 1)).slice(-2);
+      var anio = fecha.getFullYear();
+      return dia + '/' + mes + '/' + anio;
+    }
+    
+    function formatearFechaISO(fechaISO) {
+      if (!fechaISO) return '';
+      var partes = fechaISO.split('-');
+      if (partes.length === 3) {
+        return partes[2] + '/' + partes[1] + '/' + partes[0];
+      }
+      return fechaISO;
+    }
+    
+    function formatCurrency(value, isNegative = false, isPositive = false) {
+      if (value === null || value === undefined) return '$0,00';
+      
+      if (typeof value === 'string') {
+        value = value.trim().toLowerCase();
+        if (value === '' || value === 'comp' || value === 'efectivo') return '$0,00';
+        value = parseFloat(value.replace(/[^\d.,\-]/g, ''));
+      }
+      
+      if (!value || isNaN(value) || value === 0) return '$0,00';
+      
+      let sign = '';
+      if (isPositive && value > 0) sign = '- ';
+      return sign + '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function showSuggestions() {
+      if (document.getElementById('propiedad-search').value.length > 0) {
+        document.getElementById('suggestions').classList.add('active');
+      }
+    }
+
+    function hideSuggestions() {
+      setTimeout(() => {
+        document.getElementById('suggestions').classList.remove('active');
+      }, 200);
+    }
+
+    function filterProperties() {
+      var input = document.getElementById("propiedad-search");
+      var filter = input.value.trim().toUpperCase();
+      var suggestionsDiv = document.getElementById("suggestions");
+      
+      console.log("=== FILTRAR PROPIEDADES ===");
+      console.log("Pestaña activa:", currentTab);
+      console.log("Filtro:", filter);
+      console.log("Total propiedades:", propertiesData.length);
+      console.log("Total deudas:", debtsData.length);
+      
+      suggestionsDiv.innerHTML = "";
+      
+      if (filter.length === 0) {
+        suggestionsDiv.classList.remove('active');
+        return;
+      }
+      
+      var dataToSearch = currentTab === 'current' ? propertiesData : debtsData;
+      var filteredCurrent = [];
+      var filteredDebts = [];
+      
+      if (currentTab === 'current') {
+        filteredCurrent = propertiesData.filter(function(p) {
+          var nombreCompleto = (p[1] || "").toUpperCase();
+          var inquilino = (p[17] || "").toUpperCase();
+          
+          var encontrado = nombreCompleto.indexOf(filter) > -1 || inquilino.indexOf(filter) > -1;
+          
+          if (encontrado) {
+            console.log("✓ Encontrado en propiedades:", p[1]);
+          }
+          
+          return encontrado;
+        });
+      } else {
+        filteredDebts = debtsData.filter(function(p) {
+          var nombreCompleto = (p[1] || "").toUpperCase();
+          var inquilino = (p[17] || "").toUpperCase();
+          
+          var encontrado = nombreCompleto.indexOf(filter) > -1 || inquilino.indexOf(filter) > -1;
+          
+          if (encontrado) {
+            console.log("✓ Encontrado en deudas:", p[1]);
+          }
+          
+          return encontrado;
+        });
+      }
+      
+      console.log("Resultados encontrados - Propiedades:", filteredCurrent.length, "Deudas:", filteredDebts.length);
+
+      if (filteredCurrent.length === 0 && filteredDebts.length === 0) {
+        var mensaje = currentTab === 'debts' && debtsData.length === 0 ? 
+          'Cargando deudas...' : 
+          'No se encontraron resultados';
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#9ca3af; cursor: default;">' + mensaje + '</div>';
+        suggestionsDiv.classList.add('active');
+        return;
+      }
+
+      if (filteredDebts.length > 0) {
+        filteredDebts.forEach(function(p) {
+          var item = createSuggestionItem(p, true);
+          suggestionsDiv.appendChild(item);
+        });
+      }
+
+      if (filteredCurrent.length > 0) {
+        filteredCurrent.forEach(function(p) {
+          var item = createSuggestionItem(p, false);
+          suggestionsDiv.appendChild(item);
+        });
+      }
+
+      suggestionsDiv.classList.add('active');
+    }
+
+    function createSuggestionItem(p, esDeuda) {
+      var item = document.createElement('div');
+      item.className = 'suggestion-item';
+
+      var esLocal = p.length > 19 && p[19] === true;
+      var abono, debe, pagoRegistrado, cancelo;
+
+      if (esLocal) {
+        abono = p[16] || 0;
+        debe = p[20] || 0;
+        pagoRegistrado = p[15] === true;
+        cancelo = p[17] === true;
+      } else {
+        abono = p[15] || 0;
+        debe = p[18] || 0;
+        pagoRegistrado = p[14] === true;
+        cancelo = p[16] === true;
+      }
+
+      var esParcial = pagoRegistrado && debe > 0 && !cancelo;
+
+      if (esDeuda) {
+        item.classList.add('debt');
+      } else if (esParcial) {
+        item.classList.add('partial');
+      } else if (cancelo) {
+        item.classList.add('completed');
+      }
+
+      item.innerHTML = `<div class="suggestion-name">${p[1]}</div><div class="suggestion-total">Total: ${formatCurrency(p[2])}</div>`;
+
+      item.onclick = function() {
+        selectProperty(p);
+        hideSuggestions();
+      };
+
+      return item;
+    }
+
+    function selectProperty(p) {
+      selectedProperty = p;
+
+      var esLocal = p.length > 19 && p[19] === true;
+
+      document.getElementById('propiedad-search').value = p[1];
+      document.getElementById('propiedad-hidden').value = p[0];
+      showDetails(p);
+    }
+
+    function showDetails(p) {
+      var esLocal = p.length > 19 && p[19] === true;
+
+      var data;
+      if (esLocal) {
+        data = {
+          total: p[2],
+          alquiler: p[3],
+          iva: p[4],
+          impuestos: 0,
+          gastos: 0,
+          rentas: p[7],
+          muni: p[8],
+          descuentos: p[9],
+          expensas: p[10],
+          seguro: p[11],
+          agua: p[12],
+          afavor: p[13],
+          punitorios: p[14],
+          abono: p[16] || 0,
+          debe: p[20] || 0
+        };
+      } else {
+        data = {
+          total: p[2],
+          alquiler: p[3],
+          iva: p[4],
+          impuestos: p[5],
+          gastos: p[6],
+          rentas: p[7],
+          muni: p[8],
+          descuentos: p[9],
+          expensas: p[10],
+          seguro: 0,
+          agua: p[11],
+          afavor: p[12],
+          punitorios: p[13],
+          abono: p[15] || 0,
+          debe: p[18] || 0
+        };
+      }
+
+      var alreadyPaidRow = document.getElementById("already-paid-row");
+      if (data.abono > 0) {
+        alreadyPaidRow.classList.add('active');
+        document.getElementById("det-abono").textContent = formatCurrency(data.abono);
+      } else {
+        alreadyPaidRow.classList.remove('active');
+      }
+
+      var punitoriosMostrar = data.punitorios;
+      var totalMostrar = data.total;
+      var esDeuda = p[0].indexOf('Deudas') !== -1;
+
+      if (data.abono > 0 && data.debe > 0) {
+        var subtotal = data.alquiler + data.iva + data.impuestos + data.gastos + 
+                      data.rentas + data.muni + data.expensas + data.seguro + 
+                      data.agua - data.descuentos - data.afavor;
+        
+        totalMostrar = (subtotal - data.abono) + punitoriosMostrar;
+        
+        document.getElementById('punitorios-info').innerHTML = '<span class="label">ℹ️ Los punitorios se recalcularán según la fecha que elijas</span>';
+        document.getElementById('punitorios-info').classList.add('active');
+      } else if (data.punitorios > 0) {
+        document.getElementById('punitorios-info').classList.add('active');
+      }
+      
+      var ultimaFechaPagoDiv = document.getElementById('ultima-fecha-pago');
+      var ultimaFechaPago = esLocal ? p[21] : p[19];
+      
+      console.log("=== VERIFICAR ÚLTIMA FECHA DE PAGO ===");
+      console.log("ID propiedad:", p[0]);
+      console.log("Es deuda:", esDeuda);
+      console.log("Es local:", esLocal);
+      console.log("Índice usado:", esLocal ? 21 : 19);
+      console.log("Última fecha pago:", ultimaFechaPago);
+      console.log("Longitud array p:", p.length);
+      
+      if (esDeuda) {
+        if (ultimaFechaPago) {
+          var fechaFormateada = formatearFecha(ultimaFechaPago);
+          document.getElementById('fecha-ultimo-pago').textContent = fechaFormateada;
+          ultimaFechaPagoDiv.classList.add('active');
+          console.log("✓ Mostrando fecha:", fechaFormateada);
+        } else {
+          document.getElementById('fecha-ultimo-pago').textContent = 'Sin pagos registrados';
+          ultimaFechaPagoDiv.classList.add('active');
+          console.log("⚠️ Sin pagos registrados para esta deuda");
+        }
+      } else {
+        ultimaFechaPagoDiv.classList.remove('active');
+        console.log("No es deuda, ocultando div");
+      }
+
+      document.getElementById("det-alquiler").textContent = formatCurrency(data.alquiler);
+      document.getElementById("det-iva").textContent = formatCurrency(data.iva);
+      document.getElementById("det-impuestos").textContent = formatCurrency(data.impuestos);
+      document.getElementById("det-gastos").textContent = formatCurrency(data.gastos);
+      document.getElementById("det-rentas").textContent = formatCurrency(data.rentas);
+      document.getElementById("det-muni").textContent = formatCurrency(data.muni);
+      document.getElementById("det-expensas").textContent = formatCurrency(data.expensas);
+      document.getElementById("det-agua").textContent = formatCurrency(data.agua);
+      document.getElementById("det-punitorios").textContent = formatCurrency(punitoriosMostrar);
+      document.getElementById("det-descuentos").textContent = formatCurrency(data.descuentos, false, true);
+      document.getElementById("det-afavor").textContent = formatCurrency(data.afavor, false, true);
+      document.getElementById("det-total").textContent = formatCurrency(totalMostrar);
+
+      document.getElementById('payment-details').classList.add('active');
+      document.getElementById('payment-form').classList.add('active');
+
+      document.getElementById('fecha').valueAsDate = new Date();
+      document.getElementById('monto').value = totalMostrar > 0 ? totalMostrar.toFixed(2) : '';
+    }
+
+    function recalcularPunitorios() {
+      if (!selectedProperty) return;
+
+      var fecha = document.getElementById('fecha').value;
+      var perdonar = document.getElementById('perdonar-punitorios').checked;
+      var partes = selectedProperty[0].split("|");
+      var nombreHoja = partes[0];
+      var fila = parseInt(partes[1]);
+
+      if (!fecha) return;
+
+      var punitoriosElement = document.getElementById('det-punitorios');
+      punitoriosElement.textContent = 'Calculando...';
+      punitoriosElement.classList.add('warning');
+
+      google.script.run
+        .withSuccessHandler(function(punitoriosCalculados) {
+          punitoriosElement.classList.remove('warning');
+          punitoriosElement.classList.add('negative');
+          
+          punitoriosElement.textContent = formatCurrency(punitoriosCalculados);
+          
+          actualizarTotal(punitoriosCalculados);
+          
+          if (perdonar) {
+            document.getElementById('punitorios-info').innerHTML = '<span class="label">✅ Punitorios perdonados para este pago</span>';
+          } else if (punitoriosCalculados > 0) {
+            var esLocal = selectedProperty.length > 19 && selectedProperty[19] === true;
+            var ultimaFechaPago = esLocal ? selectedProperty[21] : selectedProperty[19];
+            var esDeuda = selectedProperty[0].indexOf('Deudas') !== -1;
+            
+            var mensaje;
+            if (esDeuda && ultimaFechaPago) {
+              var fechaFormateada = formatearFecha(ultimaFechaPago);
+              mensaje = '<span class="label">ℹ️ Punitorios calculados desde el último pago (' + fechaFormateada + ') hasta ' + formatearFechaISO(fecha) + '</span>';
+            } else if (esDeuda) {
+              mensaje = '<span class="label">ℹ️ Punitorios acumulados desde el mes adeudado hasta ' + formatearFechaISO(fecha) + '</span>';
+            } else {
+              mensaje = '<span class="label">ℹ️ Punitorios calculados del día 6 al ' + formatearFechaISO(fecha) + '</span>';
+            }
+            
+            document.getElementById('punitorios-info').innerHTML = mensaje;
+          } else {
+            document.getElementById('punitorios-info').innerHTML = '<span class="label">✅ Pago dentro del plazo - Sin punitorios</span>';
+          }
+        })
+        .withFailureHandler(function(error) {
+          punitoriosElement.classList.remove('warning');
+          var esLocal = selectedProperty.length > 19 && selectedProperty[19] === true;
+          var punitoriosOriginales = esLocal ? selectedProperty[14] : selectedProperty[13];
+          punitoriosElement.textContent = formatCurrency(punitoriosOriginales);
+          console.error('Error calculando punitorios:', error);
+        })
+        .calcularPunitoriosParaFecha(nombreHoja, fila, fecha, perdonar);
+    }
+
+    function actualizarTotal(nuevosPunitorios) {
+      var esLocal = selectedProperty.length > 19 && selectedProperty[19] === true;
+
+      var debe = esLocal ? selectedProperty[20] : selectedProperty[18];
+      var abono = esLocal ? selectedProperty[16] : selectedProperty[15];
+      var punitoriosOriginales = esLocal ? selectedProperty[14] : selectedProperty[13];
+
+      var nuevoTotal;
+
+      if (abono > 0 && debe > 0) {
+        var alquiler = selectedProperty[3];
+        var iva = selectedProperty[4];
+        var rentas = selectedProperty[7];
+        var muni = selectedProperty[8];
+        var descuentos = selectedProperty[9];
+        var expensas = selectedProperty[10];
+        var afavor = esLocal ? selectedProperty[13] : selectedProperty[12];
+        var agua = esLocal ? selectedProperty[12] : selectedProperty[11];
+
+        var subtotal = alquiler + iva + rentas + muni + expensas + agua - descuentos - afavor;
+
+        if (esLocal) {
+          var seguro = selectedProperty[11];
+          subtotal += seguro;
+        } else {
+          var impuestos = selectedProperty[5];
+          var gastosComunes = selectedProperty[6];
+          subtotal += impuestos + gastosComunes;
+        }
+        
+        nuevoTotal = (subtotal - abono) + nuevosPunitorios;
+        
+      } else {
+        var alquiler = selectedProperty[3];
+        var iva = selectedProperty[4];
+        var rentas = selectedProperty[7];
+        var muni = selectedProperty[8];
+        var descuentos = selectedProperty[9];
+        var expensas = selectedProperty[10];
+        var afavor = esLocal ? selectedProperty[13] : selectedProperty[12];
+        var agua = esLocal ? selectedProperty[12] : selectedProperty[11];
+
+        nuevoTotal = alquiler + iva + rentas + muni + expensas + agua + nuevosPunitorios - descuentos - afavor;
+
+        if (esLocal) {
+          var seguro = selectedProperty[11];
+          nuevoTotal += seguro;
+        } else {
+          var impuestos = selectedProperty[5];
+          var gastosComunes = selectedProperty[6];
+          nuevoTotal += impuestos + gastosComunes;
+        }
+      }
+
+      document.getElementById('det-total').textContent = formatCurrency(nuevoTotal);
+      document.getElementById('monto').value = nuevoTotal > 0 ? nuevoTotal.toFixed(2) : '';
+    }
+
+    var enviando = false;
+    
+    function enviar(form) {
+      if (!selectedProperty) { 
+        alert('Por favor selecciona una propiedad'); 
+        return; 
+      }
+      
+      if (enviando) {
+        console.log('⚠️ Ya se está enviando un pago, ignorando clic duplicado');
+        return;
+      }
+      
+      enviando = true;
+
+      var button = form.querySelector('button');
+      button.disabled = true;
+      button.textContent = 'Guardando...';
+
+      var formObject = { 
+        propiedad: form.propiedad.value, 
+        fecha: form.fecha.value, 
+        monto: form.monto.value,
+        perdonarPunitorios: document.getElementById('perdonar-punitorios').checked,
+        pagoEfectivo: document.getElementById('pago-efectivo').checked
+      };
+
+      google.script.run.withSuccessHandler(function(mensaje){
+        alert(mensaje || "¡Pago guardado con éxito!");
+        google.script.host.close();
+      }).withFailureHandler(function(err) {
+        alert("Error al guardar el pago: " + err.message);
+        button.disabled = false;
+        button.textContent = 'Confirmar pago';
+        enviando = false;
+      }).guardarPago(formObject);
+    }
+
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.search-container')) { 
+        hideSuggestions(); 
+      }
+    });
+
+    google.script.run.withSuccessHandler(function(lista){
+      console.log("✓ Propiedades cargadas:", lista.length);
+      if (lista.length > 0) {
+        console.log("Primera propiedad:", lista[0]);
+      }
+      propertiesData = lista;
+      document.getElementById('badge-current').textContent = lista.length;
+    }).withFailureHandler(function(error) {
+      console.error("✗ Error cargando propiedades:", error);
+      alert("Error cargando propiedades: " + error.message);
+      document.getElementById('badge-current').textContent = '!';
+    }).getListaPropiedades(hojaPrincipal);
+  </script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 // Supports business day calculation with holidays
 
 const prisma = require('../lib/prisma');
+const { getTodayLocalDate } = require('./dateUtils');
 
 /**
  * Check if a date is a weekend (Saturday or Sunday)
@@ -177,14 +178,41 @@ function calculatePunitoryV2(
 }
 
 /**
- * Get holidays from database for a specific year
+ * Cache en memoria de feriados por año. Los feriados de un año no cambian
+ * durante la vida del proceso salvo que alguien los edite via CRUD (poco
+ * frecuente); en ese caso se invalida con clearHolidayCache(). Esto evita un
+ * findMany a la DB en cada llamada de cálculo de punitorios, que se invoca
+ * decenas de veces por request (monthlyRecordService, debtService,
+ * paymentTransactionService) y era un cuello de botella real con pocos datos.
+ */
+const holidayCache = new Map();
+
+/**
+ * Get holidays from database for a specific year (memoizado por proceso).
  */
 async function getHolidaysForYear(year) {
+  if (holidayCache.has(year)) {
+    return holidayCache.get(year);
+  }
   const holidays = await prisma.holiday.findMany({
     where: { year },
     select: { date: true },
   });
-  return holidays.map((h) => new Date(h.date));
+  const dates = holidays.map((h) => new Date(h.date));
+  holidayCache.set(year, dates);
+  return dates;
+}
+
+/**
+ * Invalida el cache de feriados. Llamar tras crear/eliminar/sembrar feriados
+ * (ver holidayService.js) para que el próximo cálculo relea la DB.
+ */
+function clearHolidayCache(year) {
+  if (year === undefined) {
+    holidayCache.clear();
+  } else {
+    holidayCache.delete(year);
+  }
 }
 
 /**
@@ -192,6 +220,185 @@ async function getHolidaysForYear(year) {
  */
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Base ÚNICA de punitorios para un mes abierto (LOGICA.md §4.3, regla confirmada
+ * por el usuario 2026-07-11 — AUDITORIA_FUNCIONAL_2026-07-10.md A-03/A-04):
+ *   - Sin ningún pago real: la base es SOLO el alquiler (los servicios/IVA
+ *     impagos no generan punitorios en mes abierto sin ningún pago).
+ *   - Con pagos parciales: la base es el SALDO RESTANTE = alquiler + servicios
+ *     + IVA impago − pagos reales.
+ *   - El saldo a favor del mes anterior (previousBalance) NUNCA entra acá: se
+ *     aplica al TOTAL al final, nunca a la base de punitorios.
+ * Antes de esta función existían 4 copias de esta misma fórmula (display y
+ * _recalculateCore en monthlyRecordService.js, cobro en paymentTransactionService.js,
+ * cierre en debtService.js) — las dos primeras ya coincidían entre sí; las de
+ * cobro y cierre calculaban una base rent-only distinta (bug real, no solo
+ * duplicación). Esta es ahora la única implementación.
+ */
+function computePunitoryBase({ rentAmount = 0, servicesTotal = 0, ivaAmount = 0, amountPaid = 0 }) {
+  const totalCredits = amountPaid || 0;
+  const baseNonPunitory = (rentAmount || 0) + (servicesTotal || 0) + (ivaAmount || 0);
+  const remainingBalance = Math.max(baseNonPunitory - totalCredits, 0);
+  return totalCredits <= 0 ? (rentAmount || 0) : remainingBalance;
+}
+
+/**
+ * FUENTE ÚNICA DE VERDAD para el punitorio en vivo de un MonthlyRecord abierto.
+ *
+ * Centraliza las 4 implementaciones paralelas que existían en:
+ *   1. monthlyRecordService.js — inline en getOrCreateMonthlyRecords (enrichment display)
+ *   2. monthlyRecordService.js — computeLivePunitoryAmount (para _recalculateCore)
+ *   3. paymentTransactionService.js — inline en registerPaymentCore (cobro real)
+ *   4. paymentTransactionService.js — calculatePunitoryPreview (preview del formulario)
+ *
+ * Reglas de negocio:
+ *  - isFullyPaid=true → retorna la SUMA REAL de conceptos PUNITORIOS de las
+ *    transacciones (sumPunitoryConcepts), NO el congelado del último pago.
+ *  - isPostExpiry=true → sin punitorios (mes extra post-vencimiento).
+ *  - punitoryForgiven=true → sin punitorios.
+ *  - Caso normal abierto:
+ *      unpaidFrozenPunitory = punitoryAmount − lo que el último pago imputó a PUNITORIOS.
+ *      base = computePunitoryBase(rentAmount, servicesTotal, ivaAmount, amountPaid).
+ *      nuevoPunitory = calculatePunitoryV2(calculationDate, ..., base, ..., lastPaymentDate).
+ *      total = round2(unpaidFrozenPunitory + nuevoPunitory.amount).
+ *
+ * @param {object} record  MonthlyRecord con campos: rentAmount, servicesTotal, ivaAmount?,
+ *                         punitoryAmount, punitoryDays, punitoryForgiven, amountPaid,
+ *                         includeIva, periodMonth, periodYear, isPostExpiry?,
+ *                         transactions? [{paymentDate, punitoryForgiven, concepts[]}]
+ * @param {object} contract Contrato con: punitoryStartDay, punitoryGraceDay, punitoryPercent
+ * @param {Date[]} holidays Feriados del año del período (de getHolidaysForYear)
+ * @param {object} options
+ *   @param {boolean} options.isFullyPaid     true si el mes ya está COMPLETE
+ *   @param {boolean} [options.isPostExpiry]  true si es un mes extra post-vencimiento
+ *   @param {string|Date} [options.calculationDate]  Fecha de cálculo (default: hoy ART)
+ *   @param {Function} [options.sumPunitoryConceptsFn] Inyectable para tests / evitar require circular
+ * @returns {{ amount: number, days: number, unpaidFrozenPunitory: number, newPunitory: number }}
+ */
+function computeLiveRecordPunitory(record, contract, holidays, {
+  isFullyPaid,
+  isPostExpiry = record.isPostExpiry || false,
+  calculationDate,
+  sumPunitoryConceptsFn,
+} = {}) {
+  // Importar getTodayLocalString solo si no se recibió calculationDate (evita require at top-level)
+  // y sumPunitoryConcepts solo si se necesita (evita require circular con helpers)
+  if (!calculationDate) {
+    const { getTodayLocalString } = require('../utils/dateUtils');
+    calculationDate = getTodayLocalString();
+  }
+  const sumPunitoryConcepts = sumPunitoryConceptsFn || require('../utils/helpers').sumPunitoryConcepts;
+
+  // Caso: mes ya completamente pagado → punitorio REAL = suma de conceptos PUNITORIOS
+  if (isFullyPaid && !record.punitoryForgiven) {
+    const amount = sumPunitoryConcepts(record.transactions || []);
+    return { amount, days: record.punitoryDays || 0, unpaidFrozenPunitory: 0, newPunitory: amount };
+  }
+
+  // Casos que devuelven cero
+  if (record.punitoryForgiven || isPostExpiry || contract?.exemptFromPunitory) {
+    return { amount: 0, days: 0, unpaidFrozenPunitory: 0, newPunitory: 0, graceDate: null, fromDate: null, toDate: null };
+  }
+
+  let amount = record.punitoryAmount || 0;
+  let days = record.punitoryDays || 0;
+  let unpaidFrozenPunitory = 0;
+  let newPunitory = 0;
+
+  let graceDate = null;
+  let fromDate = null;
+  let toDate = null;
+
+  try {
+    const amountPaid = record.amountPaid || 0;
+    const servicesTotal = record.servicesTotal || 0;
+    const frozenPunitory = record.punitoryAmount || 0;
+    const ivaForPunitory = record.includeIva ? (record.rentAmount || 0) * 0.21 : 0;
+
+    // Base ÚNICA de punitorios (A-03/A-04, computePunitoryBase).
+    // El crédito (previousBalance) NUNCA entra acá — se aplica al total al final.
+    const punitoryBase = computePunitoryBase({
+      rentAmount: record.rentAmount || 0,
+      servicesTotal: Math.max(servicesTotal, 0),
+      ivaAmount: ivaForPunitory,
+      amountPaid,
+    });
+
+    // Punitorios congelados IMPAGOS: lo que queda del congelado del último pago
+    // que ese pago NO imputó al concepto PUNITORIOS (caso Etica S.A.).
+    const txs = record.transactions || [];
+    const lastTx = txs.length > 0 ? txs[txs.length - 1] : null;
+    const lastTxPunitoryPaid = (lastTx?.concepts || [])
+      .filter((c) => c.type === 'PUNITORIOS')
+      .reduce((s, c) => s + c.amount, 0);
+    unpaidFrozenPunitory = lastTx?.punitoryForgiven
+      ? 0
+      : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
+
+    const lastPaymentDate = lastTx ? new Date(lastTx.paymentDate) : null;
+
+    if (punitoryBase > 0) {
+      const liveResult = calculatePunitoryV2(
+        calculationDate,
+        record.periodMonth,
+        record.periodYear,
+        punitoryBase,
+        contract.punitoryStartDay,
+        contract.punitoryGraceDay,
+        contract.punitoryPercent,
+        holidays,
+        lastPaymentDate
+      );
+      newPunitory = liveResult.amount;
+      amount = round2(unpaidFrozenPunitory + newPunitory);
+      days = liveResult.days;
+      graceDate = liveResult.graceDate || null;
+      fromDate = liveResult.fromDate || null;
+      toDate = liveResult.toDate || null;
+    } else if (unpaidFrozenPunitory > 0) {
+      // Base = 0: alquiler+servicios+IVA ya cubiertos por pagos, pero queda
+      // punitorio congelado sin pagar. Mismo criterio que el motor de deudas
+      // (calculateDebtPunitory, rama remainingBase<=0): a partir de acá los
+      // punitorios NUEVOS se calculan COMPUESTOS sobre el saldo de punitorio
+      // pendiente (interés sobre interés), no se congelan en $0 — regla
+      // confirmada por el usuario 2026-07-14 (ver memoria punitory-base-rule,
+      // que dejaba esto explícitamente pendiente "si el usuario lo pide").
+      const liveResult = calculatePunitoryV2(
+        calculationDate,
+        record.periodMonth,
+        record.periodYear,
+        unpaidFrozenPunitory,
+        contract.punitoryStartDay,
+        contract.punitoryGraceDay,
+        contract.punitoryPercent,
+        holidays,
+        lastPaymentDate
+      );
+      newPunitory = liveResult.amount;
+      amount = round2(unpaidFrozenPunitory + newPunitory);
+      days = liveResult.days;
+      graceDate = liveResult.graceDate || null;
+      fromDate = liveResult.fromDate || null;
+      toDate = liveResult.toDate || null;
+    } else {
+      // Base = 0 y nada pendiente de punitorio tampoco: no hay nada sobre lo
+      // que seguir acumulando.
+      amount = frozenPunitory;
+      days = record.punitoryDays || 0;
+      newPunitory = 0;
+    }
+  } catch (e) {
+    // En caso de error de cálculo, mantener el valor congelado del record.
+    console.error('[punitory.js] Error in computeLiveRecordPunitory:', e.message);
+    amount = record.punitoryAmount || 0;
+    days = record.punitoryDays || 0;
+    unpaidFrozenPunitory = record.punitoryAmount || 0;
+    newPunitory = 0;
+  }
+
+  return { amount, days, unpaidFrozenPunitory, newPunitory, graceDate, fromDate, toDate };
 }
 
 // Keep legacy functions for backward compatibility
@@ -210,16 +417,40 @@ function calculatePunitoryAmount(baseRent, daysLate, punitoryPercent) {
   return round2(baseRent * punitoryPercent * daysLate);
 }
 
+/**
+ * Días TOTALES de atraso de una deuda: desde que empezó a correr el punitorio
+ * (`punitoryStartDate`) hasta que se saldó (`lastPaymentDate`/`closedAt`) o, si
+ * sigue viva, hasta la fecha de corte (hoy, o el `endDate` de un cálculo en vivo).
+ *
+ * A diferencia de los `days` que devuelve `calculatePunitoryV2` (que cuentan solo
+ * el tramo desde el ÚLTIMO pago — correcto para el interés compuesto, pero engañoso
+ * como etiqueta: una deuda pagada en 4 cuotas a lo largo de 20 días mostraría "2 días"
+ * en vez de los 20 reales), esto es el conteo acumulado real de mora que se muestra
+ * al usuario. No reemplaza el cálculo del monto de punitorios, solo la etiqueta.
+ */
+function debtDelinquencyDays(debt, liveEndDate = null) {
+  if (!debt || !debt.punitoryStartDate) return 0;
+  const start = new Date(debt.punitoryStartDate);
+  const end = debt.status === 'PAID'
+    ? new Date(debt.lastPaymentDate || debt.closedAt || start)
+    : new Date(liveEndDate || getTodayLocalDate());
+  return Math.max(diffCalendarDays(end, start) + 1, 0);
+}
+
 module.exports = {
   calculatePunitoryDays,
   calculatePunitoryAmount,
   calculatePunitoryV2,
+  computePunitoryBase,
+  computeLiveRecordPunitory,
   getEffectiveGraceDate,
   getHolidaysForYear,
+  clearHolidayCache,
   isBusinessDay,
   isWeekend,
   isHoliday,
   diffCalendarDays,
   toLocalDate,
   round2,
+  debtDelinquencyDays,
 };

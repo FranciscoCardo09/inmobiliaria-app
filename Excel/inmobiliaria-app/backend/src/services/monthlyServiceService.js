@@ -346,7 +346,7 @@ const bulkAssign = async (groupId, contractId, conceptTypeId, amount, months, de
  * Copy service configuration from one month to target months
  */
 const copyConfig = async (groupId, contractId, sourceMonth, sourceYear, targetMonths) => {
-  return await prisma.$transaction(async (tx) => {
+  const copiedServices = await prisma.$transaction(async (tx) => {
     // Get source services
     const sourceRecord = await tx.monthlyRecord.findUnique({
       where: {
@@ -384,6 +384,16 @@ const copyConfig = async (groupId, contractId, sourceMonth, sourceYear, targetMo
 
     return results;
   });
+
+  // Propagar a deudas existentes (igual patrón que addService), fuera de la
+  // transacción — evita que un mes con Debt ya generada quede con servicios
+  // desincronizados (caso C06_none, 2026-07-16).
+  const affectedIds = [...new Set(copiedServices.map((s) => s.monthlyRecordId))];
+  for (const id of affectedIds) {
+    await require('./debtService').syncDebtServicesFromRecord(id);
+  }
+
+  return copiedServices;
 };
 
 /**
@@ -413,6 +423,13 @@ const batchAddServices = async (distributions, conceptTypeId, description = null
 
     await recalculateMultipleRecords(recordIds, tx);
   });
+
+  // Propagar a deudas existentes (igual patrón que addService), fuera de la
+  // transacción (caso C06_none, 2026-07-16).
+  const affectedIds = [...new Set(results.map((s) => s.monthlyRecordId))];
+  for (const id of affectedIds) {
+    await require('./debtService').syncDebtServicesFromRecord(id);
+  }
 
   return results;
 };
@@ -449,14 +466,14 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
   for (let i = 0; i < uniqueContractIds.length; i += CHUNK_SIZE) {
     const chunkIds = uniqueContractIds.slice(i, i + CHUNK_SIZE);
 
+    const chunkAffectedIds = new Set();
     try {
       await prisma.$transaction(async (tx) => {
-        const allAffectedIds = new Set();
         for (const contractId of chunkIds) {
           try {
             const { results, affectedRecordIds, overwrites } = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, tx, true, 'multi');
             totalAssigned += results.length;
-            affectedRecordIds.forEach(id => allAffectedIds.add(id));
+            affectedRecordIds.forEach(id => chunkAffectedIds.add(id));
             overwrites.forEach(o => overwrittenAmounts.push(o));
           } catch (e) {
             errors.push({ contractId, error: e.message });
@@ -464,10 +481,18 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
         }
 
         // Recalcular todo el lote junto, una sola vez por transacción
-        if (allAffectedIds.size > 0) {
-          await recalculateMultipleRecords(Array.from(allAffectedIds), tx);
+        if (chunkAffectedIds.size > 0) {
+          await recalculateMultipleRecords(Array.from(chunkAffectedIds), tx);
         }
       }, { timeout: 30000 });
+
+      // Propagar a deudas existentes (igual patrón que addService), fuera de la
+      // transacción — sin esto, un mes que ya generó Deuda quedaba con servicios
+      // desincronizados: "Deuda" y el modal de pago no veían el servicio nuevo,
+      // aunque Control Mensual sí (caso C06_none, 2026-07-16).
+      for (const id of chunkAffectedIds) {
+        await require('./debtService').syncDebtServicesFromRecord(id);
+      }
     } catch (chunkError) {
       for (const contractId of chunkIds) {
         errors.push({ contractId, error: `Error en lote: ${chunkError.message}` });
@@ -483,36 +508,70 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
  * Uses bulkAssign (upsert) so existing services are updated, missing ones are created.
  */
 const propagateServiceForward = async (groupId, contractId, conceptTypeId, amount, fromMonth, fromYear, description = null) => {
-  const months = [];
   const startM = parseInt(fromMonth);
   const fixedY = parseInt(fromYear);
 
+  // No tocar meses que YA tienen un pago registrado (confirmado por el usuario
+  // 2026-07-14): propagar un servicio hacia adelante no debe modificar un mes
+  // donde ya se cobró algo — cambiaría retroactivamente cuánto se le cobró al
+  // inquilino sin que ese pago lo refleje. Ej.: agregar el servicio en enero
+  // con marzo ya pagado → se aplica a enero, febrero, abril, mayo... pero NO a
+  // marzo.
+  const existingRecords = await prisma.monthlyRecord.findMany({
+    where: { groupId, contractId, periodYear: fixedY, periodMonth: { gte: startM } },
+    select: { periodMonth: true, amountPaid: true },
+  });
+  const paidMonths = new Set(
+    existingRecords.filter((r) => (r.amountPaid || 0) > 0).map((r) => r.periodMonth)
+  );
+
+  const months = [];
+  const skippedMonths = [];
   // Generate strictly up to month 12 of the SAME year
   for (let m = startM; m <= 12; m++) {
+    if (paidMonths.has(m)) {
+      skippedMonths.push(m);
+      continue;
+    }
     months.push({ month: m, year: fixedY });
   }
 
-  return bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, null, false, 'propagate');
+  const result = await bulkAssign(groupId, contractId, conceptTypeId, amount, months, description, null, false, 'propagate');
+
+  // Propagar a deudas existentes (igual patrón que addService): sin esto, un mes
+  // que ya generó Deuda no reflejaba el servicio nuevo en "Deuda" ni en el modal
+  // de pago, aunque Control Mensual sí lo mostrara (caso C06_none, 2026-07-16).
+  const affectedIds = [...new Set(result.map((s) => s.monthlyRecordId))];
+  for (const id of affectedIds) {
+    await require('./debtService').syncDebtServicesFromRecord(id);
+  }
+
+  return { results: result, skippedMonths };
 };
 
 /**
  * Remove a service for a contract from a given month through December of the same year.
  */
 const removeServiceForward = async (groupId, contractId, conceptTypeId, fromMonth, fromYear) => {
-  return await prisma.$transaction(async (tx) => {
+  const { skippedMonths, recordIds } = await prisma.$transaction(async (tx) => {
     // Find all monthly records for this contract strictly in the same year from fromMonth
-    const records = await tx.monthlyRecord.findMany({
+    // que NO tengan ya un pago registrado (mismo criterio que propagateServiceForward:
+    // no tocar un mes donde ya se cobró algo).
+    const allRecords = await tx.monthlyRecord.findMany({
       where: {
         groupId,
         contractId,
         periodYear: parseInt(fromYear),
         periodMonth: { gte: parseInt(fromMonth) },
       },
-      select: { id: true },
+      select: { id: true, periodMonth: true, amountPaid: true },
     });
 
+    const records = allRecords.filter((r) => (r.amountPaid || 0) <= 0);
+    const skippedMonths = allRecords.filter((r) => (r.amountPaid || 0) > 0).map((r) => r.periodMonth);
+
     const recordIds = records.map((r) => r.id);
-    if (recordIds.length === 0) return;
+    if (recordIds.length === 0) return { skippedMonths, recordIds };
 
     await tx.monthlyService.deleteMany({
       where: {
@@ -522,7 +581,16 @@ const removeServiceForward = async (groupId, contractId, conceptTypeId, fromMont
     });
 
     await recalculateMultipleRecords(recordIds, tx);
+    return { skippedMonths, recordIds };
   });
+
+  // Propagar a deudas existentes (igual patrón que addService), fuera de la
+  // transacción (caso C06_none, 2026-07-16).
+  for (const id of recordIds) {
+    await require('./debtService').syncDebtServicesFromRecord(id);
+  }
+
+  return { skippedMonths };
 };
 
 module.exports = {

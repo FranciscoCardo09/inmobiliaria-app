@@ -208,8 +208,14 @@ const createContract = async (req, res, next) => {
 
     // Check no other active contract of the SAME TYPE on this property
     // (allows 1 INQUILINO + 1 PROPIETARIO active simultaneously)
+    // A-13 (AUDITORIA_FUNCIONAL_2026-07-10.md): un contrato rescindido queda
+    // active=true para siempre (rescindContract nunca lo desactiva, para no
+    // ocultar su historial del filtro de getOrCreateMonthlyRecords). Sin
+    // `rescindedAt: null` acá, la propiedad quedaba bloqueada indefinidamente
+    // tras una rescisión. Decisión del usuario (2026-07-12): ignorar
+    // contratos rescindidos en el chequeo de ocupación, sin tocar `active`.
     const activeContract = await prisma.contract.findFirst({
-      where: { propertyId, active: true, contractType: resolvedContractType },
+      where: { propertyId, active: true, rescindedAt: null, contractType: resolvedContractType },
     });
     if (activeContract) {
       const typeLabel = resolvedContractType === 'PROPIETARIO' ? 'obligación de propietario' : 'contrato de inquilino';
@@ -334,13 +340,15 @@ const updateContract = async (req, res, next) => {
     if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
 
     // Recalculate startMonth when relevant fields change.
-    // startMonth represents the contract month corresponding to startDate.
-    // For virtually all contracts, startDate IS the real start, so startMonth = 1.
-    // The only exception is when creating a mid-way contract (handled in createContract).
-    // On edit, we always reset startMonth to 1 because enrichContract() computes
-    // the correct display month dynamically from startDate + elapsed time.
     if (startDate || durationMonths || currentMonth) {
-      data.startMonth = 1;
+      const effectiveStartDate = new Date(data.startDate || contract.startDate);
+      const nowForStart = new Date();
+      const elapsedMonths =
+        (nowForStart.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
+        (nowForStart.getMonth() - effectiveStartDate.getMonth());
+      const userCurrentMonth = currentMonth ? parseInt(currentMonth, 10) : (contract.currentMonth || 1);
+      
+      data.startMonth = Math.max(1, userCurrentMonth - elapsedMonths);
       if (currentMonth) {
         data.currentMonth = parseInt(currentMonth, 10);
       }
@@ -553,7 +561,18 @@ const deleteContract = async (req, res, next) => {
     const contract = await prisma.contract.findUnique({
       where: { id },
       include: {
-        debts: { where: { status: { in: ['OPEN', 'PARTIAL'] } } },
+        // A-12 (AUDITORIA_FUNCIONAL_2026-07-10.md): antes solo se bloqueaba con
+        // deudas OPEN/PARTIAL; el `contract.delete` en cascada (schema.prisma:
+        // MonthlyRecord/PaymentTransaction/Payment/Debt/DebtPayment/RentHistory)
+        // borraba irreversiblemente historial de pagos y comprobantes ya
+        // entregados. Decisión del usuario (2026-07-12): bloquear el borrado si
+        // existe CUALQUIER historial financiero, o si el contrato es eslabón de
+        // una cadena de renovación (renewedFromContractId es onDelete: SetNull,
+        // así que borrar un contrato intermedio corta la cadena para expandToChain).
+        debts: { select: { id: true, status: true } },
+        monthlyRecords: { select: { id: true, amountPaid: true } },
+        renewedFrom: { select: { id: true } },
+        renewedTo: { select: { id: true } },
         tenant: { select: { name: true } },
         contractTenants: { include: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
         property: { select: { address: true } },
@@ -564,11 +583,25 @@ const deleteContract = async (req, res, next) => {
       return ApiResponse.notFound(res, 'Contrato no encontrado');
     }
 
-    // Prevent deletion if there are open debts
     if (contract.debts.length > 0) {
       return ApiResponse.badRequest(
         res,
-        `No se puede eliminar: el contrato tiene ${contract.debts.length} deuda(s) abierta(s). Pague o cancele las deudas primero.`
+        `No se puede eliminar: el contrato tiene ${contract.debts.length} deuda(s) registrada(s) (pagadas o abiertas). Ese historial no puede borrarse.`
+      );
+    }
+
+    const paidRecords = contract.monthlyRecords.filter((r) => (r.amountPaid || 0) > 0);
+    if (paidRecords.length > 0) {
+      return ApiResponse.badRequest(
+        res,
+        `No se puede eliminar: el contrato tiene ${paidRecords.length} mes(es) con pagos registrados. Ese historial no puede borrarse.`
+      );
+    }
+
+    if (contract.renewedFrom || contract.renewedTo) {
+      return ApiResponse.badRequest(
+        res,
+        'No se puede eliminar: el contrato forma parte de una cadena de renovaciones. Borrarlo rompería el vínculo con el contrato anterior/siguiente.'
       );
     }
 
@@ -576,7 +609,8 @@ const deleteContract = async (req, res, next) => {
       ? contract.contractTenants.map((ct) => ct.tenant.name).join(' / ')
       : contract.tenant?.name || 'Sin inquilino';
 
-    // Cascade will delete payments, monthly records, closed debts, etc.
+    // A esta altura el contrato está financieramente vacío: sin deudas, sin meses
+    // pagados, sin renovaciones. El cascade solo borra registros mensuales vacíos.
     await prisma.contract.delete({ where: { id } });
 
     return ApiResponse.success(
@@ -614,8 +648,9 @@ const assignTenantToProperty = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Inquilino invalido');
     }
 
+    // A-13: ver comentario equivalente en createContract — ignorar rescindidos.
     const activeContract = await prisma.contract.findFirst({
-      where: { propertyId, active: true, contractType: 'INQUILINO' },
+      where: { propertyId, active: true, rescindedAt: null, contractType: 'INQUILINO' },
     });
     if (activeContract) {
       return ApiResponse.conflict(res, 'Esta propiedad ya tiene un contrato activo');
@@ -861,12 +896,14 @@ const renewContract = async (req, res, next) => {
     }
 
     // Check no other active contract of the same type on the same property
+    // A-13: ver comentario equivalente en createContract — ignorar rescindidos.
     const duplicate = await prisma.contract.findFirst({
       where: {
         groupId,
         propertyId: oldContract.propertyId,
         contractType: oldContract.contractType,
         active: true,
+        rescindedAt: null,
         id: { not: id },
       },
     });

@@ -12,6 +12,10 @@ const queryClient = new QueryClient({
       staleTime: 1000 * 60 * 5, // 5 minutes
       gcTime: 1000 * 60 * 30, // 30 minutes (keep unused cache longer)
       retry: 1,
+      // Evita re-disparar los endpoints pesados (dashboard/summary,
+      // monthly-records) cada vez que se vuelve a la pestaña. Los datos
+      // igual se refrescan por invalidación tras mutaciones.
+      refetchOnWindowFocus: false,
     },
   },
 })

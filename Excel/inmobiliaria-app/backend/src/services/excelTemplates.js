@@ -263,18 +263,32 @@ const generateLiquidacionExcel = async (dataArray) => {
       sinAbonarRow.getCell(3).numFmt = CURRENCY_FORMAT;
     }
 
-    // Cobrado de deudas anteriores (vista de caja del período)
+    // Cobrado de deudas anteriores (vista de caja del período) — desglose completo,
+    // línea por línea, igual que un pago del mes actual.
     const cobr = data.cobradoOtrosPeriodos;
     if (cobr && cobr.total > 0) {
       sheet.addRow([]);
-      const cobrHeader = sheet.addRow([`Cobrado de deudas anteriores (en ${data.periodo.label})`, 'Punitorios', 'Cobrado']);
-      applyHeaderStyle(cobrHeader);
-      cobr.detalle.forEach((d, i) => {
-        const row = sheet.addRow([d.periodLabel, d.punitorios, d.monto]);
-        applyDataRowStyle(row, i);
-        row.getCell(2).numFmt = CURRENCY_FORMAT;
-        row.getCell(3).numFmt = CURRENCY_FORMAT;
+      const cobrTitle = sheet.addRow([`Cobrado de deudas anteriores (en ${data.periodo.label})`]);
+      cobrTitle.getCell(1).font = { bold: true, color: { argb: 'FF0066CC' } };
+
+      cobr.detalle.forEach((d) => {
+        const estadoLabel = d.saldada ? 'Deuda saldada' : 'Pago parcial de deuda';
+        const diasLabel = d.dias > 0 ? ` (${d.dias} días de atraso)` : '';
+        const periodHeader = sheet.addRow([`${estadoLabel} · ${d.periodLabel}${diasLabel}`]);
+        periodHeader.getCell(1).font = { bold: true, italic: true, color: { argb: 'FF0066CC' } };
+
+        (d.conceptos || []).forEach((c, i) => {
+          const row = sheet.addRow([`   ${c.label}`, '', c.monto]);
+          applyDataRowStyle(row, i);
+          row.getCell(3).numFmt = CURRENCY_FORMAT;
+        });
+
+        const subRow = sheet.addRow(['   Cobrado', '', d.monto]);
+        subRow.getCell(1).font = { bold: true };
+        subRow.getCell(3).font = { bold: true };
+        subRow.getCell(3).numFmt = CURRENCY_FORMAT;
       });
+
       const cobrTotal = sheet.addRow(['Total cobrado períodos anteriores', '', cobr.total]);
       applyTotalRowStyle(cobrTotal);
       cobrTotal.getCell(3).numFmt = CURRENCY_FORMAT;
@@ -376,13 +390,13 @@ const generateEstadoCuentasExcel = async (data) => {
     const debtTitle = sheet.addRow(['DEUDAS ABIERTAS']);
     debtTitle.getCell(1).font = { bold: true, size: 12, color: { argb: 'FFDC2626' } };
 
-    const debtHeaders = sheet.addRow(['Período', 'Original', 'Pagado', 'Punitorios', 'Pendiente', 'Estado']);
+    const debtHeaders = sheet.addRow(['Período', 'Original', 'Pagado', 'Punitorios', 'Días', 'Pendiente', 'Estado']);
     applyHeaderStyle(debtHeaders);
 
     data.deudas.forEach((d, i) => {
-      const row = sheet.addRow([d.periodo, d.original, d.pagado, d.punitorios, d.pendiente, d.status]);
+      const row = sheet.addRow([d.periodo, d.original, d.pagado, d.punitorios, d.dias || 0, d.pendiente, d.status]);
       applyDataRowStyle(row, i);
-      for (let c = 2; c <= 5; c++) {
+      for (const c of [2, 3, 4, 6]) {
         row.getCell(c).numFmt = CURRENCY_FORMAT;
       }
     });

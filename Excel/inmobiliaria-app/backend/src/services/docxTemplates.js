@@ -422,7 +422,8 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
       }));
     }
 
-    // Cobrado de deudas anteriores (vista de caja del período)
+    // Cobrado de deudas anteriores (vista de caja del período) — desglose completo,
+    // línea por línea, igual que un pago del mes actual.
     const cobr = data.cobradoOtrosPeriodos;
     if (cobr && cobr.total > 0) {
       children.push(new Paragraph({
@@ -430,10 +431,25 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
         spacing: { before: 40, after: 20 },
       }));
       for (const d of cobr.detalle) {
+        const estadoLabel = d.saldada ? 'Deuda saldada' : 'Pago parcial de deuda';
+        const diasLabel = d.dias > 0 ? ` (${d.dias} días de atraso)` : '';
+        children.push(new Paragraph({
+          children: [new TextRun({ text: `        ${estadoLabel} · ${d.periodLabel}${diasLabel}`, bold: true, italics: true, size: 15, font: 'Arial', color: '0066CC' })],
+          spacing: { before: 20 },
+        }));
+        for (const c of (d.conceptos || [])) {
+          children.push(new Paragraph({
+            children: [
+              new TextRun({ text: `            ${c.label}`, size: 16, font: 'Arial', color: MEDIUM }),
+              new TextRun({ text: `\t${fmt(c.monto, currency)}`, size: 16, font: 'Arial', color: DARK }),
+            ],
+            tabStops: [{ type: 'right', position: 9000 }],
+          }));
+        }
         children.push(new Paragraph({
           children: [
-            new TextRun({ text: `        ${d.periodLabel}`, size: 16, font: 'Arial', color: MEDIUM }),
-            new TextRun({ text: `\t${fmt(d.monto, currency)}`, size: 16, font: 'Arial', color: DARK }),
+            new TextRun({ text: '            Cobrado', bold: true, size: 16, font: 'Arial', color: BLACK }),
+            new TextRun({ text: `\t${fmt(d.monto, currency)}`, bold: true, size: 16, font: 'Arial', color: BLACK }),
           ],
           tabStops: [{ type: 'right', position: 9000 }],
         }));

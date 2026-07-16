@@ -158,113 +158,26 @@ const calculatePayment = async (req, res, next) => {
   }
 };
 
+// C-07: endpoint legacy deshabilitado. Este `Payment`/`PaymentConcept` es un libro
+// contable paralelo al sistema real (`MonthlyRecord`/`PaymentTransaction`/`Debt`):
+// `createPayment` calculaba `totalDue` sumando ciegamente los `concepts` que mandaba el
+// cliente, sin validar contra RentHistory/punitorios ni recalcular nada — nada
+// reconcilia este libro con el real. Confirmado (2026-07-11) que ningún flujo vivo del
+// frontend llega a estos tres endpoints (create/update/delete): `PaymentForm.jsx`, el
+// único caller de `createPayment`, no está montado en ninguna ruta de `App.jsx`;
+// `updatePayment`/`deletePayment` no tienen ningún caller. No se borra el modelo
+// `Payment` ni datos históricos — solo se bloquean las escrituras nuevas. Las rutas
+// GET (`getPayments`, `getPaymentById`, `calculatePayment`) y los concept-types (usados
+// por el sistema actual) NO se tocan.
+
 // POST /api/groups/:groupId/payments
 const createPayment = async (req, res, next) => {
   try {
-    const { groupId } = req.params;
-    const {
-      contractId,
-      monthNumber,
-      periodMonth,
-      periodYear,
-      paymentDate,
-      amountPaid,
-      concepts,
-      observations,
-    } = req.body;
-
-    // Validations
-    if (!contractId || !monthNumber || !concepts || !Array.isArray(concepts)) {
-      return ApiResponse.badRequest(
-        res,
-        'contractId, monthNumber y concepts son requeridos'
-      );
-    }
-
-    if (!periodMonth || !periodYear) {
-      return ApiResponse.badRequest(
-        res,
-        'periodMonth y periodYear son requeridos'
-      );
-    }
-
-    // Verify contract exists and belongs to group
-    const contract = await prisma.contract.findUnique({
-      where: { id: contractId },
-    });
-
-    if (!contract || contract.groupId !== groupId) {
-      return ApiResponse.badRequest(res, 'Contrato no encontrado');
-    }
-
-    // Check if payment already exists for this contract+month
-    const existing = await prisma.payment.findUnique({
-      where: {
-        contractId_monthNumber: { contractId, monthNumber },
-      },
-    });
-
-    if (existing) {
-      return ApiResponse.conflict(
-        res,
-        `Ya existe un pago para el mes ${monthNumber} de este contrato`
-      );
-    }
-
-    // Calculate totals from concepts (IVA is now manual, included in concepts)
-    const totalDue = concepts.reduce((sum, c) => sum + (c.amount || 0), 0);
-    const paid = amountPaid !== undefined ? parseFloat(amountPaid) : 0;
-    const balance = paid - totalDue;
-
-    let status = 'PENDING';
-    if (paid >= totalDue && paid > 0) status = 'COMPLETE';
-    else if (paid > 0) status = 'PARTIAL';
-
-    // Create payment with concepts in transaction
-    const payment = await prisma.$transaction(async (tx) => {
-      const newPayment = await tx.payment.create({
-        data: {
-          groupId,
-          contractId,
-          monthNumber,
-          periodMonth: parseInt(periodMonth),
-          periodYear: parseInt(periodYear),
-          paymentDate: paymentDate ? new Date(paymentDate) : null,
-          totalDue,
-          amountPaid: paid,
-          balance,
-          status,
-          observations,
-          concepts: {
-            create: concepts.map((c) => ({
-              type: c.type,
-              description: c.description || null,
-              amount: c.amount || 0,
-              isAutomatic: c.isAutomatic || false,
-            })),
-          },
-        },
-        include: {
-          concepts: true,
-          contract: {
-            include: {
-              tenant: { select: { id: true, name: true } },
-              property: {
-                select: {
-                  id: true,
-                  address: true,
-                  category: { select: { id: true, name: true, color: true } },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      return newPayment;
-    });
-
-    return ApiResponse.created(res, payment, 'Pago registrado exitosamente');
+    return ApiResponse.gone(
+      res,
+      'Este endpoint fue deshabilitado (C-07): persistía montos y conceptos sin validar, ' +
+      'desconectado del sistema real de pagos. Use POST /payment-transactions.'
+    );
   } catch (error) {
     next(error);
   }
@@ -273,110 +186,11 @@ const createPayment = async (req, res, next) => {
 // PUT /api/groups/:groupId/payments/:id
 const updatePayment = async (req, res, next) => {
   try {
-    const { groupId, id } = req.params;
-    const { amountPaid, paymentDate, observations, concepts } = req.body;
-
-    const existing = await prisma.payment.findUnique({
-      where: { id },
-    });
-
-    if (!existing || existing.groupId !== groupId) {
-      return ApiResponse.notFound(res, 'Pago no encontrado');
-    }
-
-    const updateData = {};
-    if (paymentDate !== undefined)
-      updateData.paymentDate = paymentDate ? new Date(paymentDate) : null;
-    if (observations !== undefined) updateData.observations = observations;
-
-    // If concepts are provided, recalculate totals
-    if (concepts && Array.isArray(concepts)) {
-      const totalDue = concepts.reduce((sum, c) => sum + (c.amount || 0), 0);
-      const paid =
-        amountPaid !== undefined ? parseFloat(amountPaid) : existing.amountPaid;
-      const balance = paid - totalDue;
-
-      let status = 'PENDING';
-      if (paid >= totalDue && paid > 0) status = 'COMPLETE';
-      else if (paid > 0) status = 'PARTIAL';
-
-      updateData.totalDue = totalDue;
-      updateData.amountPaid = paid;
-      updateData.balance = balance;
-      updateData.status = status;
-
-      const payment = await prisma.$transaction(async (tx) => {
-        await tx.paymentConcept.deleteMany({ where: { paymentId: id } });
-
-        return tx.payment.update({
-          where: { id },
-          data: {
-            ...updateData,
-            concepts: {
-              create: concepts.map((c) => ({
-                type: c.type,
-                description: c.description || null,
-                amount: c.amount || 0,
-                isAutomatic: c.isAutomatic || false,
-              })),
-            },
-          },
-          include: {
-            concepts: true,
-            contract: {
-              include: {
-                tenant: { select: { id: true, name: true } },
-                property: {
-                  select: {
-                    id: true,
-                    address: true,
-                    category: { select: { id: true, name: true, color: true } },
-                  },
-                },
-              },
-            },
-          },
-        });
-      });
-
-      return ApiResponse.success(res, payment, 'Pago actualizado');
-    }
-
-    // Simple update without concepts change
-    if (amountPaid !== undefined) {
-      const paid = parseFloat(amountPaid);
-      const balance = paid - existing.totalDue;
-
-      let status = 'PENDING';
-      if (paid >= existing.totalDue && paid > 0) status = 'COMPLETE';
-      else if (paid > 0) status = 'PARTIAL';
-
-      updateData.amountPaid = paid;
-      updateData.balance = balance;
-      updateData.status = status;
-    }
-
-    const payment = await prisma.payment.update({
-      where: { id },
-      data: updateData,
-      include: {
-        concepts: true,
-        contract: {
-          include: {
-            tenant: { select: { id: true, name: true } },
-            property: {
-              select: {
-                id: true,
-                address: true,
-                category: { select: { id: true, name: true, color: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return ApiResponse.success(res, payment, 'Pago actualizado');
+    return ApiResponse.gone(
+      res,
+      'Este endpoint fue deshabilitado (C-07): persistía montos y conceptos sin validar, ' +
+      'desconectado del sistema real de pagos.'
+    );
   } catch (error) {
     next(error);
   }
@@ -385,19 +199,10 @@ const updatePayment = async (req, res, next) => {
 // DELETE /api/groups/:groupId/payments/:id
 const deletePayment = async (req, res, next) => {
   try {
-    const { groupId, id } = req.params;
-
-    const existing = await prisma.payment.findUnique({
-      where: { id },
-    });
-
-    if (!existing || existing.groupId !== groupId) {
-      return ApiResponse.notFound(res, 'Pago no encontrado');
-    }
-
-    await prisma.payment.delete({ where: { id } });
-
-    return ApiResponse.success(res, null, 'Pago eliminado');
+    return ApiResponse.gone(
+      res,
+      'Este endpoint fue deshabilitado (C-07): borraba sin recalcular nada del sistema real de pagos.'
+    );
   } catch (error) {
     next(error);
   }

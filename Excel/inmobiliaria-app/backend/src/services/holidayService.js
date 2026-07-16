@@ -1,6 +1,7 @@
 // Holiday Service - Business day support
 
 const prisma = require('../lib/prisma');
+const { clearHolidayCache } = require('../utils/punitory');
 
 // Argentine national holidays (fixed dates)
 const ARGENTINE_FIXED_HOLIDAYS = [
@@ -30,17 +31,21 @@ const getHolidays = async (year) => {
 
 const addHoliday = async (date, name) => {
   const d = new Date(date);
-  return prisma.holiday.create({
+  const holiday = await prisma.holiday.create({
     data: {
       date: d,
       name,
       year: d.getFullYear(),
     },
   });
+  clearHolidayCache(holiday.year);
+  return holiday;
 };
 
 const removeHoliday = async (id) => {
-  return prisma.holiday.delete({ where: { id } });
+  const holiday = await prisma.holiday.delete({ where: { id } });
+  clearHolidayCache(holiday.year);
+  return holiday;
 };
 
 const seedHolidays = async (year) => {
@@ -65,6 +70,7 @@ const seedHolidays = async (year) => {
     }
   }
 
+  clearHolidayCache(y);
   return created;
 };
 

@@ -55,7 +55,7 @@ const nextMonthTemplate = (tenant, record, groupName) => {
 
 const debtTotalTemplate = (tenant, debt, groupName) => {
   const subject = `DEUDA ${debt.periodLabel} - ${groupName}`;
-  const dailyPunitory = debt.unpaidRentAmount * (debt.punitoryPercent || 0.02);
+  const dailyPunitory = debt.unpaidRentAmount * (debt.punitoryPercent || 0.006);
 
   const whatsappText = [
     `*⚠️ DEUDA ${debt.periodLabel} - ${groupName}*`,
@@ -82,7 +82,7 @@ const debtTotalTemplate = (tenant, debt, groupName) => {
 
 const debtPartialTemplate = (tenant, debt, groupName) => {
   const remaining = debt.unpaidRentAmount - (debt.amountPaid || 0);
-  const dailyPunitory = remaining * (debt.punitoryPercent || 0.02);
+  const dailyPunitory = remaining * (debt.punitoryPercent || 0.006);
   const subject = `SALDO PENDIENTE ${debt.periodLabel} - ${groupName}`;
 
   const whatsappText = [
@@ -111,7 +111,7 @@ const debtPartialTemplate = (tenant, debt, groupName) => {
 
 const latePaymentTemplate = (tenant, record, contract, groupName) => {
   const period = `${monthNames[record.periodMonth]} ${record.periodYear}`;
-  const dailyPunitory = record.rentAmount * (contract.punitoryPercent || 0.02);
+  const dailyPunitory = record.rentAmount * (contract.punitoryPercent || 0.006);
   const subject = `URGENTE - Pago ${period} ATRASADO - ${groupName}`;
 
   const whatsappText = [
@@ -119,7 +119,7 @@ const latePaymentTemplate = (tenant, record, contract, groupName) => {
     ``,
     `${tenant.name},`,
     `NO pagó antes del día 10.`,
-    `Punitorios DESDE día ${contract.punitoryStartDay || 4}: ${formatCurrency(dailyPunitory)}/día`,
+    `Punitorios DESDE día ${contract.punitoryStartDay || 10}: ${formatCurrency(dailyPunitory)}/día`,
     ``,
     `Pague HOY.`,
   ].join('\n');
@@ -128,7 +128,7 @@ const latePaymentTemplate = (tenant, record, contract, groupName) => {
     <h2 style="color:#dc2626">🚨 URGENTE - Pago ${period} ATRASADO</h2>
     <p>${tenant.name},</p>
     <p>NO registramos su pago antes del día 10.</p>
-    <p>Punitorios desde día ${contract.punitoryStartDay || 4}: <strong>${formatCurrency(dailyPunitory)}/día</strong></p>
+    <p>Punitorios desde día ${contract.punitoryStartDay || 10}: <strong>${formatCurrency(dailyPunitory)}/día</strong></p>
     <p style="font-weight:bold">Pague HOY.</p>
   `;
 

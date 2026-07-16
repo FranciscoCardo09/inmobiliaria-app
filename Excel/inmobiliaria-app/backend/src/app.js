@@ -99,6 +99,20 @@ app.listen(PORT, () => {
      Google OAuth: ${config.google.clientId ? 'Configured' : 'Not configured'}
   =============================================
   `);
+
+  // A-14 (AUDITORIA_FUNCIONAL_2026-07-10.md): el recálculo mensual es async
+  // (marca `needsRecalculation=true` + `setImmediate(processDirtyRecords)`).
+  // Si el proceso muere (crash, deploy) entre marcar dirty y que el worker
+  // corra, esos registros quedan huérfanos con totales stale indefinidamente
+  // — nada más los recoge. Barrido único al arrancar: si hay dirty records
+  // pendientes de una corrida anterior, se procesan ahora. No reemplaza el
+  // recálculo inline usado en los caminos de dinero (payDebt, registerPayment,
+  // forgiveDebt, cancelDebtPayment); es solo la red de seguridad para lo que
+  // pudo quedar pendiente por un crash.
+  const { processDirtyRecords } = require('./services/monthlyRecordService');
+  processDirtyRecords().catch((err) => {
+    console.error('[boot] Error en el barrido de registros pendientes de recálculo:', err);
+  });
 });
 
 module.exports = app;

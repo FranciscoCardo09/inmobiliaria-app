@@ -82,6 +82,78 @@ test('A-03 (cobro): con pago parcial, la base incluye servicios+IVA impagos (sal
   assert.strictEqual(capturedBase, 141000, 'la base de cobro debe ser el saldo restante (LOGICA §4.3), no solo el alquiler');
 });
 
+test('2026-07-14: cobro con alquiler ya cubierto pero punitorio pendiente compone sobre el saldo de punitorio, no da $0', async (t) => {
+  // Caso real: contrato C07_multi_same_month. Pago 1 (09/07, $100.000) + pago 2
+  // (14/07, $300.000) cubren el alquiler completo ($400.000) pero dejan $10.800 de
+  // punitorio congelado sin pagar. Un tercer pago el 18/07 (4 días después) debe
+  // cobrar punitorios NUEVOS compuestos sobre esos $10.800 pendientes — antes de este
+  // fix, `unpaidRentForPunitory` daba 0 (alquiler ya cubierto) y calculatePunitoryV2
+  // se llamaba con base 0 → $0 de interés nuevo, y cualquier pago que cubriera el
+  // compuesto real quedaba mal imputado como SOBREPAGO (saldo a favor falso).
+  const prisma = makeFakePrisma();
+  let capturedBase = null;
+
+  const svc = proxyquire('../src/services/paymentTransactionService', {
+    '../lib/prisma': prisma,
+    '../utils/punitory': {
+      ...realPunitory,
+      getHolidaysForYear: async () => [],
+      calculatePunitoryV2: (paymentDate, pm, py, baseRent, ...rest) => {
+        capturedBase = baseRent;
+        // 5 días (14→18 inclusive) al 0.6% diario sobre 10800 = 324
+        return { amount: 324, days: 5, fromDate: null, toDate: null };
+      },
+    },
+    './monthlyRecordService': {
+      recalculateMonthlyRecord: async () => ({ status: 'COMPLETE' }),
+      recalculateMultipleRecords: async () => 0,
+    },
+    './debtService': {
+      canPayCurrentMonth: async () => ({ canPay: true }),
+    },
+  });
+
+  await prisma.monthlyRecord.create({
+    data: {
+      id: 'mr-c07', groupId: 'g1', contractId: 'c1',
+      periodMonth: 7, periodYear: 2026, monthNumber: 7,
+      status: 'PARTIAL', rentAmount: 400000, servicesTotal: 0,
+      includeIva: false, amountPaid: 400000, // alquiler YA cubierto por pagos anteriores
+      previousBalance: 0, punitoryAmount: 10800, punitoryDays: 6, punitoryForgiven: false,
+      services: [],
+      contract: { id: 'c1', punitoryStartDay: 4, punitoryGraceDay: 10, punitoryPercent: 0.006, rescindedAt: null },
+    },
+  });
+  await prisma.paymentTransaction.create({
+    data: {
+      id: 'tx-prev', groupId: 'g1', monthlyRecordId: 'mr-c07',
+      paymentDate: new Date(2026, 6, 14, 12, 0, 0), amount: 300000,
+      punitoryForgiven: false,
+      concepts: [{ type: 'ALQUILER', amount: 300000 }], // este pago NO tocó punitorios
+    },
+  });
+
+  await svc.registerPayment('g1', 'mr-c07', {
+    paymentDate: '2026-07-18',
+    amount: 11124,
+    paymentMethod: 'TRANSFERENCIA',
+  });
+
+  assert.strictEqual(capturedBase, 10800, 'la base del interés nuevo debe ser el punitorio pendiente (10800), no 0');
+
+  // fakePrisma no resuelve el nested write `concepts: { create: [...] }` de Prisma
+  // real (solo guarda el objeto literal) — leer los conceptos ahí en vez de la
+  // tabla transactionConcept (que fakePrisma nunca puebla para este patrón).
+  const newTx = await prisma.paymentTransaction.findFirst({ where: { monthlyRecordId: 'mr-c07', amount: 11124 } });
+  const concepts = newTx.concepts.create;
+  const punitorios = concepts.find((c) => c.type === 'PUNITORIOS');
+  const sobrepago = concepts.find((c) => c.type === 'SOBREPAGO');
+
+  assert.ok(punitorios, 'debe existir un concepto PUNITORIOS');
+  assert.strictEqual(punitorios.amount, 11124, 'PUNITORIOS debe ser el total compuesto (10800 + 324), no solo el congelado');
+  assert.strictEqual(sobrepago, undefined, 'NO debe generar SOBREPAGO — el pago cubre exactamente lo compuesto, sin saldo a favor falso');
+});
+
 test('A-03 (cierre): el catch-up de punitorios en vivo al cerrar usa el saldo restante total, no solo alquiler', async (t) => {
   const prisma = makeFakePrisma();
   let capturedBase = null;

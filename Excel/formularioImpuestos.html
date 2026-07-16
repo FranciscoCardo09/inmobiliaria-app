@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body { 
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+      background: #fff;
+      padding: 0;
+      margin: 0;
+      color: #202124;
+    }
+    
+    .container { 
+      width: 100%;
+      max-width: 100%;
+      background: white;
+      padding: 20px;
+    }
+    
+    /* Tabs */
+    .tabs { 
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #e8eaed;
+    }
+    
+    .tab { 
+      padding: 10px 20px;
+      background: transparent;
+      border: none;
+      font-size: 14px;
+      font-weight: 500;
+      color: #5f6368;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      position: relative;
+      margin-bottom: -1px;
+    }
+    
+    .tab:hover { 
+      background: #f8f9fa;
+      color: #202124;
+    }
+    
+    .tab.active { 
+      color: #1a73e8;
+      border-bottom-color: #1a73e8;
+    }
+    
+    /* Tab Content */
+    .tab-content { 
+      display: none;
+    }
+    
+    .tab-content.active { 
+      display: block;
+    }
+    
+    /* Search */
+    .search-container { 
+      margin-bottom: 16px;
+    }
+    
+    .search-label { 
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 8px;
+    }
+    
+    .search-wrapper { 
+      position: relative;
+    }
+    
+    .search-icon { 
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #5f6368;
+      font-size: 16px;
+    }
+    
+    .search-input {
+      width: 100%;
+      padding: 10px 12px 10px 40px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: all 0.2s;
+      background: white;
+      font-family: inherit;
+    }
+    
+    .search-input:hover {
+      border-color: #bdc1c6;
+    }
+    
+    .search-input:focus { 
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.3);
+    }
+    
+    .search-input::placeholder {
+      color: #80868b;
+    }
+    
+    .suggestions { 
+      position: relative;
+      margin-top: 8px;
+      background: white;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      display: none;
+    }
+    
+    .suggestions.active { 
+      display: block;
+    }
+    
+    .suggestions::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    .suggestions::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    .suggestions::-webkit-scrollbar-thumb {
+      background: #dadce0;
+      border-radius: 4px;
+    }
+    
+    .suggestions::-webkit-scrollbar-thumb:hover {
+      background: #bdc1c6;
+    }
+    
+    .suggestion-item { 
+      padding: 10px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f3f4;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      transition: background 0.1s;
+    }
+    
+    .suggestion-item:last-child { 
+      border-bottom: none;
+    }
+    
+    .suggestion-item:hover { 
+      background: #f1f3f4;
+    }
+    
+    .suggestion-item.selected { 
+      background: #e8f0fe;
+    }
+    
+    .suggestion-item .badge {
+      background: #e8f0fe;
+      color: #1967d2;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-left: auto;
+    }
+    
+    .section-title { 
+      padding: 8px 16px;
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #5f6368;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+      position: sticky;
+      top: 0;
+    }
+    
+    /* Checkbox */
+    .checkbox { 
+      width: 18px;
+      height: 18px;
+      border: 2px solid #5f6368;
+      border-radius: 2px;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      background: white;
+    }
+    
+    .checkbox:hover {
+      border-color: #1a73e8;
+    }
+    
+    .checkbox.checked { 
+      background: #1a73e8;
+      border-color: #1a73e8;
+    }
+    
+    .checkbox.checked::after { 
+      content: '✓';
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    /* Selected items */
+    .selected-items { 
+      margin-bottom: 16px;
+    }
+    
+    .selected-items-label { 
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .selected-count {
+      background: #1a73e8;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .selected-list { 
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px;
+      border: 1px dashed #dadce0;
+      border-radius: 4px;
+      background: #f8f9fa;
+      align-items: center;
+    }
+    
+    .selected-badge { 
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: #e8f0fe;
+      color: #1967d2;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid #d2e3fc;
+    }
+    
+    .selected-badge button { 
+      background: transparent;
+      border: none;
+      color: #5f6368;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.2s;
+    }
+    
+    .selected-badge button:hover { 
+      color: #202124;
+    }
+    
+    .selected-placeholder { 
+      color: #80868b;
+      font-size: 13px;
+      text-align: center;
+      width: 100%;
+    }
+    
+    /* Form */
+    .form-fields { 
+      display: none;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e8eaed;
+    }
+    
+    .form-fields.active { 
+      display: block;
+    }
+    
+    .input-group { 
+      margin-bottom: 16px;
+    }
+    
+    .input-group label { 
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #202124;
+      font-size: 13px;
+    }
+    
+    input[type="number"],
+    select { 
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    
+    input[type="number"]:hover,
+    select:hover {
+      border-color: #bdc1c6;
+    }
+    
+    input[type="number"]:focus,
+    select:focus { 
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.3);
+    }
+    
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    
+    .btn-submit { 
+      width: 100%;
+      padding: 10px 24px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+      letter-spacing: 0.25px;
+    }
+    
+    .btn-submit:hover { 
+      background: #1765cc;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-submit:active {
+      background: #1557b0;
+    }
+    
+    .btn-submit:disabled { 
+      background: #dadce0;
+      color: #80868b;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    
+    .info-box {
+      background: #e8f0fe;
+      border-left: 3px solid #1a73e8;
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #174ea6;
+      line-height: 1.4;
+    }
+    
+    .warning-box {
+      background: #fef7e0;
+      border-left: 3px solid #f9ab00;
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #7f6003;
+      line-height: 1.4;
+    }
+    
+    .periodo-info {
+      background: #fef7e0;
+      border-left: 3px solid #f9ab00;
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #7f6003;
+      line-height: 1.4;
+      display: none;
+    }
+    
+    .periodo-info.active {
+      display: block;
+    }
+    
+    .periodo-info strong {
+      color: #5f4100;
+    }
+    
+    .summary {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    
+    .summary.active {
+      display: block;
+    }
+    
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 13px;
+    }
+    
+    .summary-row.total {
+      border-top: 2px solid #dadce0;
+      margin-top: 8px;
+      padding-top: 12px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    /* Toggle Switch para Providus */
+    .toggle-container {
+      margin-bottom: 16px;
+    }
+    
+    .toggle-label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #202124;
+      font-size: 13px;
+    }
+    
+    .toggle-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      border: 1px solid #dadce0;
+    }
+    
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: #dadce0;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .toggle-switch.active {
+      background: #1a73e8;
+    }
+    
+    .toggle-slider {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    
+    .toggle-switch.active .toggle-slider {
+      transform: translateX(20px);
+    }
+    
+    .toggle-text {
+      flex: 1;
+      font-size: 14px;
+      color: #202124;
+    }
+    
+    .toggle-text strong {
+      color: #1a73e8;
+    }
+    
+    .bank-preview {
+      background: white;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #5f6368;
+      line-height: 1.6;
+      display: none;
+    }
+    
+    .bank-preview.active {
+      display: block;
+    }
+    
+    .bank-preview strong {
+      color: #202124;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('single')">Individual</button>
+      <button class="tab" onclick="switchTab('multiple')">Múltiple</button>
+    </div>
+    
+    <form onsubmit="event.preventDefault(); generar();">
+      <!-- TAB 1: Individual -->
+      <div id="tab-single" class="tab-content active">
+        <div class="info-box">
+          ℹ️ Genera un reporte de impuestos para una sola propiedad
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar propiedad</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="propiedad-search" 
+                   placeholder="Busca por nombre, ubicación o inquilino..." 
+                   autocomplete="off" oninput="filterProperties()">
+            <input type="hidden" id="propiedad-hidden" name="propiedad">
+          </div>
+          <div id="suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      
+      <!-- TAB 2: Selección Múltiple -->
+      <div id="tab-multiple" class="tab-content">
+        <div class="info-box">
+          ℹ️ Selecciona múltiples propiedades para generar reportes individuales de cada una
+        </div>
+        
+        <div class="selected-items">
+          <label class="selected-items-label">
+            <span>Propiedades seleccionadas</span>
+            <span class="selected-count" id="count">0</span>
+          </label>
+          <div class="selected-list" id="selected-list">
+            <span class="selected-placeholder">Busca y selecciona propiedades abajo</span>
+          </div>
+        </div>
+        
+        <div class="search-container">
+          <label class="search-label">Buscar propiedades</label>
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="multiple-search" 
+                   placeholder="Busca y marca las propiedades..." 
+                   autocomplete="off" oninput="filterMultiple()">
+          </div>
+          <div id="multiple-suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      
+      <!-- Campos del formulario (compartidos) -->
+      <div id="form-fields" class="form-fields">
+        <div class="summary" id="summary">
+          <div class="summary-row">
+            <span>Impuesto Municipal:</span>
+            <span id="sum-muni">$ 0.00</span>
+          </div>
+          <div class="summary-row">
+            <span>Impuesto Provincial:</span>
+            <span id="sum-rentas">$ 0.00</span>
+          </div>
+          <div class="summary-row">
+            <span>Aguas Cordobesas:</span>
+            <span id="sum-agua">$ 0.00</span>
+          </div>
+          <div class="summary-row total">
+            <span>TOTAL:</span>
+            <span id="sum-total">$ 0.00</span>
+          </div>
+        </div>
+        
+        <div class="row">
+          <div class="input-group">
+            <label for="mes">Mes de pago</label>
+            <select name="mes" id="mes" required onchange="actualizarPeriodo()">
+              <option value="">Selecciona un mes</option>
+              <option value="Enero">Enero</option>
+              <option value="Febrero">Febrero</option>
+              <option value="Marzo">Marzo</option>
+              <option value="Abril">Abril</option>
+              <option value="Mayo">Mayo</option>
+              <option value="Junio">Junio</option>
+              <option value="Julio">Julio</option>
+              <option value="Agosto">Agosto</option>
+              <option value="Septiembre">Septiembre</option>
+              <option value="Octubre">Octubre</option>
+              <option value="Noviembre">Noviembre</option>
+              <option value="Diciembre">Diciembre</option>
+            </select>
+          </div>
+          
+          <div class="input-group">
+            <label for="anio">Año</label>
+            <input type="number" name="anio" id="anio" min="2020" max="2030" required onchange="actualizarPeriodo()">
+          </div>
+        </div>
+        
+        <div class="periodo-info" id="periodo-info">
+          ⏰ <strong>Mes vencido:</strong> Estarás pagando el período <strong id="periodo-text"></strong>
+        </div>
+        
+        <!-- Selector de Providus -->
+        <div class="toggle-container">
+          <label class="toggle-label">Datos bancarios</label>
+          <div class="toggle-wrapper">
+            <div class="toggle-switch" id="providus-toggle" onclick="toggleProvidus()">
+              <div class="toggle-slider"></div>
+            </div>
+            <div class="toggle-text">
+              <span id="toggle-label">Banco Galicia (Maria Lorena Boxer)</span>
+            </div>
+          </div>
+          <div class="bank-preview" id="bank-preview"></div>
+          <input type="hidden" id="es-providus" name="esProvidus" value="false">
+        </div>
+        
+        <button type="submit" class="btn-submit">Generar Reporte(s) de Impuestos</button>
+      </div>
+    </form>
+  </div>
+  
+  <script>
+    var propertiesData = [];
+    var selectedProperty = null;
+    var selectedMultiple = [];
+    var currentTab = 'single';
+    var esProvidus = false;
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      
+      event.target.classList.add('active');
+      document.getElementById('tab-' + tab).classList.add('active');
+      
+      selectedProperty = null;
+      document.getElementById('form-fields').classList.remove('active');
+    }
+
+    // === TAB 1: INDIVIDUAL ===
+    function filterProperties() {
+      var input = document.getElementById("propiedad-search");
+      var filter = input.value.toUpperCase();
+      var suggestionsDiv = document.getElementById("suggestions");
+
+      suggestionsDiv.innerHTML = "";
+
+      if (filter.length === 0) {
+        suggestionsDiv.classList.remove('active');
+        selectedProperty = null;
+        document.getElementById('form-fields').classList.remove('active');
+        return;
+      }
+
+      // CRÍTICO: NO filtrar por estado - mostrar TODAS las propiedades con impuestos
+      var filtered = propertiesData.filter(function(p) {
+        return p[1].toUpperCase().indexOf(filter) > -1;
+      });
+
+      if (filtered.length === 0) {
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No se encontraron propiedades con impuestos</div>';
+        suggestionsDiv.classList.add('active');
+        return;
+      }
+
+      console.log("Propiedades filtradas encontradas: " + filtered.length);
+
+      filtered.forEach(function(p) {
+        var item = document.createElement('div');
+        item.className = 'suggestion-item';
+        
+        var nombre = p[1];
+        var total = p[2] + p[3] + p[4];
+        
+        var badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = '$ ' + total.toLocaleString('es-AR', {minimumFractionDigits: 2});
+        
+        var text = document.createElement('span');
+        text.textContent = nombre;
+        text.style.flex = '1';
+        
+        item.appendChild(text);
+        item.appendChild(badge);
+        
+        item.onclick = function() {
+          selectProperty(p);
+        };
+        suggestionsDiv.appendChild(item);
+      });
+
+      suggestionsDiv.classList.add('active');
+    }
+
+    function selectProperty(p) {
+      selectedProperty = p;
+      document.getElementById('propiedad-search').value = p[1];
+      document.getElementById('propiedad-hidden').value = p[0];
+      document.getElementById('suggestions').classList.remove('active');
+      document.getElementById('form-fields').classList.add('active');
+      
+      // Mostrar resumen
+      actualizarResumen([p]);
+      
+      // Establecer mes y año actual
+      establecerFechaActual();
+      
+      // Actualizar preview bancario
+      actualizarBankPreview();
+    }
+
+    // === TAB 2: SELECCIÓN MÚLTIPLE ===
+    function filterMultiple() {
+      var input = document.getElementById("multiple-search");
+      var filter = input.value.toUpperCase();
+      var suggestionsDiv = document.getElementById("multiple-suggestions");
+
+      suggestionsDiv.innerHTML = "";
+
+      if (filter.length === 0) {
+        suggestionsDiv.classList.remove('active');
+        return;
+      }
+
+      // CRÍTICO: NO filtrar por estado - mostrar TODAS las propiedades con impuestos
+      var filtered = propertiesData.filter(function(p) {
+        return p[1].toUpperCase().indexOf(filter) > -1;
+      });
+
+      if (filtered.length === 0) {
+        suggestionsDiv.innerHTML = '<div class="suggestion-item" style="color:#80868b; cursor: default;">No se encontraron resultados</div>';
+        suggestionsDiv.classList.add('active');
+        return;
+      }
+
+      console.log("Propiedades para selección múltiple: " + filtered.length);
+
+      var titleCurrent = document.createElement('div');
+      titleCurrent.className = 'section-title';
+      titleCurrent.textContent = 'Selecciona propiedades';
+      suggestionsDiv.appendChild(titleCurrent);
+
+      filtered.forEach(function(p) {
+        var item = document.createElement('div');
+        item.className = 'suggestion-item';
+        
+        var isSelected = selectedMultiple.some(function(s) { return s[0] === p[0]; });
+        if (isSelected) {
+          item.classList.add('selected');
+        }
+        
+        var checkbox = document.createElement('div');
+        checkbox.className = 'checkbox' + (isSelected ? ' checked' : '');
+        
+        var text = document.createElement('span');
+        text.textContent = p[1];
+        text.style.flex = '1';
+        
+        var total = p[2] + p[3] + p[4];
+        var badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = '$ ' + total.toLocaleString('es-AR', {minimumFractionDigits: 2});
+        
+        item.appendChild(checkbox);
+        item.appendChild(text);
+        item.appendChild(badge);
+        
+        item.onclick = function(e) {
+          e.stopPropagation();
+          toggleSelection(p);
+          filterMultiple();
+        };
+        
+        suggestionsDiv.appendChild(item);
+      });
+
+      suggestionsDiv.classList.add('active');
+    }
+
+    function toggleSelection(p) {
+      var index = selectedMultiple.findIndex(function(s) { return s[0] === p[0]; });
+      
+      if (index > -1) {
+        selectedMultiple.splice(index, 1);
+      } else {
+        selectedMultiple.push(p);
+      }
+      
+      updateSelectedList();
+    }
+
+    function updateSelectedList() {
+      var listDiv = document.getElementById('selected-list');
+      var countSpan = document.getElementById('count');
+      
+      countSpan.textContent = selectedMultiple.length;
+      
+      if (selectedMultiple.length === 0) {
+        listDiv.innerHTML = '<span class="selected-placeholder">Busca y selecciona propiedades abajo</span>';
+        document.getElementById('form-fields').classList.remove('active');
+      } else {
+        listDiv.innerHTML = '';
+        selectedMultiple.forEach(function(p) {
+          var badge = document.createElement('div');
+          badge.className = 'selected-badge';
+          
+          var text = document.createElement('span');
+          text.textContent = p[1];
+          
+          var btn = document.createElement('button');
+          btn.innerHTML = '×';
+          btn.type = 'button';
+          btn.onclick = function(e) {
+            e.stopPropagation();
+            toggleSelection(p);
+          };
+          
+          badge.appendChild(text);
+          badge.appendChild(btn);
+          listDiv.appendChild(badge);
+        });
+        
+        document.getElementById('form-fields').classList.add('active');
+        
+        // Actualizar resumen con totales sumados
+        actualizarResumen(selectedMultiple);
+        
+        // Establecer fecha actual
+        establecerFechaActual();
+        
+        // Actualizar preview bancario
+        actualizarBankPreview();
+      }
+    }
+
+    // === FUNCIONES COMUNES ===
+    function actualizarResumen(propiedades) {
+      var totalMuni = 0;
+      var totalRentas = 0;
+      var totalAgua = 0;
+      
+      propiedades.forEach(function(p) {
+        totalMuni += p[2];
+        totalRentas += p[3];
+        totalAgua += p[4];
+      });
+      
+      var total = totalMuni + totalRentas + totalAgua;
+      
+      document.getElementById('sum-muni').textContent = '$ ' + totalMuni.toLocaleString('es-AR', {minimumFractionDigits: 2});
+      document.getElementById('sum-rentas').textContent = '$ ' + totalRentas.toLocaleString('es-AR', {minimumFractionDigits: 2});
+      document.getElementById('sum-agua').textContent = '$ ' + totalAgua.toLocaleString('es-AR', {minimumFractionDigits: 2});
+      document.getElementById('sum-total').textContent = '$ ' + total.toLocaleString('es-AR', {minimumFractionDigits: 2});
+      
+      document.getElementById('summary').classList.add('active');
+    }
+
+    function establecerFechaActual() {
+      var hoy = new Date();
+      var mesActual = hoy.getMonth();
+      document.getElementById('mes').selectedIndex = mesActual + 1;
+      document.getElementById('anio').value = hoy.getFullYear();
+      actualizarPeriodo();
+    }
+
+    function actualizarPeriodo() {
+      var mesSelect = document.getElementById('mes');
+      var anioInput = document.getElementById('anio');
+      
+      if (!mesSelect.value || !anioInput.value) {
+        document.getElementById('periodo-info').classList.remove('active');
+        return;
+      }
+      
+      var meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+      
+      var mesIndex = meses.indexOf(mesSelect.value);
+      var anio = parseInt(anioInput.value);
+      
+      // Calcular mes anterior (mes vencido)
+      var mesAnteriorIndex = mesIndex - 1;
+      var anioAnterior = anio;
+      
+      if (mesAnteriorIndex < 0) {
+        mesAnteriorIndex = 11;
+        anioAnterior = anio - 1;
+      }
+      
+      var mesAnterior = meses[mesAnteriorIndex];
+      var periodoNumero = (mesAnteriorIndex + 1).toString().padStart(2, '0');
+      var periodo = periodoNumero + '-' + anioAnterior;
+      
+      document.getElementById('periodo-text').textContent = periodo + ' (' + mesAnterior + ' ' + anioAnterior + ')';
+      document.getElementById('periodo-info').classList.add('active');
+    }
+
+    function toggleProvidus() {
+      esProvidus = !esProvidus;
+      
+      var toggle = document.getElementById('providus-toggle');
+      var label = document.getElementById('toggle-label');
+      var hiddenInput = document.getElementById('es-providus');
+      
+      if (esProvidus) {
+        toggle.classList.add('active');
+        label.innerHTML = '<strong>Banco Columbia (Providus S.A.)</strong>';
+        hiddenInput.value = 'true';
+      } else {
+        toggle.classList.remove('active');
+        label.textContent = 'Banco Galicia (Maria Lorena Boxer)';
+        hiddenInput.value = 'false';
+      }
+      
+      actualizarBankPreview();
+    }
+
+    function actualizarBankPreview() {
+      var preview = document.getElementById('bank-preview');
+      
+      if (esProvidus) {
+        preview.innerHTML = '<strong>BANCO COLUMBIA</strong><br>' +
+                           '1. Titular: Providus S.A.<br>' +
+                           '2. CUIT: 30-67880531-5<br>' +
+                           '3. Tipo de cuenta: Cuenta corriente<br>' +
+                           '4. N° de Cuenta: 5202334361<br>' +
+                           '5. CBU: 3890004230005202334361';
+      } else {
+        preview.innerHTML = '<strong>BANCO GALICIA</strong><br>' +
+                           '1. Titular: Maria Lorena Boxer<br>' +
+                           '2. CUIT: 27-25429274-0<br>' +
+                           '3. Tipo de cuenta: Caja de ahorros<br>' +
+                           '4. N° de Cuenta: 404616110765<br>' +
+                           '5. CBU: 0070076430004046161155';
+      }
+      
+      preview.classList.add('active');
+    }
+
+    function generar() {
+  var button = document.querySelector('button[type="submit"]');
+  button.disabled = true;
+  button.textContent = 'Generando...';
+
+  var formData = {
+    mes: document.getElementById('mes').value,
+    anio: document.getElementById('anio').value,
+    esProvidus: document.getElementById('es-providus').value
+  };
+
+  if (currentTab === 'single') {
+    if (!selectedProperty) {
+      alert('Por favor selecciona una propiedad');
+      button.disabled = false;
+      button.textContent = 'Generar Reporte(s) de Impuestos';
+      return;
+    }
+    
+    formData.propiedad = document.getElementById('propiedad-hidden').value;
+    
+    google.script.run.withSuccessHandler(function(url){
+      alert("✅ Reporte de impuestos generado exitosamente");
+      window.open(url, '_blank');
+      google.script.host.close();
+    }).withFailureHandler(function(err) {
+      alert("❌ Error al generar el reporte: " + err.message);
+      button.disabled = false;
+      button.textContent = 'Generar Reporte(s) de Impuestos';
+    }).generarReporteImpuestos(formData);
+    
+  } else if (currentTab === 'multiple') {
+    if (selectedMultiple.length === 0) {
+      alert('Por favor selecciona al menos una propiedad');
+      button.disabled = false;
+      button.textContent = 'Generar Reporte(s) de Impuestos';
+      return;
+    }
+    
+    // Generar UN SOLO reporte con todas las propiedades
+    formData.propiedades = selectedMultiple.map(function(p) { return p[0]; });
+    
+    google.script.run.withSuccessHandler(function(url){
+      alert("✅ Reporte de impuestos generado exitosamente\n\nSe incluyeron " + selectedMultiple.length + " propiedades");
+      window.open(url, '_blank');
+      google.script.host.close();
+    }).withFailureHandler(function(err) {
+      alert("❌ Error al generar el reporte: " + err.message);
+      button.disabled = false;
+      button.textContent = 'Generar Reporte(s) de Impuestos';
+    }).generarReporteImpuestosMultiples(formData); // ← SIN "s" en Reportes
+  }
+}
+
+    // Cargar datos
+    google.script.run.withSuccessHandler(function(lista){
+      console.log('✅ Propiedades con impuestos cargadas: ' + lista.length);
+      
+      // Debug: mostrar primeras 3 propiedades
+      if (lista.length > 0) {
+        console.log('Primeras propiedades cargadas:');
+        for (var i = 0; i < Math.min(3, lista.length); i++) {
+          var p = lista[i];
+          console.log('  ' + (i+1) + '. ' + p[1] + ' → Muni: $' + p[2] + ', Rentas: $' + p[3] + ', Agua: $' + p[4]);
+        }
+      }
+      
+      propertiesData = lista;
+      
+      if (lista.length === 0) {
+        alert('⚠️ No se encontraron propiedades con impuestos en las hojas principales.\n\nVerifica que haya valores en las columnas de Muni, Rentas o Agua.');
+      }
+    }).withFailureHandler(function(error) {
+      console.error('❌ Error cargando propiedades:', error);
+      alert("Error cargando propiedades: " + error.message);
+    }).getListaPropiedadesConImpuestos();
+  </script>
+</body>
+</html>

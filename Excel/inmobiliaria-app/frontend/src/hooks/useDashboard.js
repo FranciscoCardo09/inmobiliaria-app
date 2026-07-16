@@ -11,7 +11,12 @@ export const useDashboard = (groupId) => {
     },
     enabled: !!groupId,
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 60000,
+    // Antes: refetchInterval: 60000 (polling incondicional cada minuto).
+    // Cada poll dispara getOrCreateMonthlyRecords + recálculo de deudas
+    // (dashboard/summary), un ciclo pesado, aunque el usuario no toque nada.
+    // El summary ya se invalida tras mutaciones relevantes (ver useDebts.js),
+    // así que no hace falta un intervalo tan agresivo.
+    refetchInterval: 5 * 60 * 1000,
   })
 
   return {

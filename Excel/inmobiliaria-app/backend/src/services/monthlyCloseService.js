@@ -1,5 +1,6 @@
 // Monthly Close Service - Cierre mensual que genera deudas automáticas
 const { createDebtFromMonthlyRecord, calculateImputation } = require('./debtService');
+const { isContractInRangeForMonth } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
 
@@ -49,8 +50,17 @@ const previewCloseMonth = async (groupId, month, year) => {
     },
   });
 
-  // Filtrar los que ya tienen deuda generada
-  const recordsToClose = unpaidRecords.filter((r) => !r.debt);
+  // Filtrar los que ya tienen deuda generada.
+  // A-10 (AUDITORIA_FUNCIONAL_2026-07-10.md): sin este segundo filtro, un
+  // MonthlyRecord PENDING/PARTIAL de un mes posterior a la rescisión del
+  // contrato (invisible en el Control Mensual, pero vivo en la DB) generaba
+  // deuda real e igual de exigible que un mes vigente. `isContractInRangeForMonth`
+  // (monthlyRecordService.js) ya es la fuente única de "¿este mes está dentro
+  // del rango activo del contrato, considerando la rescisión?" — se reutiliza
+  // acá en vez de duplicar la lógica de rango.
+  const recordsToClose = unpaidRecords.filter(
+    (r) => !r.debt && isContractInRangeForMonth(r.contract, r.monthNumber)
+  );
 
   const debtsPreview = recordsToClose.map((record) => {
     const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(record);
@@ -84,7 +94,8 @@ const previewCloseMonth = async (groupId, month, year) => {
 
   const summary = {
     totalRecords: unpaidRecords.length,
-    alreadyHaveDebt: unpaidRecords.length - recordsToClose.length,
+    alreadyHaveDebt: unpaidRecords.filter((r) => !!r.debt).length,
+    outOfContractRange: unpaidRecords.filter((r) => !r.debt && !isContractInRangeForMonth(r.contract, r.monthNumber)).length,
     willGenerateDebts: debtsPreview.filter((d) => d.willGenerateDebt).length,
     totalDebtAmount: debtsPreview.reduce((sum, d) => sum + d.totalUnpaid, 0),
   };
@@ -127,6 +138,10 @@ const closeMonth = async (groupId, month, year) => {
   for (const record of unpaidRecords) {
     // Saltar si ya tiene deuda
     if (record.debt) continue;
+
+    // A-10: no generar deuda para un mes fuera del rango activo del contrato
+    // (p.ej. posterior a su rescisión). Ver comentario equivalente en previewCloseMonth.
+    if (!isContractInRangeForMonth(record.contract, record.monthNumber)) continue;
 
     try {
       const debt = await createDebtFromMonthlyRecord(record, record.contract);

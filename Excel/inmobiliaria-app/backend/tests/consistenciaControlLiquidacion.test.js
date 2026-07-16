@@ -103,7 +103,7 @@ describe('Control Mensual vs Liquidación — mes COMPLETE (deben coincidir)', (
       isFullyPaid: true,
       calculationDate: '2026-04-14',
     });
-    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026);
+    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { holidays: [] });
 
     assert.strictEqual(
       controlMensual.livePunitoryAmount,
@@ -139,40 +139,48 @@ describe('Control Mensual vs Liquidación — mes COMPLETE (deben coincidir)', (
       isFullyPaid: true,
       calculationDate: '2026-04-14',
     });
-    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026);
+    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { holidays: [] });
 
     assert.strictEqual(controlMensual.livePunitoryAmount, 0);
     assert.strictEqual(liquidacion.punitoryAmount, 0);
   });
 });
 
-describe('Control Mensual vs Liquidación — mes ABIERTO en mora (divergencia esperada, no es bug)', () => {
-  test('punitorio vivo (Control Mensual, a hoy) > punitorio congelado (Liquidación, snapshot)', async () => {
-    // Enero sin ningún pago; el punitorio congelado quedó en 3000 (de un cierre/snapshot
-    // anterior) pero pasaron meses y el punitorio en vivo siguió corriendo.
+describe('Control Mensual vs Liquidación — mes ABIERTO en mora (deben coincidir)', () => {
+  test('punitorio vivo (Control Mensual) == punitorio vivo (Liquidación), misma fecha de cálculo', async () => {
+    // Enero sin ningún pago; el punitorio congelado (snapshot) quedó en 3000, pero
+    // pasaron meses y el punitorio en vivo siguió corriendo. Confirmado con el usuario
+    // 2026-07-15: Liquidación ya NO debe mostrar el valor congelado — debe calcular
+    // en vivo igual que Control Mensual (mismo motor, misma fecha de cálculo), porque
+    // esos punitorios en vivo pasan a contar para el total y el estado de pago del mes.
     const record = makeRecord({
       periodMonth: 1,
       periodYear: 2026,
-      punitoryAmount: 3000, // congelado
+      punitoryAmount: 3000, // congelado (snapshot viejo, ya no se usa para mostrar)
       amountPaid: 0,
       transactions: [],
     });
 
+    const calculationDate = '2026-04-14'; // ~3 meses después del período
     const controlMensual = computeControlMensualTotal(record, CONTRACT, {
       isFullyPaid: false,
-      calculationDate: '2026-04-14', // ~3 meses después del período
+      calculationDate,
     });
-    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026);
+    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { holidays: [], calculationDate });
 
-    // Divergencia INTENCIONAL (confirmada con el usuario 2026-07-14):
-    // Control Mensual = foto en vivo a HOY; Liquidación = papel de caja (congelado).
     assert.ok(
-      controlMensual.livePunitoryAmount > liquidacion.punitoryAmount,
-      `esperado: vivo (${controlMensual.livePunitoryAmount}) > congelado (${liquidacion.punitoryAmount})`
+      liquidacion.punitoryAmount > record.punitoryAmount,
+      `el punitorio en vivo (${liquidacion.punitoryAmount}) debe superar al congelado viejo (${record.punitoryAmount})`
     );
-    assert.ok(
-      controlMensual.liveTotalDue > liquidacion.total,
-      'el total "a hoy" de Control Mensual debe ser mayor al total congelado de Liquidación'
+    assert.strictEqual(
+      controlMensual.livePunitoryAmount,
+      liquidacion.punitoryAmount,
+      'Control Mensual y Liquidación deben mostrar el mismo punitorio en vivo'
+    );
+    assert.strictEqual(
+      controlMensual.liveTotalDue,
+      liquidacion.total,
+      'Control Mensual y Liquidación deben mostrar el mismo total en vivo'
     );
   });
 });
@@ -187,7 +195,7 @@ describe('Redondeo — sin diferencias de centavos', () => {
       balance: -(133333 + 27999.93),
     });
 
-    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026);
+    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { holidays: [] });
     const sumaConceptos = liquidacion.conceptos.reduce((s, c) => s + c.importe, 0);
 
     assert.strictEqual(liquidacion.total, sumaConceptos, 'total debe ser exactamente la suma de conceptos');
@@ -205,7 +213,7 @@ describe('Redondeo — sin diferencias de centavos', () => {
       isCancelled: true,
     });
 
-    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { honorariosPercent: 8.5 });
+    const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { honorariosPercent: 8.5, holidays: [] });
     const rounded = Math.round(liquidacion.honorariosCobrado * 100) / 100;
 
     assert.strictEqual(liquidacion.honorariosCobrado, rounded, 'honorariosCobrado no debe tener error de flotante');

@@ -47,6 +47,10 @@ class ApiResponse {
   static conflict(res, message = 'Conflict') {
     return this.error(res, message, 409);
   }
+
+  static gone(res, message = 'Gone') {
+    return this.error(res, message, 410);
+  }
 }
 
 module.exports = ApiResponse;

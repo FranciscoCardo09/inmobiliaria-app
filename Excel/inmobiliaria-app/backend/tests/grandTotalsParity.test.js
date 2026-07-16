@@ -6,8 +6,9 @@
  * `backend/src/services/reportDataService.js` (PDF/Excel/DOCX/HTML). Este test
  * congela la paridad: si una copia cambia sin la otra, este test se pone rojo.
  *
- * También documenta el Hallazgo #4: `grandTotal` no incluye
- * `cobradoOtrosPeriodos.total` (cobros de deudas de meses anteriores).
+ * También protege el fix del Hallazgo #4: `grandTotal` (y los desgloses por
+ * concepto) deben incluir `cobradoOtrosPeriodos` (cobros de deudas de meses
+ * anteriores efectivamente cobrados en el mes del reporte — criterio de caja).
  *
  * Run with: cd inmobiliaria-app/backend && npm test
  */
@@ -76,27 +77,30 @@ describe('Paridad computeGrandTotals — frontend vs backend (Hallazgo #3)', () 
   }
 });
 
-describe('Hallazgo #4 — grandTotal NO incluye cobros de deudas de meses anteriores', () => {
-  test('grandTotal solo suma amountPaid de las filas del período; ignora cobradoOtrosPeriodos', () => {
+describe('Hallazgo #4 (FIX) — grandTotal incluye cobros de deudas de meses anteriores', () => {
+  test('grandTotal suma amountPaid del período + cobradoOtrosPeriodos.total (caja real del mes)', () => {
     // Fila del período con amountPaid propio, más un bloque "cobrado en otros períodos"
-    // (deudas de meses anteriores canceladas en este mes) que el modelo de caja SÍ
-    // debería contar como "cobrado en el mes", pero que computeGrandTotals ignora hoy.
+    // (deudas de meses anteriores canceladas en este mes) que el modelo de caja cuenta
+    // como "cobrado en el mes" (escenario "Juan": marzo cobra 42000 propios + 208000 de
+    // ene/feb = 250000 de caja real).
     const data = [
       {
-        ...row({ paymentStatus: 'PAGO PARCIAL', subtotalAlquileresCobrado: 42000, pendingAmount: 58000, amountPaid: 42000, honorariosCobrado: 4200 }),
-        cobradoOtrosPeriodos: { total: 208000, detalle: [] }, // ene + feb canceladas en marzo
+        ...row({ paymentStatus: 'PAGO PARCIAL', subtotalAlquileresCobrado: 42000, pendingAmount: 58000, amountPaid: 42000, honorariosCobrado: 4200, paidAlquiler: 42000 }),
+        cobradoOtrosPeriodos: { total: 208000, alquiler: 200000, servicios: 0, iva: 0, punitorios: 8000, detalle: [] }, // ene + feb canceladas en marzo
       },
     ];
 
     const result = computeGrandTotalsBackend(data);
 
-    // Documenta el estado ACTUAL (no deseado): el total de caja real del mes
-    // (42000 propio + 208000 de meses anteriores = 250000) NO se refleja en grandTotal.
-    assert.strictEqual(result.grandTotal, 42000, 'grandTotal HOY ignora cobradoOtrosPeriodos (ver Hallazgo #4 y modelo de caja deseado)');
-    assert.notStrictEqual(
-      result.grandTotal,
-      42000 + 208000,
-      'si este assert empieza a fallar, el fix del Hallazgo #4 ya sumó cobradoOtrosPeriodos a grandTotal — actualizar este test'
-    );
+    assert.strictEqual(result.grandTotal, 250000, 'grandTotal = 42000 (propio) + 208000 (otros períodos) = caja real de marzo');
+    assert.strictEqual(result.grandAlquilerCobrado, 242000, 'alquiler cobrado = 42000 (propio) + 200000 (ene/feb)');
+    assert.strictEqual(result.grandPunitoriosCobrado, 8000, 'punitorios cobrados = 0 (propio, marzo) + 8000 (ene/feb congelados)');
+  });
+
+  test('filas sin cobradoOtrosPeriodos no cambian de comportamiento (fallback a 0)', () => {
+    const data = [row({ paymentStatus: 'PAGADO', amountPaid: 50000, paidAlquiler: 50000 })];
+    const result = computeGrandTotalsBackend(data);
+    assert.strictEqual(result.grandTotal, 50000);
+    assert.strictEqual(result.grandAlquilerCobrado, 50000);
   });
 });

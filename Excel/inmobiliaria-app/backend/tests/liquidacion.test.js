@@ -31,19 +31,31 @@ const YEAR  = 2026;
 // Owner "Peñaloza Camet Sofia Rosario" — 11 active INQUILINO contracts
 const OWNER_ID = '564b1c66-3caa-497c-9282-1d8b46261815';
 
-// Five specific contract IDs (mix of cancelled and not)
+// Five specific contract IDs (mix of cancelled and not).
+// NOTA (2026-07-11, M-26): 2 de los 4 originales ('4b6a68b1...', '60654630...')
+// fueron renovados con posterioridad — el contrato NUEVO (post-renovación) no
+// tiene registro de marzo/2026 (arrancó en abril/mayo); el registro cancelado
+// de marzo/2026 sigue siendo dueño del contrato VIEJO (active:false,
+// renewedAt seteado). Se reemplazan por esos ancestros: son exactamente el
+// caso que M-26 exige que la Liquidación general siga mostrando.
 const CONTRACT_IDS_CANCELLED = [
   '47d35273-8b1f-449b-bf2c-00c645a382f3',
-  '4b6a68b1-41c3-48ba-be5c-3f53ee2b34dc',
+  'e30c9d4f-aabd-4a65-8609-1447e19e239c', // renovado 2026-04-01 (antes: '4b6a68b1...', el contrato NUEVO sin registro de marzo)
   'c777d98c-3dce-4bb6-87f0-73e9f27e4f74',
-  '60654630-657a-4b11-b220-eb1c6f267891',
+  '7ac14816-b061-4af6-8375-36f6c93a0ed9', // renovado 2026-05-01 (antes: '60654630...', el contrato NUEVO sin registro de marzo)
+  // Marquez Gomez Diego Roman — Los Pinos 3989 Torre 1 - 2 A: estaba en NOT_CANCELLED
+  // porque su Debt.status ya era 'PAID' pero el MonthlyRecord había quedado congelado
+  // en 'PARTIAL' (bug real, repair-debt-record-status-sync.js aplicado 2026-07-14).
+  '22fa988d-a566-4b79-81e0-4d2cb580e8d1',
+  // Coseano, Johana Soledad — Pablo Zufriategui 4568: mismo caso — su registro de
+  // marzo pasó a isCancelled=true al recalcularse (status COMPLETE), estaba mal
+  // clasificado acá desde antes de esta sesión.
+  '57659010-4cd0-4c75-a949-6e7a0690a658',
 ];
 
 // Contracts known NOT cancelled in March 2026
 const CONTRACT_IDS_NOT_CANCELLED = [
-  '22fa988d-a566-4b79-81e0-4d2cb580e8d1', // Los Pinos 3989 Torre 1 - 2 A
   '71b8a624-b0d2-4e5c-89c6-6e8508e9960b', // Alvear 306 Esq Lima
-  '57659010-4cd0-4c75-a949-6e7a0690a658', // Pablo Zufriategui 4568
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

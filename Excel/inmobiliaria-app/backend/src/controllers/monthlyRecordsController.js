@@ -18,6 +18,10 @@ const {
 
 const prisma = require('../lib/prisma');
 const { bulkLoadServicesSchema } = require('../validators/monthlyRecordsValidators');
+const { MONTH_NAMES } = require('../utils/constants');
+
+const formatSkippedMonths = (skippedMonths, year) =>
+  (skippedMonths || []).map((m) => `${MONTH_NAMES[m]} ${year}`).join(', ');
 
 // GET /api/groups/:groupId/monthly-records?month=2&year=2026
 const getMonthlyRecords = async (req, res, next) => {
@@ -174,7 +178,7 @@ const addRecordService = async (req, res, next) => {
     }
 
     if (propagateForward) {
-      await propagateServiceForward(
+      const { skippedMonths } = await propagateServiceForward(
         groupId,
         record.contractId,
         conceptTypeId,
@@ -184,10 +188,13 @@ const addRecordService = async (req, res, next) => {
         description || null
       );
       const toMonth = 12;
+      const skippedLabel = skippedMonths.length > 0
+        ? ` (no se tocaron los meses ya pagados: ${formatSkippedMonths(skippedMonths, record.periodYear)})`
+        : '';
       return ApiResponse.created(
         res,
-        { fromMonth: record.periodMonth, toMonth, year: record.periodYear },
-        `Servicio agregado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}`
+        { fromMonth: record.periodMonth, toMonth, year: record.periodYear, skippedMonths },
+        `Servicio agregado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}${skippedLabel}`
       );
     }
 
@@ -225,7 +232,7 @@ const updateRecordService = async (req, res, next) => {
         return ApiResponse.notFound(res, 'Servicio no encontrado');
       }
 
-      await propagateServiceForward(
+      const { skippedMonths } = await propagateServiceForward(
         groupId,
         record.contractId,
         existing.conceptTypeId,
@@ -235,10 +242,13 @@ const updateRecordService = async (req, res, next) => {
         description !== undefined ? description : existing.description
       );
       const toMonth = 12;
+      const skippedLabel = skippedMonths.length > 0
+        ? ` (no se tocaron los meses ya pagados: ${formatSkippedMonths(skippedMonths, record.periodYear)})`
+        : '';
       return ApiResponse.success(
         res,
-        { fromMonth: record.periodMonth, toMonth, year: record.periodYear },
-        `Servicio actualizado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}`
+        { fromMonth: record.periodMonth, toMonth, year: record.periodYear, skippedMonths },
+        `Servicio actualizado y propagado del mes ${record.periodMonth} al ${toMonth} de ${record.periodYear}${skippedLabel}`
       );
     }
 
@@ -282,14 +292,17 @@ const deleteRecordService = async (req, res, next) => {
     }
 
     if (propagateForward === 'true') {
-      await removeServiceForward(
+      const { skippedMonths } = await removeServiceForward(
         groupId,
         record.contractId,
         existing.conceptTypeId,
         record.periodMonth,
         record.periodYear
       );
-      return ApiResponse.success(res, null, 'Servicio eliminado de este mes y los siguientes');
+      const skippedLabel = skippedMonths?.length > 0
+        ? ` (no se tocaron los meses ya pagados: ${formatSkippedMonths(skippedMonths, record.periodYear)})`
+        : '';
+      return ApiResponse.success(res, { skippedMonths }, `Servicio eliminado de este mes y los siguientes${skippedLabel}`);
     }
 
     const service = await removeService(serviceId);
@@ -321,6 +334,16 @@ const toggleIva = async (req, res, next) => {
       data: { includeIva, ivaAmount },
     });
 
+    // Si el mes ya generó deuda, propagar el cambio de IVA a la deuda ANTES de
+    // recalcular el record (unpaidServicesAmount lleva el IVA plegado). Mismo
+    // patrón que monthlyServiceService.js para los servicios: antes solo
+    // agregar/quitar un servicio refrescaba la deuda, togglear IVA la dejaba con
+    // el monto viejo. Orden importante (2026-07-16): syncDebtServicesFromRecord
+    // puede REABRIR una deuda PAID (si el IVA nuevo queda pendiente) — tiene que
+    // correr primero para que recalculateMonthlyRecord vea la deuda ya reabierta
+    // (OPEN/PARTIAL) y le asigne al mes el status/totalDue correctos; si corriera
+    // al revés, el mes se recalcularía todavía con la deuda vieja en PAID.
+    await require('../services/debtService').syncDebtServicesFromRecord(recordId);
     const updated = await recalculateMonthlyRecord(recordId);
     return ApiResponse.success(res, updated, 'IVA actualizado');
   } catch (error) {

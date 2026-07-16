@@ -40,8 +40,12 @@ export const useDebts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['debts', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] }),
+      // Detalle de un mes suelto (useMonthlyRecordDetail): el mes actual pagado en un
+      // bulk con currentRecordId queda con este cache stale si no se invalida acá.
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId, debtId] }),
+      queryClient.invalidateQueries({ queryKey: ['bulkDebtPreview', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['paymentTransactions', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] }),
     ])
@@ -167,15 +171,16 @@ export const useDebtPunitoryPreview = (groupId, debtId, paymentDate) => {
   })
 }
 
-export const useBulkDebtPreview = (groupId, debtIds, paymentDate) => {
+export const useBulkDebtPreview = (groupId, debtIds, paymentDate, currentRecordId = null) => {
   // Sorted+joined key so the query is stable regardless of selection order
   const idsKey = [...(debtIds || [])].sort().join(',')
   return useQuery({
-    queryKey: ['bulkDebtPreview', groupId, idsKey, paymentDate],
+    queryKey: ['bulkDebtPreview', groupId, idsKey, paymentDate, currentRecordId],
     queryFn: async () => {
       const response = await api.post(`/groups/${groupId}/debts/pay-bulk/preview`, {
         debtIds,
         paymentDate,
+        currentRecordId: currentRecordId || undefined,
       })
       return response.data.data
     },

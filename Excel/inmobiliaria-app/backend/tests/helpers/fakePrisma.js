@@ -3,11 +3,14 @@
  * (paired with proxyquire to inject into services that require '../lib/prisma').
  *
  * Supports: findUnique, findFirst, findMany, create, createMany, update,
- * updateMany, delete, deleteMany; plus $transaction (runs callback with same
- * client — no real isolation, fine for unit tests).
+ * updateMany, upsert, delete, deleteMany, count; plus $transaction (runs
+ * callback with same client — no real isolation, fine for unit tests).
  *
  * Filters: equality, { in: [...] }, { notIn }, { not }, { lt/gt/lte/gte },
  * { contains }, plus AND/OR/NOT composition.
+ *
+ * Update data supports the numeric-field operators Prisma exposes for atomic
+ * increments: { increment }, { decrement }, { set }, { multiply }, { divide }.
  */
 const { randomUUID } = require('crypto');
 
@@ -29,6 +32,14 @@ function matchValue(actual, condition) {
   if ('lte' in condition) return new Date(actual).getTime() <= new Date(condition.lte).getTime();
   if ('gte' in condition) return new Date(actual).getTime() >= new Date(condition.gte).getTime();
   if ('contains' in condition) return String(actual || '').includes(condition.contains);
+  // Nested relation filter (e.g. `where: { contract: { groupId, active: true } }`).
+  // Real Prisma joins the relation; the fake has no joins, so tests embed the
+  // related object literally on the row (see helpers usage in adjustmentGuards
+  // tests) and this recurses into it with the same matching rules as a top-level
+  // `where`.
+  if (actual && typeof actual === 'object' && !(actual instanceof Date) && !Array.isArray(actual)) {
+    return matchWhere(actual, condition);
+  }
   return actual === condition;
 }
 
@@ -86,6 +97,24 @@ function applySelect(rows, select) {
   });
 }
 
+// Resolves Prisma's numeric field-update operators ({ increment }, { decrement },
+// { set }, { multiply }, { divide }) against the current row so `update`/`upsert`
+// behave like the real atomic SQL Prisma would generate.
+function resolveUpdateData(row, data) {
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value && typeof value === 'object' && !(value instanceof Date)) {
+      if ('increment' in value) { out[key] = (row[key] || 0) + value.increment; continue; }
+      if ('decrement' in value) { out[key] = (row[key] || 0) - value.decrement; continue; }
+      if ('multiply' in value) { out[key] = (row[key] || 0) * value.multiply; continue; }
+      if ('divide' in value) { out[key] = (row[key] || 0) / value.divide; continue; }
+      if ('set' in value) { out[key] = value.set; continue; }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function makeTable() {
   const rows = [];
 
@@ -133,18 +162,28 @@ function makeTable() {
     update: async ({ where, data }) => {
       const idx = rows.findIndex((r) => matchWhere(r, where));
       if (idx === -1) throw new Error('Record not found');
-      rows[idx] = { ...rows[idx], ...data, updatedAt: new Date() };
+      rows[idx] = { ...rows[idx], ...resolveUpdateData(rows[idx], data), updatedAt: new Date() };
       return { ...rows[idx] };
     },
     updateMany: async ({ where, data }) => {
       let count = 0;
       for (let i = 0; i < rows.length; i++) {
         if (matchWhere(rows[i], where || {})) {
-          rows[i] = { ...rows[i], ...data, updatedAt: new Date() };
+          rows[i] = { ...rows[i], ...resolveUpdateData(rows[i], data), updatedAt: new Date() };
           count++;
         }
       }
       return { count };
+    },
+    upsert: async ({ where, create, update }) => {
+      const idx = rows.findIndex((r) => matchWhere(r, where));
+      if (idx === -1) {
+        const row = { id: create.id || randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...create };
+        rows.push(row);
+        return { ...row };
+      }
+      rows[idx] = { ...rows[idx], ...resolveUpdateData(rows[idx], update), updatedAt: new Date() };
+      return { ...rows[idx] };
     },
     delete: async ({ where }) => {
       const idx = rows.findIndex((r) => matchWhere(r, where));
@@ -161,6 +200,7 @@ function makeTable() {
       }
       return { count };
     },
+    count: async ({ where } = {}) => rows.filter((r) => matchWhere(r, where || {})).length,
   };
 }
 
@@ -183,6 +223,7 @@ function makeFakePrisma() {
     'adjustmentIndex',
     'holiday',
     'conceptType',
+    'receiptSequence',
   ];
 
   const client = {};
@@ -190,6 +231,9 @@ function makeFakePrisma() {
 
   client.$transaction = async (cb) => cb(client);
   client.$disconnect = async () => {};
+  // No-op stub: production code uses this only for pg_advisory_xact_lock (Postgres-only,
+  // meaningless without real concurrency); the in-memory fake has none to guard against.
+  client.$executeRawUnsafe = async () => 0;
   return client;
 }
 

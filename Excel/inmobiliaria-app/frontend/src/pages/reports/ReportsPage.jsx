@@ -155,16 +155,17 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Honorarios: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
-  // Si no se cobró nada (NO COBRADO) no se cobran honorarios ni gastos a mi cargo,
-  // aunque haya saldo a favor previo.
-  const amtPaid = data.amountPaid || 0
+  // Honorarios: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados,
+  // que ya incluye el alquiler + punitorios de deudas viejas saldadas en el período).
+  // Si no se cobró nada (ni el mes actual ni deudas anteriores) no se cobran honorarios
+  // ni gastos a mi cargo, aunque haya saldo a favor previo.
+  const cobroAlgo = (data.amountPaid || 0) > 0 || (data.cobradoOtrosPeriodos?.total || 0) > 0
   const honorariosBase = data.subtotalAlquileresCobrado || 0
-  const montoAlquiler = (pct > 0 && amtPaid > 0)
+  const montoAlquiler = (pct > 0 && cobroAlgo)
     ? Math.max(0, Math.round(honorariosBase * pct / 100 * 100) / 100)
     : 0
   const totalGastosRaw = gastosItems.reduce((s, g) => s + g.importe, 0)
-  const totalGastos = amtPaid > 0 ? totalGastosRaw : 0
+  const totalGastos = cobroAlgo ? totalGastosRaw : 0
   const monto = montoAlquiler + totalGastos
 
   return { porcentaje: pct, baseHonorarios: honorariosBase, montoAlquiler, gastosAMiCargo: gastosItems, totalGastos, monto }
@@ -342,7 +343,6 @@ function LiquidacionTab({ groupId }) {
   const {
     grandTotal,
     grandPending,
-    grandSubtotalAlquileres,
     grandSubtotalAlquileresPartial,
     grandSubtotalAlquileresUnpaid,
     grandServiciosCobrado,
@@ -565,49 +565,111 @@ function LiquidacionTab({ groupId }) {
                 'SOLO DEUDAS ANTERIORES': { cls: 'badge-info', label: 'COBRÓ DEUDAS ANT.' },
               }[data.paymentStatus]
 
-              // Bloque "Cobrado de deudas anteriores" (vista de caja del período seleccionado)
-              const cobrados = data.cobradoOtrosPeriodos
-              const cobradosBlock = (cobrados && cobrados.total > 0) ? (
-                <div className="mb-4">
-                  <h4 className="font-semibold text-sm mb-2">Cobrado de deudas anteriores (en {data.periodo.label})</h4>
-                  <div className="overflow-x-auto bg-info/10 rounded-lg">
+              // Reconciliación de display (armada en el backend, ver
+              // reportDataService.js#buildDeudasUnificadas): un solo bloque por mes,
+              // nunca "Deuda abierta" y "Pago parcial" del mismo mes por separado.
+              const unificadas = data.deudasUnificadas || []
+              const pendientesUni = unificadas.filter(d => d.estado === 'PENDIENTE')
+              const saldadasUni = unificadas.filter(d => d.estado === 'SALDADA')
+
+              // Un mes dentro de un recuadro (Deudas Acumuladas / Deudas Pagadas): el
+              // total que tenía que pagar, y un aviso de cierre en rojo ("Falta pagar")
+              // solo si todavía debe algo — nunca azul, eso es solo para saldo a favor.
+              const renderMonthBlock = (d, isLast) => {
+                const debe = d.pendiente > 0.009
+                const estado = debe ? 'SIN ABONAR' : 'SALDADA'
+                const toneCls = debe ? 'text-error' : ''
+                const totalDisplay = (d.pagadoTotal > 0 && debe)
+                  ? `${formatCurrency(d.pagadoTotal)} / ${formatCurrency(d.totalAPagar)}`
+                  : formatCurrency(d.totalAPagar)
+                return (
+                  <div key={d.periodLabel} className={!isLast ? 'pb-2 mb-2 border-b border-base-300/60' : ''}>
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="text-xs font-semibold">{d.periodLabel}</p>
+                      <div className="text-right">
+                        <p className={`text-[11px] font-bold ${toneCls}`}>{estado}</p>
+                        <p className={`text-xs font-bold ${toneCls}`}>{totalDisplay}</p>
+                      </div>
+                    </div>
                     <table className="table table-xs">
-                      <thead>
-                        <tr>
-                          <th className="pl-4">Período de la deuda</th>
-                          <th className="text-right">Punitorios</th>
-                          <th className="text-right">Cobrado</th>
-                        </tr>
-                      </thead>
                       <tbody>
-                        {cobrados.detalle.map((d, di) => (
-                          <tr key={di}>
-                            <td className="pl-4">{d.periodLabel}</td>
-                            <td className="text-right">{formatCurrency(d.punitorios)}</td>
-                            <td className="text-right font-semibold">{formatCurrency(d.monto)}</td>
+                        {d.conceptos ? d.conceptos.map((c, ci) => (
+                          <tr key={ci}>
+                            <td className="pl-2">{c.tipo === 'PUNITORIOS' ? `Punitorios pagados${d.dias > 0 ? ` (${d.dias} días)` : ''}` : c.label}</td>
+                            <td className="text-right">{formatCurrency(c.monto)}</td>
                           </tr>
-                        ))}
-                        <tr className="border-t-2 border-base-300">
-                          <td colSpan="2" className="pl-4 text-right font-bold">TOTAL COBRADO DE PERÍODOS ANTERIORES</td>
-                          <td className="text-right font-bold text-info">{formatCurrency(cobrados.total)}</td>
-                        </tr>
+                        )) : (
+                          <>
+                            {d.alquilerPendiente > 0 && (
+                              <tr>
+                                <td className="pl-2">Alquiler pendiente</td>
+                                <td className="text-right">{formatCurrency(d.alquilerPendiente)}</td>
+                              </tr>
+                            )}
+                            {d.serviciosPendientes > 0 && (
+                              <tr>
+                                <td className="pl-2">Servicios pendientes</td>
+                                <td className="text-right">{formatCurrency(d.serviciosPendientes)}</td>
+                              </tr>
+                            )}
+                            {d.punitoriosPagados > 0 && (
+                              <tr>
+                                <td className="pl-2">Punitorios pagados</td>
+                                <td className="text-right">{formatCurrency(d.punitoriosPagados)}</td>
+                              </tr>
+                            )}
+                            {d.punitoriosPendientes > 0 && (
+                              <tr>
+                                <td className="pl-2">Punitorios que faltan pagar</td>
+                                <td className="text-right">{formatCurrency(d.punitoriosPendientes)}</td>
+                              </tr>
+                            )}
+                            {d.pagadoEstePeriodo > 0 && (
+                              <tr>
+                                <td className="pl-2">Pagado</td>
+                                <td className="text-right">{formatCurrency(d.pagadoEstePeriodo)}</td>
+                              </tr>
+                            )}
+                          </>
+                        )}
+                        {debe && (
+                          <tr className="font-semibold border-t border-base-300 text-error">
+                            <td className="pl-2">Falta pagar</td>
+                            <td className="text-right">{formatCurrency(d.pendiente)}</td>
+                          </tr>
+                        )}
+                        {!debe && d.sobrepago > 0 && (
+                          <tr className="font-semibold border-t border-base-300 text-info">
+                            <td className="pl-2">Saldo a favor</td>
+                            <td className="text-right">{formatCurrency(d.sobrepago)}</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
-                </div>
-              ) : null
+                )
+              }
 
               // Entrada sintética: solo cobró deudas anteriores en el período, sin liquidación propia del mes
               if (data.paymentStatus === 'SOLO DEUDAS ANTERIORES') {
                 return (
                   <div key={data.contractId || idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
-                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap pb-2 border-b border-base-300">
                       <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
                       {statusBadge && <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>}
                       {periodSelector}
                     </div>
-                    <p className="text-xs text-base-content/60 mb-2">Sin liquidación propia de {data.periodo.label}; durante el período se cobraron deudas de meses anteriores.</p>
-                    {cobradosBlock}
+                    <p className="text-xs text-base-content/60 mb-2 mt-2">Sin liquidación propia de {data.periodo.label}; durante el período se cobraron deudas de meses anteriores.</p>
+                    {saldadasUni.length > 0 && (
+                      <>
+                        <h4 className="font-semibold text-sm mb-2">Deudas Pagadas</h4>
+                        {saldadasUni.map((d) => (
+                          <div key={d.periodLabel} className="mb-3 border border-base-300 rounded-lg p-3">
+                            {renderMonthBlock(d, true)}
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </div>
                 )
               }
@@ -629,71 +691,69 @@ function LiquidacionTab({ groupId }) {
 
               return (
                 <div key={data.contractId || idx} className={idx > 0 ? 'mt-4 pt-4 border-t border-base-300' : ''}>
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap pb-2 border-b border-base-300">
                     <h3 className="font-semibold text-sm">{addr} - {data.inquilino.nombre}</h3>
                     {statusBadge && <span className={`badge badge-sm text-white font-bold ${statusBadge.cls}`}>{statusBadge.label}</span>}
                     {isOverridden && <span className="badge badge-sm badge-info" title="Período distinto al global">{data.periodo.label}</span>}
                     {periodSelector}
                   </div>
 
-                  {data.deudas && data.deudas.length > 0 && (
-                    <div className="mb-4">
-                      <h4 className="font-semibold text-sm mb-2">Deudas Acumuladas</h4>
-                      <div className="overflow-x-auto bg-base-200/30 rounded-lg">
-                        <table className="table table-xs">
-                          <thead>
-                            <tr>
-                              <th className="pl-4">Período</th>
-                              <th className="text-right">Original</th>
-                              <th className="text-right">Punitorios</th>
-                              <th className="text-right">Pendiente</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {data.deudas.map((d, di) => (
-                              <tr key={di}>
-                                <td className="pl-4">{d.periodo}</td>
-                                <td className="text-right">{formatCurrency(d.original)}</td>
-                                <td className="text-right">{formatCurrency(d.punitorios)}</td>
-                                <td className="text-right font-semibold text-error">{formatCurrency(d.pendiente)}</td>
+                  {/* Liquidación Actual */}
+                  <div className="mb-3 mt-2 border border-base-300 rounded-lg p-3">
+                    <h4 className="font-semibold text-sm mb-2">Liquidación Actual</h4>
+                    <div className="overflow-x-auto">
+                      <table className="table table-xs">
+                        <tbody>
+                          {data.conceptos.map((c, ci) => {
+                            const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto
+                            if (c.concepto.includes('Punitorios') && c.importe === 0) return null
+                            return (
+                              <tr key={ci}>
+                                <td className="pl-2">{label}</td>
+                                <td className="text-right">{formatCurrency(c.importe)}</td>
                               </tr>
-                            ))}
-                            <tr className="border-t-2 border-base-300">
-                              <td colSpan="3" className="pl-4 text-right font-bold">TOTAL DEUDA ACUMULADA</td>
-                              <td className="text-right font-bold text-error">{formatCurrency(data.totalDeuda)}</td>
+                            )
+                          })}
+                          {data.pendingAmount > 0.009 ? (
+                            <tr className="font-semibold border-t border-base-300 text-error">
+                              <td className="pl-2">Falta pagar (a día de hoy)</td>
+                              <td className="text-right">{formatCurrency(data.pendingAmount)}</td>
                             </tr>
-                          </tbody>
-                        </table>
+                          ) : data.saldoAFavor > 0 ? (
+                            <tr className="font-semibold border-t border-base-300 text-info">
+                              <td className="pl-2">Saldo a favor</td>
+                              <td className="text-right">{formatCurrency(data.saldoAFavor)}</td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Deudas Acumuladas */}
+                  {pendientesUni.length > 0 && (
+                    <div className="mb-3 border border-base-300 rounded-lg p-3">
+                      <h4 className="font-semibold text-sm mb-2">Deudas Acumuladas</h4>
+                      {pendientesUni.map((d, di) => renderMonthBlock(d, di === pendientesUni.length - 1))}
+                      <div className="flex justify-between items-center pt-2 mt-1 border-t border-base-300 font-bold text-sm">
+                        <span>Total Deuda</span>
+                        <span>{formatCurrency(data.totalDeuda)}</span>
                       </div>
                     </div>
                   )}
 
-                  {cobradosBlock}
-
-                  {/* Conceptos table */}
-                  {data.deudas && data.deudas.length > 0 && (
-                    <h4 className="font-semibold text-sm mt-2 mb-2">Liquidación Actual</h4>
+                  {/* Deudas Pagadas: un rectángulo por mes (separadas), mismo patrón que
+                      Deudas Acumuladas — estado + total arriba a la derecha */}
+                  {saldadasUni.length > 0 && (
+                    <>
+                      <h4 className="font-semibold text-sm mb-2">Deudas Pagadas</h4>
+                      {saldadasUni.map((d) => (
+                        <div key={d.periodLabel} className="mb-3 border border-base-300 rounded-lg p-3">
+                          {renderMonthBlock(d, true)}
+                        </div>
+                      ))}
+                    </>
                   )}
-                  <div className="overflow-x-auto">
-                    <table className="table table-xs">
-                      <tbody>
-                        {data.conceptos.map((c, ci) => {
-                          const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto
-                          if (c.concepto.includes('Punitorios') && c.importe === 0) return null
-                          return (
-                            <tr key={ci}>
-                              <td className="pl-4">{label}</td>
-                              <td className="text-right">{formatCurrency(c.importe)}</td>
-                            </tr>
-                          )
-                        })}
-                        <tr className="font-semibold">
-                          <td className="pl-4">Subtotal</td>
-                          <td className="text-right">{formatCurrency(data.total)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
 
                   {/* Total combinado sin abonar: deudas anteriores + mes actual impago */}
                   {data.totalDeuda > 0 && data.pendingAmount > 0 && (
@@ -735,15 +795,12 @@ function LiquidacionTab({ groupId }) {
                             <span>{formatCurrency(data.paidPunitorios)}</span>
                           </div>
                         )}
-                        {(() => {
-                          const alquilerAbonado = Math.max(0, (data.amountPaid || 0) - (data.paidServicios || 0) - (data.paidPunitorios || 0));
-                          return alquilerAbonado > 0 ? (
-                            <div className="flex justify-between text-base-content/70">
-                              <span>→ Alquiler pagado</span>
-                              <span>{formatCurrency(alquilerAbonado)}</span>
-                            </div>
-                          ) : null;
-                        })()}
+                        {(data.paidAlquiler || 0) > 0 && (
+                          <div className="flex justify-between text-base-content/70">
+                            <span>→ Alquiler pagado</span>
+                            <span>{formatCurrency(data.paidAlquiler)}</span>
+                          </div>
+                        )}
                       </div>
                       {data.saldoAFavor > 0 && (
                         <div className="flex justify-between text-info font-bold border-t border-base-300 pt-1 mt-1">
@@ -875,25 +932,23 @@ function LiquidacionTab({ groupId }) {
                 </div>
               </div>
 
-              {/* Grand Total Alquileres — paid only */}
+              {/* Grand Total Alquileres — alquiler PURO cobrado, sin punitorios (esos son
+                  la base de Honorarios, no "alquiler" — confirmado 2026-07-15) */}
               <div>
                 <div className="bg-base-300 px-4 py-3 border-t-2 border-base-content flex justify-between items-center rounded-t-lg">
                   <span className="font-bold text-lg uppercase">Total Alquileres Cobrados</span>
-                  <span className="font-bold text-xl">{formatCurrency(grandSubtotalAlquileres)}</span>
+                  <span className="font-bold text-xl">{formatCurrency(grandAlquilerCobrado)}</span>
                 </div>
                 <div className="bg-base-200 px-4 py-2 text-xs italic text-base-content/70 border-x border-b border-base-300">
-                  Son: {numeroATexto(grandSubtotalAlquileres)}
+                  Son: {numeroATexto(grandAlquilerCobrado)}
                 </div>
-                {/* Allocation breakdown */}
+                {/* Informativo: no forma parte del total de arriba */}
                 <div className="bg-base-200/50 px-4 py-2 text-xs space-y-0.5 border-x border-b border-base-300">
                   {grandServiciosCobrado > 0 && (
                     <div className="flex justify-between text-base-content/70"><span>Servicios cobrados</span><span>{formatCurrency(grandServiciosCobrado)}</span></div>
                   )}
                   {grandPunitoriosCobrado > 0 && (
                     <div className="flex justify-between text-base-content/70"><span>Punitorios cobrados</span><span>{formatCurrency(grandPunitoriosCobrado)}</span></div>
-                  )}
-                  {grandAlquilerCobrado > 0 && (
-                    <div className="flex justify-between text-base-content/70"><span>Alquiler cobrado</span><span>{formatCurrency(grandAlquilerCobrado)}</span></div>
                   )}
                 </div>
                 {(grandSubtotalAlquileresPartial > 0 || grandSubtotalAlquileresUnpaid > 0) && (

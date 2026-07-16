@@ -83,6 +83,13 @@ export const useMonthlyRecords = (groupId, periodMonth, periodYear, filters = {}
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      // El IVA queda plegado en unpaidServicesAmount de la deuda (si el mes ya
+      // cerró con deuda abierta): sin esto, el modal de pago (useDebt /
+      // useDebtPunitoryPreview) seguía sirviendo el monto cacheado pre-toggle.
+      queryClient.invalidateQueries({ queryKey: ['debt', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId] })
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al cambiar IVA')

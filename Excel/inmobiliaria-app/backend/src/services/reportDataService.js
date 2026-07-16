@@ -1,6 +1,6 @@
 // Report Data Service - Prisma queries for all report types
 const { numeroATexto, sumPunitoryConcepts } = require('../utils/helpers');
-const { round2, diffCalendarDays } = require('../utils/punitory');
+const { round2, diffCalendarDays, debtDelinquencyDays, getHolidaysForYear, computeLiveRecordPunitory } = require('../utils/punitory');
 const { MONTH_NAMES } = require('../utils/constants');
 const { formatServiceLabel } = require('../utils/serviceLabel');
 // A-25: "hoy" del negocio en ART, TZ-inmune (ver dateUtils.js). El servidor
@@ -29,6 +29,201 @@ const getPrimaryTenant = (contract) => {
   return contract.tenant || null;
 };
 
+// Agrupa transacciones por fecha calendario: varios pagos el mismo día (p.ej.
+// de distintos meses de origen, cancelando deudas viejas + el mes actual en un
+// solo cobro) aparecen como UN solo renglón sumado, no uno por transacción
+// (AUDITORIA_CONTROL_LIQUIDACION_2026-07.md, punto 5).
+const groupTransaccionesByFecha = (txList) => {
+  const byDate = new Map();
+  for (const t of txList) {
+    const key = new Date(t.fecha).toDateString();
+    if (!byDate.has(key)) {
+      byDate.set(key, { fecha: t.fecha, monto: 0, metodo: t.metodo, inquilino: t.inquilino, propiedad: t.propiedad, conceptos: [] });
+    }
+    const row = byDate.get(key);
+    row.monto = round2(row.monto + t.monto);
+    row.conceptos.push(...t.conceptos);
+  }
+  return Array.from(byDate.values()).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+};
+
+// Reconciliación de DISPLAY (no toca ningún cálculo de plata): unifica, por mes,
+// la deuda todavía abierta (`deudas`, viene de contract.debts con status != PAID)
+// con lo cobrado de ese mismo mes en `cobradoOtrosPeriodos.detalle`. Antes un mes
+// con pago parcial aparecía dos veces en el informe — "Deuda abierta" (lo que
+// falta) en un lado y "Pago parcial de deuda" (lo cobrado) en otro — porque son
+// dos fuentes de datos distintas para el mismo período. Acá se combinan en una
+// sola entrada por mes, para que el PDF y la pantalla dibujen un solo recuadro.
+// Un mes solo puede terminar en dos estados: 'PENDIENTE' (todavía debe algo,
+// viene de `deudas`) o 'SALDADA' (quedó saldado, viene solo de `cobradoOtrosPeriodos`
+// porque `contract.debts` ya no lo trae — se filtra por status != PAID).
+const buildDeudasUnificadas = (deudasVivas, cobradoDetalle) => {
+  const cobradoList = cobradoDetalle || [];
+  const usedCobrado = new Set();
+
+  const pendientes = (deudasVivas || []).map((d) => {
+    const match = cobradoList.find((c) =>
+      !usedCobrado.has(c) && c.periodMonth === d.periodMonth && c.periodYear === d.periodYear && !c.saldada
+    );
+    if (match) usedCobrado.add(match);
+    return {
+      periodLabel: d.periodo,
+      dias: d.dias,
+      estado: 'PENDIENTE',
+      conceptos: null, // se arma desde alquilerPendiente/serviciosPendientes/punitorios*
+      alquilerPendiente: d.alquilerPendiente,
+      serviciosPendientes: d.serviciosPendientes,
+      // Punitorios de esta deuda: lo ya cobrado en el período (real, va a honorarios)
+      // vs lo que todavía falta pagar (incluye lo viejo acumulado + lo nuevo en vivo).
+      // Antes se mostraba solo una porción de "faltan pagar" y no cerraba contra `pendiente`.
+      punitoriosPagados: match ? (match.punitorios || 0) : 0,
+      punitoriosPendientes: d.punitoriosPendientes,
+      pendiente: d.pendiente,
+      // "Total que tenía que pagar" ese mes = lo cobrado hasta hoy en esa deuda +
+      // lo que todavía falta. Para lo cobrado se toma el máximo entre Debt.amountPaid
+      // (acumulado histórico) y lo cobrado ESTE período — Debt.amountPaid puede quedar
+      // desactualizado cuando un pago se registra fuera del flujo payDebt() (caso
+      // observado 2026-07-15: pago de $400.000 vía transacción directa sobre el
+      // monthlyRecord de la deuda, sin sincronizar debt.amountPaid).
+      // `debtTotal` (no `monto`): lo realmente imputado a esta deuda, sin contar
+      // un eventual sobrepago (crédito para otro período, no parte de "lo que
+      // tenía que pagar" acá — caso C01_full_ontime 2026-07-15).
+      pagadoTotal: Math.max(d.pagado || 0, match ? match.debtTotal : 0),
+      totalAPagar: round2(Math.max(d.pagado || 0, match ? match.debtTotal : 0) + (d.pendiente || 0)),
+      pagadoEstePeriodo: match ? match.debtTotal : 0,
+      sobrepago: match ? (match.sobrepago || 0) : 0,
+    };
+  });
+
+  // Cobros que no matchean ninguna deuda viva conocida: el caso normal es un mes
+  // saldado (contract.debts no trae deudas PAID, así que "Deuda saldada" solo
+  // existe acá). El caso raro es un contrato sin registro propio en el período
+  // del reporte ("SOLO DEUDAS ANTERIORES") que cobró un pago PARCIAL de una
+  // deuda vieja aún abierta: sin la deuda formal no hay forma de calcular cuánto
+  // falta, así que se muestra lo cobrado sin inventar un "Falta pagar".
+  const resto = cobradoList
+    .filter((c) => !usedCobrado.has(c))
+    .map((c) => ({
+      periodLabel: c.periodLabel,
+      dias: c.dias,
+      estado: c.saldada ? 'SALDADA' : 'PENDIENTE',
+      conceptos: c.conceptos,
+      alquilerPendiente: 0,
+      serviciosPendientes: 0,
+      punitoriosPagados: c.punitorios || 0,
+      punitoriosPendientes: 0,
+      pendiente: 0,
+      // `debtTotal` (no `monto`): lo realmente imputado a la deuda, sin el
+      // sobrepago (crédito para otro período) — evita mostrar "Saldada $500.000"
+      // cuando la deuda era de $396.000 y el resto quedó a favor.
+      totalAPagar: c.debtTotal,
+      pagadoTotal: c.debtTotal,
+      pagadoEstePeriodo: c.debtTotal,
+      sobrepago: c.sobrepago || 0,
+    }));
+
+  return [...pendientes, ...resto];
+};
+
+// Categorías que se muestran en la liquidación (mismo set que buildLiquidacionFromRecord).
+const LIQUIDACION_CATEGORIES_DEUDA = new Set(['IMPUESTO', 'SERVICIO', 'DESCUENTO', 'BONIFICACION']);
+
+// Total original de servicios+IVA de un MonthlyRecord (para reconciliar contra lo
+// realmente cobrado e itemizar, o para saber cuánto le "falta" a ese balde al
+// repartir un crédito aplicado).
+const originalServiciosIvaTotal = (rec) => {
+  if (!rec) return 0;
+  const originalServicios = (rec.services || []).filter((s) => LIQUIDACION_CATEGORIES_DEUDA.has(s.conceptType?.category));
+  return round2(
+    originalServicios.reduce((s, sv) => {
+      const isDiscount = sv.conceptType?.category === 'DESCUENTO' || sv.conceptType?.category === 'BONIFICACION';
+      return s + (isDiscount ? -Math.abs(sv.amount) : sv.amount);
+    }, 0) + (rec.includeIva ? (rec.ivaAmount || 0) : 0)
+  );
+};
+
+// Reparte un crédito disponible en cascada servicios→alquiler→punitorios contra lo
+// que YA falta de cada balde (objetivo menos lo ya cubierto en efectivo real).
+// Mismo orden que usa el motor de pagos (paymentTransactionService.js / debtService.js
+// payDebt) — se reconstruye acá porque el crédito aplicado no queda persistido por
+// tipo de concepto, solo como una línea "A_FAVOR" informativa.
+const splitCreditCascade = (credit, faltaServicios, faltaAlquiler, faltaPunitorios) => {
+  let restante = credit;
+  const servicios = round2(Math.min(restante, Math.max(0, faltaServicios)));
+  restante = round2(restante - servicios);
+  const alquiler = round2(Math.min(restante, Math.max(0, faltaAlquiler)));
+  restante = round2(restante - alquiler);
+  const punitorios = round2(Math.min(restante, Math.max(0, faltaPunitorios)));
+  restante = round2(restante - punitorios);
+  return { servicios, alquiler, punitorios, restante };
+};
+
+/**
+ * Reconstruye los conceptos de una deuda vieja pagada con el MISMO nivel de detalle
+ * que "Liquidación Actual" — alquiler con mes y "Mes N" del contrato, cada servicio
+ * con su label y período — en vez de las líneas genéricas "Pago deuda alquiler/
+ * servicios" que graba debtService.payDebt() (no itemiza por servicio).
+ *
+ * Solo itemiza servicios si el monto REALMENTE cobrado (`det.servicios`, que incluye
+ * IVA — payDebt los graba juntos) coincide con la suma de los conceptos originales de
+ * ese período. Si la deuda se pagó en cuotas repartidas en distintos meses de reporte,
+ * no hay forma de saber qué parte corresponde a cada servicio, así que se muestra el
+ * total sin desglosar en vez de inventar una atribución.
+ *
+ * `rec` = el MonthlyRecord ORIGINAL de esa deuda (rentAmount, monthNumber, services,
+ * includeIva, ivaAmount, periodMonth/Year) — no el registro del mes que se está
+ * liquidando ahora.
+ */
+const buildConceptosDeudaPagada = (rec, det) => {
+  const items = [];
+  if (!rec) {
+    // Sin el record original (no debería pasar, pero por las dudas no perder el dato).
+    if (det.alquiler > 0.009) items.push({ tipo: 'ALQUILER_DEUDA', label: 'Pago deuda alquiler', monto: det.alquiler });
+    if (det.servicios > 0.009) items.push({ tipo: 'SERVICIOS_DEUDA', label: 'Pago deuda servicios', monto: det.servicios });
+    if (det.punitorios > 0.009) items.push({ tipo: 'PUNITORIOS', label: 'Punitorios pagados', monto: det.punitorios });
+    return items;
+  }
+
+  if (det.alquiler > 0.009) {
+    items.push({
+      tipo: 'ALQUILER_DEUDA',
+      label: `Pago deuda Alquiler ${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear} (Mes ${rec.monthNumber})`,
+      monto: det.alquiler,
+    });
+  }
+
+  if (det.servicios > 0.009) {
+    const originalServicios = (rec.services || []).filter((s) => LIQUIDACION_CATEGORIES_DEUDA.has(s.conceptType?.category));
+    const originalServiciosTotal = originalServiciosIvaTotal(rec);
+    if (Math.abs(originalServiciosTotal - det.servicios) < 1) {
+      const mesVencidoRec = rec.periodMonth === 1 ? 12 : rec.periodMonth - 1;
+      const anioVencidoRec = rec.periodMonth === 1 ? rec.periodYear - 1 : rec.periodYear;
+      for (const sv of originalServicios) {
+        const cat = sv.conceptType?.category;
+        const isDiscount = cat === 'DESCUENTO' || cat === 'BONIFICACION';
+        const showPeriodo = cat === 'IMPUESTO' || cat === 'SERVICIO';
+        const label = formatServiceLabel(sv);
+        items.push({
+          tipo: 'SERVICIOS_DEUDA',
+          label: `Pago deuda ${label}${showPeriodo ? ` (período ${MONTH_NAMES[mesVencidoRec]} ${anioVencidoRec})` : ''}`,
+          monto: isDiscount ? -Math.abs(sv.amount) : sv.amount,
+        });
+      }
+      if (rec.includeIva && rec.ivaAmount > 0) {
+        items.push({ tipo: 'IVA', label: 'Pago deuda IVA (21%)', monto: rec.ivaAmount });
+      }
+    } else {
+      items.push({ tipo: 'SERVICIOS_DEUDA', label: 'Pago deuda servicios', monto: det.servicios });
+    }
+  }
+
+  if (det.punitorios > 0.009) {
+    items.push({ tipo: 'PUNITORIOS', label: 'Punitorios pagados', monto: det.punitorios });
+  }
+
+  return items;
+};
+
 /**
  * Punitorios y total PENDIENTE de una deuda EN VIVO (a hoy), vía calculateDebtPunitory
  * (incluye interés compuesto). Para reportes que mostraban el valor congelado guardado.
@@ -37,13 +232,22 @@ const getPrimaryTenant = (contract) => {
  * `preloaded` = preloadDebtDependencies(debts) para evitar N+1 cuando hay muchas deudas.
  */
 const liveDebtFigures = async (debt, preloaded = null) => {
-  if (!debt) return { punitorios: 0, pendiente: 0 };
+  if (!debt) return { punitorios: 0, punitoriosPendientes: 0, pendiente: 0, alquiler: 0, servicios: 0 };
   const debtService = require('./debtService');
   // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
   const liveDebt = await debtService.computeLiveDebtTotal(debt, getTodayLocalString(), preloaded);
-  return { 
-    punitorios: liveDebt.liveAccumulatedPunitory || 0, 
-    pendiente: liveDebt.liveCurrentTotal || 0 
+  return {
+    punitorios: liveDebt.liveAccumulatedPunitory || 0,
+    // Punitorios TOTALES todavía impagos: el acumulado congelado de antes del
+    // último pago (unpaidAccumulatedPunitory) + lo nuevo devengado desde
+    // entonces (liveAccumulatedPunitory). `punitorios` de arriba solo trae la
+    // segunda parte — se mantiene sin tocar por los demás reportes que ya lo
+    // usan así; este campo nuevo es el que suma correctamente contra `pendiente`.
+    punitoriosPendientes: round2((liveDebt.unpaidAccumulatedPunitory || 0) + (liveDebt.liveAccumulatedPunitory || 0)),
+    pendiente: liveDebt.liveCurrentTotal || 0,
+    // Desglose alquiler/servicios pendientes (para "Deudas Acumuladas" itemizado).
+    alquiler: liveDebt.remainingRent || 0,
+    servicios: liveDebt.remainingServices || 0,
   };
 };
 
@@ -159,6 +363,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
         include: { concepts: true },
         orderBy: { paymentDate: 'asc' },
       },
+      debt: true,
     },
   });
 
@@ -181,6 +386,7 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
           },
           services: { include: { conceptType: true } },
           transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
+          debt: true,
         },
       });
     } catch (e) {
@@ -314,9 +520,42 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     conceptos.push({ concepto: 'IVA (21%)', base: monthlyRecord.rentAmount, importe: monthlyRecord.ivaAmount });
   }
 
-  const punitoryAmt = (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0;
+  // Punitorios EN VIVO (no el campo congelado monthlyRecord.punitoryAmount, que solo
+  // se "congela" en momentos puntuales — cierre de mes, pagos — y puede quedar en 0
+  // para un mes recién abierto aunque ya esté devengando mora). Mismo criterio que
+  // usa Control Mensual / /monthly-control (computeLiveRecordPunitory / deuda viva).
+  // Confirmado con el usuario 2026-07-15: estos punitorios en vivo SÍ cuentan para
+  // el total y el estado de pago del mes (pueden pasar un mes de PAGADO a PAGO PARCIAL).
+  let livePunitoryAmt = 0;
+  let livePunitoryDays = 0;
+  if (!monthlyRecord.punitoryForgiven) {
+    if (monthlyRecord.debt && monthlyRecord.debt.status !== 'PAID') {
+      const live = await liveDebtFigures(monthlyRecord.debt);
+      livePunitoryAmt = round2(live.punitoriosPendientes);
+      livePunitoryDays = debtDelinquencyDays(monthlyRecord.debt);
+    } else if (monthlyRecord.debt) {
+      livePunitoryAmt = round2(monthlyRecord.debt.accumulatedPunitory || 0);
+      livePunitoryDays = debtDelinquencyDays(monthlyRecord.debt);
+    } else {
+      // Inyectable vía options.holidays (preload en getLiquidacionesAllContracts,
+      // evita N llamadas a DB en el loop; también permite tests puros sin DB).
+      const holidays = options.holidays || await getHolidaysForYear(monthlyRecord.periodYear);
+      const liveResult = computeLiveRecordPunitory(monthlyRecord, contract, holidays, {
+        isFullyPaid: monthlyRecord.status === 'COMPLETE',
+        calculationDate: options.calculationDate,
+      });
+      livePunitoryAmt = round2(liveResult.amount);
+      // `liveResult.days` mide días "desde el último pago" — si hubo un pago HOY
+      // sobre un punitorio viejo que quedó parcialmente impago, da 0 aunque el
+      // monto ($21.600 en el caso Vaisman/C01 2026-07-15) sigue representando
+      // varios días de mora ya congelados antes de ese pago. Nunca mostrar menos
+      // días que los que ya estaban congelados en el record.
+      livePunitoryDays = Math.max(liveResult.days, monthlyRecord.punitoryDays || 0);
+    }
+  }
+  const punitoryAmt = livePunitoryAmt;
   if (punitoryAmt > 0) {
-    conceptos.push({ concepto: `Punitorios (${monthlyRecord.punitoryDays} días)`, base: null, importe: punitoryAmt });
+    conceptos.push({ concepto: `Punitorios (${livePunitoryDays} días)`, base: null, importe: punitoryAmt });
   }
 
   if (monthlyRecord.previousBalance !== 0) {
@@ -334,23 +573,22 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   const subtotalAlquileres = monthlyRecord.rentAmount;
 
   // ================================================================
-  // SEQUENTIAL PAYMENT ALLOCATION (strict order)
-  // 1. Services + IVA first
-  // 2. Punitorios second
+  // PAYMENT ALLOCATION — leído de los TransactionConcept reales
   // ================================================================
-  // 3. Rent (Alquiler) and Punitorios Allocation
-  // ================================================================
-  // Poder de pago = lo pagado + crédito previo + BONIFICACIONES (no descuentos).
-  // BONIFICACION: no reduce la base de honorarios → se trata como crédito.
-  // DESCUENTO: sí reduce la base → se deja restando dentro de serviciosTotal como antes.
+  // Hallazgo #2/#5 (AUDITORIA_CONTROL_LIQUIDACION_2026-07.md): paidServicios/
+  // paidAlquiler/paidPunitorios deben reflejar lo REALMENTE imputado por cada
+  // pago (paymentTransactionService: servicios→alquiler→IVA→punitorios), no
+  // una imputación propia re-derivada de amountPaid. Es lo único que permite
+  // mostrar "punitorios pagados a la fecha del pago" en un mes parcial en
+  // mora (no un valor recalculado contra el amountPaid total a la fecha en
+  // que se genera el reporte).
   const amtPaid = monthlyRecord.amountPaid || 0;
   const previousBalance = monthlyRecord.previousBalance || 0;
   const bonificacionesTotal = conceptos
     .filter(c => c.isService && c.category === 'BONIFICACION')
     .reduce((s, c) => s + Math.abs(c.importe), 0);
-  let remaining = amtPaid + previousBalance + bonificacionesTotal;
 
-  // Servicios + IVA, excluyendo bonificaciones (que ya se sumaron al remaining).
+  // Servicios + IVA, excluyendo bonificaciones (crédito, no reduce la base).
   // Los descuentos sí se mantienen restando (su negativo queda incluido).
   const serviciosTotal = conceptos
     .filter(c => c.isService && c.category !== 'BONIFICACION')
@@ -359,20 +597,84 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   const serviciosIvaTotal = Math.max(0, serviciosTotal + ivaTotal);
   const alquilerTotal = monthlyRecord.rentAmount;
 
-  // Step 1: Services + IVA (Highest priority)
-  const paidServicios = Math.min(remaining, serviciosIvaTotal);
-  remaining -= paidServicios;
+  // conceptType.name → category, para reconocer BONIFICACION entre los
+  // TransactionConcept reales (su `type` es el nombre del servicio, no la
+  // categoría — hay que cruzarlo contra los servicios del propio record).
+  const serviceCategoryByName = new Map(
+    (monthlyRecord.services || [])
+      .filter((s) => s.conceptType?.name)
+      .map((s) => [s.conceptType.name, s.conceptType.category])
+  );
 
-  // Step 2: Rent (Prioritized over Punitorios)
-  const paidAlquiler = Math.min(remaining, alquilerTotal);
-  remaining -= paidAlquiler;
+  // Suma los TransactionConcept reales de las transacciones del record en
+  // los 3 baldes de display (servicios+IVA / alquiler / punitorios) + el
+  // excedente (SOBREPAGO). BONIFICACION y A_FAVOR son créditos informativos,
+  // no "cobrado" nuevo, y se excluyen (igual criterio que el fallback).
+  const sumRealConceptBuckets = (transactions) => {
+    let servicios = 0, alquiler = 0, punitorios = 0, sobrepago = 0, sawConcepts = false;
+    for (const tx of (transactions || [])) {
+      for (const c of (tx.concepts || [])) {
+        sawConcepts = true;
+        const amt = c.amount || 0;
+        if (c.type === 'PUNITORIOS') punitorios += amt;
+        else if (c.type === 'ALQUILER' || c.type === 'MULTA_RESCISION') alquiler += amt;
+        else if (c.type === 'SOBREPAGO') sobrepago += amt;
+        else if (c.type === 'A_FAVOR') { /* crédito informativo, no es cobro nuevo */ }
+        else if (serviceCategoryByName.get(c.type) === 'BONIFICACION') { /* crédito */ }
+        else servicios += amt; // servicios/impuestos reales, IVA y descuentos (negativos)
+      }
+    }
+    return { servicios: round2(servicios), alquiler: round2(alquiler), punitorios: round2(punitorios), sobrepago: round2(sobrepago), sawConcepts };
+  };
 
-  // Step 3: Punitorios (Late fees)
-  const paidPunitorios = Math.min(remaining, punitoryAmt);
-  remaining -= paidPunitorios;
+  const realBuckets = sumRealConceptBuckets(monthlyRecord.transactions);
 
-  // Overpayment / saldo a favor
-  const saldoAFavor = remaining > 0 ? remaining : 0;
+  let paidServicios, paidAlquiler, paidPunitorios, saldoAFavor;
+  if (realBuckets.sawConcepts) {
+    paidServicios = realBuckets.servicios;
+    paidAlquiler = realBuckets.alquiler;
+    paidPunitorios = realBuckets.punitorios;
+    saldoAFavor = realBuckets.sobrepago > 0 ? realBuckets.sobrepago : 0;
+
+    // Crédito previo aplicado (previousBalance): el motor de pagos SÍ lo imputa
+    // en cascada servicios→alquiler→IVA→punitorios (paymentTransactionService.js),
+    // pero solo queda registrado como una línea "A_FAVOR" genérica, sin decir a
+    // qué concepto fue — por eso `realBuckets` (que solo lee TransactionConcept
+    // reales) subestima paidAlquiler cuando hubo crédito de por medio (caso
+    // Vaisman/C01 2026-07-15: pagó $100.000 en efectivo + $104.000 de crédito;
+    // el crédito cubrió $15.214 de servicios y $88.786 de alquiler, pero
+    // realBuckets solo veía los $100.000 tageados como ALQUILER).
+    // Se reparte contra lo que YA falta de cada concepto (neto de lo real-tageado),
+    // en el mismo orden — nunca reabre punitorios "viejos" ya pagados en efectivo,
+    // ni retrocede el detalle histórico de qué cubrió cada pago en su momento.
+    if (previousBalance > 0) {
+      const split = splitCreditCascade(
+        previousBalance,
+        serviciosIvaTotal - paidServicios,
+        alquilerTotal - paidAlquiler,
+        punitoryAmt - paidPunitorios
+      );
+      paidServicios = round2(paidServicios + split.servicios);
+      paidAlquiler = round2(paidAlquiler + split.alquiler);
+      paidPunitorios = round2(paidPunitorios + split.punitorios);
+      // Crédito que sobra después de cubrir todo: queda a favor (además del
+      // sobrepago en efectivo que ya traía realBuckets.sobrepago).
+      if (split.restante > 0) saldoAFavor = round2(saldoAFavor + split.restante);
+    }
+  } else {
+    // Fallback: records legacy/de test sin TransactionConcept reales →
+    // asignación secuencial anterior sobre amountPaid (servicios+IVA →
+    // alquiler → punitorios). Poder de pago = pagado + crédito previo +
+    // BONIFICACIONES (no descuentos, que ya restan dentro de serviciosTotal).
+    let remaining = amtPaid + previousBalance + bonificacionesTotal;
+    paidServicios = Math.min(remaining, serviciosIvaTotal);
+    remaining -= paidServicios;
+    paidAlquiler = Math.min(remaining, alquilerTotal);
+    remaining -= paidAlquiler;
+    paidPunitorios = Math.min(remaining, punitoryAmt);
+    remaining -= paidPunitorios;
+    saldoAFavor = remaining > 0 ? remaining : 0;
+  }
 
   // ================================================================
   // 4-STATE PAYMENT CLASSIFICATION
@@ -395,11 +697,21 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     const live = await liveDebtFigures(d);
     return {
       periodo: d.periodLabel,
+      periodMonth: d.periodMonth,
+      periodYear: d.periodYear,
       original: d.originalAmount,
       pagado: d.amountPaid,
       punitorios: live.punitorios,
+      punitoriosPendientes: live.punitoriosPendientes,
       pendiente: live.pendiente,
       status: d.status,
+      // Días TOTALES de mora (desde que empezó a correr el punitorio hasta HOY, fecha
+      // de generación del reporte) — no el tramo desde el último pago parcial.
+      dias: debtDelinquencyDays(d),
+      // Desglose alquiler/servicios pendientes, para itemizar "Deudas Acumuladas"
+      // con el mismo nivel de detalle que "Cobrado de deudas anteriores".
+      alquilerPendiente: live.alquiler,
+      serviciosPendientes: live.servicios,
     };
   }));
 
@@ -459,7 +771,7 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     total,
     totalEnLetras: numeroATexto(total),
     rentAmount: monthlyRecord.rentAmount,
-    punitoryAmount: (monthlyRecord.punitoryAmount > 0 && !monthlyRecord.punitoryForgiven) ? monthlyRecord.punitoryAmount : 0,
+    punitoryAmount: punitoryAmt,
     subtotalAlquileres,
     subtotalAlquileresEnLetras: numeroATexto(subtotalAlquileres),
     subtotalAlquileresCobrado,
@@ -483,11 +795,11 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     deudas: deudasVivas,
     totalDeuda,
     totalSinAbonar,
-    transacciones: monthlyRecord.transactions.map((t) => ({
+    transacciones: groupTransaccionesByFecha(monthlyRecord.transactions.map((t) => ({
       fecha: t.paymentDate, monto: t.amount, metodo: t.paymentMethod,
       inquilino: getTenantsName(contract), propiedad: contract.property.address,
       conceptos: t.concepts.map((c) => ({ tipo: c.type, descripcion: c.description, monto: c.amount })),
-    })),
+    }))),
     currency: empresa.currency,
     contractId: contract.id,
     monthlyRecordId: monthlyRecord.id,
@@ -505,13 +817,19 @@ const computeGrandTotals = (dataArray) => {
     grandSubtotalAlquileres: dataArray.reduce((s, d) => s + (d.subtotalAlquileresCobrado || 0), 0),
     grandSubtotalAlquileresPartial: partialRows.reduce((s, d) => s + (d.pendingAmount || 0), 0),
     grandSubtotalAlquileresUnpaid: unpaidRows.reduce((s, d) => s + (d.pendingAmount || 0), 0),
-    grandTotal: dataArray.reduce((s, d) => s + (d.amountPaid || 0), 0),
-    grandPending: dataArray.reduce((s, d) => s + (d.pendingAmount || 0), 0),
+    // Hallazgo #4: la caja real del mes = lo cobrado del propio período +
+    // lo cobrado de deudas/meses anteriores (cobradoOtrosPeriodos), no solo
+    // amountPaid del período (AUDITORIA_CONTROL_LIQUIDACION_2026-07.md).
+    grandTotal: dataArray.reduce((s, d) => s + (d.amountPaid || 0) + (d.cobradoOtrosPeriodos?.total || 0), 0),
+    // "Total Pendiente" debe incluir tanto lo impago del período actual como las
+    // deudas viejas todavía abiertas (antes solo sumaba pendingAmount: un contrato
+    // con Junio y Julio sin pagar mostraba solo Julio, perdiendo Junio del total).
+    grandPending: dataArray.reduce((s, d) => s + (d.pendingAmount || 0) + (d.totalDeuda || 0), 0),
     grandHonorarios: dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0),
-    // Allocation breakdown totals
-    grandServiciosCobrado: dataArray.reduce((s, d) => s + (d.paidServicios || 0), 0),
-    grandPunitoriosCobrado: dataArray.reduce((s, d) => s + (d.paidPunitorios || 0), 0),
-    grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquiler || 0), 0),
+    // Allocation breakdown totals — incluyen lo cobrado de otros períodos por concepto
+    grandServiciosCobrado: dataArray.reduce((s, d) => s + (d.paidServicios || 0) + (d.cobradoOtrosPeriodos?.servicios || 0), 0),
+    grandPunitoriosCobrado: dataArray.reduce((s, d) => s + (d.paidPunitorios || 0) + (d.cobradoOtrosPeriodos?.punitorios || 0), 0),
+    grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquiler || 0) + (d.cobradoOtrosPeriodos?.alquiler || 0), 0),
     grandSaldoAFavor: dataArray.reduce((s, d) => s + (d.saldoAFavor || 0), 0),
     // Counts
     paidCount: paidRows.length,
@@ -591,6 +909,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     },
     services: { include: { conceptType: true } },
     transactions: { include: { concepts: true }, orderBy: { paymentDate: 'asc' } },
+    debt: true,
   };
   const orderByClause = { contract: { property: { address: 'asc' } } };
 
@@ -623,9 +942,16 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
 
   const allRecords = [...globalRecords, ...overrideRecords];
 
+  // Preload feriados por año (evita N llamadas a DB dentro del loop; getHolidaysForYear
+  // ya memoiza por proceso, pero esto lo deja explícito como el resto de los preloads).
+  const yearsNeeded = [...new Set(allRecords.map((r) => r.periodYear))];
+  const holidaysByYear = new Map(
+    await Promise.all(yearsNeeded.map(async (y) => [y, await getHolidaysForYear(y)]))
+  );
+
   const result = await Promise.all(allRecords.map((record) => {
     // Route per-contract gastosAMiCargo if provided as a map { [contractId]: {...} }
-    const contractOptions = { ...options };
+    const contractOptions = { ...options, holidays: holidaysByYear.get(record.periodYear) || [] };
     if (options.gastosAMiCargo && typeof options.gastosAMiCargo === 'object' && !Array.isArray(options.gastosAMiCargo)) {
       contractOptions.gastosAMiCargo = options.gastosAMiCargo[record.contractId] || null;
     }
@@ -700,9 +1026,23 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         concepts: true,
         monthlyRecord: {
           select: {
+            id: true,
             periodMonth: true,
             periodYear: true,
             contractId: true,
+            // Para reconstruir etiquetas ricas en "Deudas Pagadas" (mismo criterio que
+            // "Liquidación Actual": alquiler con mes/período, cada servicio con su label
+            // y período — no la línea genérica "Pago deuda servicios/alquiler").
+            monthNumber: true,
+            rentAmount: true,
+            includeIva: true,
+            ivaAmount: true,
+            services: {
+              select: {
+                id: true, amount: true, cuotaNumber: true, cuotaTotal: true, description: true,
+                conceptType: { select: { category: true, name: true, label: true } },
+              },
+            },
             contract: {
               select: {
                 contractType: true,
@@ -721,33 +1061,166 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
       const rec = tx.monthlyRecord;
       if (!rec) continue;
       const cid = rec.contractId;
-      const punitorios = (tx.concepts || [])
-        .filter((c) => c.type === 'PUNITORIOS')
-        .reduce((s, c) => s + (c.amount || 0), 0);
-      if (!map.has(cid)) map.set(cid, { total: 0, detalle: [], contract: rec.contract });
+      // Desglose por concepto real (Hallazgo #2): alquiler/servicios/IVA/punitorios,
+      // no re-derivado — leído directamente de los TransactionConcept de este pago.
+      let alquiler = 0, servicios = 0, iva = 0, punitorios = 0, sobrepago = 0;
+      const conceptosOut = [];
+      for (const c of (tx.concepts || [])) {
+        const amt = c.amount || 0;
+        conceptosOut.push({ tipo: c.type, descripcion: c.description, monto: amt });
+        if (c.type === 'PUNITORIOS') punitorios += amt;
+        // ALQUILER_DEUDA es el tipo real que debtService.payDebt() graba al cobrar
+        // el alquiler de una deuda vieja (distinto de 'ALQUILER' del mes corriente).
+        // Sin este case, ese monto caía en "servicios" y "Total Alquileres Cobrados"
+        // no lo contaba (bug reportado).
+        else if (c.type === 'ALQUILER' || c.type === 'MULTA_RESCISION' || c.type === 'ALQUILER_DEUDA') alquiler += amt;
+        else if (c.type === 'IVA') iva += amt;
+        // Sobrepago de una deuda vieja: crédito para el mes siguiente, no es parte
+        // de lo que se debía POR ESA deuda — se trackea aparte (caso Vaisman/
+        // C01_full_ontime 2026-07-15: pagó $500.000 una deuda de $396.000).
+        else if (c.type === 'A_FAVOR' || c.type === 'SOBREPAGO') sobrepago += amt;
+        else servicios += amt; // incluye SERVICIOS_DEUDA: servicios+IVA de la deuda en un solo monto (payDebt no los desglosa)
+      }
+      if (!map.has(cid)) {
+        map.set(cid, { total: 0, alquiler: 0, servicios: 0, iva: 0, punitorios: 0, detalle: [], transacciones: [], contract: rec.contract });
+      }
       const entry = map.get(cid);
       entry.total += tx.amount || 0;
+      entry.alquiler += alquiler;
+      entry.servicios += servicios;
+      entry.iva += iva;
+      entry.punitorios += punitorios;
+      entry.transacciones.push({
+        fecha: tx.paymentDate, monto: tx.amount, metodo: tx.paymentMethod,
+        inquilino: getTenantsName(rec.contract), propiedad: rec.contract.property?.address,
+        conceptos: conceptosOut,
+      });
       let det = entry.detalle.find((d) => d.periodMonth === rec.periodMonth && d.periodYear === rec.periodYear);
       if (!det) {
-        det = { periodLabel: `${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear}`, periodMonth: rec.periodMonth, periodYear: rec.periodYear, monto: 0, punitorios: 0 };
+        det = {
+          periodLabel: `${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear}`, periodMonth: rec.periodMonth, periodYear: rec.periodYear,
+          monto: 0, alquiler: 0, servicios: 0, iva: 0, punitorios: 0, sobrepago: 0,
+          monthlyRecordId: rec.id, rec, lastTxDate: null,
+        };
         entry.detalle.push(det);
       }
       det.monto += tx.amount || 0;
+      det.alquiler += alquiler;
+      det.servicios += servicios;
+      det.iva += iva;
       det.punitorios += punitorios;
+      det.sobrepago += sobrepago;
+      if (!det.lastTxDate || new Date(tx.paymentDate) > new Date(det.lastTxDate)) det.lastTxDate = tx.paymentDate;
     }
+    // Orden de presentación de cada línea: Alquiler primero, servicios en el medio, IVA y Punitorios al final.
+    const conceptOrder = { ALQUILER: 0, MULTA_RESCISION: 0, ALQUILER_DEUDA: 0, IVA: 2, PUNITORIOS: 3 };
     for (const entry of map.values()) {
       entry.detalle.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+      for (const d of entry.detalle) {
+        d.alquiler = round2(d.alquiler);
+        d.servicios = round2(d.servicios);
+        d.iva = round2(d.iva);
+        d.punitorios = round2(d.punitorios);
+        d.sobrepago = round2(d.sobrepago);
+      }
+    }
+
+    // "Deuda saldada" vs "Pago parcial de deuda": estado real de la Deuda (Debt) del período,
+    // via monthlyRecordId. Sin Debt formal (p.ej. record legacy) se considera saldada.
+    // También trae punitoryStartDate/lastPaymentDate/closedAt para "días TOTALES de mora",
+    // y appliedCredit/accumulatedPunitory para repartir un eventual crédito aplicado
+    // (ver más abajo — mismo hueco que buildLiquidacionFromRecord: debtService.js sí
+    // reparte el crédito en cascada servicios→alquiler→punitorios internamente, pero
+    // solo lo persiste como una línea "A_FAVOR" genérica, no por tipo de concepto).
+    const allMonthlyRecordIds = [];
+    for (const entry of map.values()) {
+      for (const d of entry.detalle) if (d.monthlyRecordId) allMonthlyRecordIds.push(d.monthlyRecordId);
+    }
+    const debtByRecordId = new Map();
+    if (allMonthlyRecordIds.length > 0) {
+      const debts = await prisma.debt.findMany({
+        where: { monthlyRecordId: { in: allMonthlyRecordIds } },
+        select: { monthlyRecordId: true, status: true, punitoryStartDate: true, lastPaymentDate: true, closedAt: true, appliedCredit: true, accumulatedPunitory: true },
+      });
+      for (const d of debts) debtByRecordId.set(d.monthlyRecordId, d);
+    }
+    for (const entry of map.values()) {
+      for (const d of entry.detalle) {
+        const debtRow = debtByRecordId.get(d.monthlyRecordId);
+        const status = debtRow?.status;
+        d.saldada = (status == null) || status === 'PAID';
+        // Si todavía no está saldada, "días" es hasta el ÚLTIMO pago capturado en ESTE
+        // det (no hasta hoy ni hasta el lastPaymentDate mutable de la deuda, que puede
+        // reflejar un cobro posterior de un mes de reporte distinto).
+        d.dias = debtRow ? debtDelinquencyDays(debtRow, d.saldada ? null : d.lastTxDate) : 0;
+
+        // Repartir el crédito aplicado a esta deuda (si hubo) contra lo que falta de
+        // cada balde, usando los totales ORIGINALES del período (d.rec) y el punitorio
+        // final acumulado de la deuda — caso Vaisman/C01 2026-07-15, mismo criterio que
+        // buildLiquidacionFromRecord.
+        if (debtRow?.appliedCredit > 0) {
+          const faltaServicios = originalServiciosIvaTotal(d.rec) - d.servicios;
+          const faltaAlquiler = (d.rec?.rentAmount || 0) - d.alquiler;
+          const faltaPunitorios = (debtRow.accumulatedPunitory || 0) - d.punitorios;
+          const split = splitCreditCascade(debtRow.appliedCredit, faltaServicios, faltaAlquiler, faltaPunitorios);
+          d.servicios = round2(d.servicios + split.servicios);
+          d.alquiler = round2(d.alquiler + split.alquiler);
+          d.punitorios = round2(d.punitorios + split.punitorios);
+          if (split.restante > 0) d.sobrepago = round2(d.sobrepago + split.restante);
+        }
+
+        // Lo que REALMENTE se debía por esta deuda (sin el sobrepago, que es crédito
+        // para otro período) — `d.monto` sigue siendo el efectivo real cobrado (para
+        // caja/grandTotal), pero para mostrar "Saldada $X" hay que usar este total.
+        d.debtTotal = round2(d.alquiler + d.servicios + d.iva + d.punitorios);
+        d.conceptos = buildConceptosDeudaPagada(d.rec, d)
+          .sort((a, b) => (conceptOrder[a.tipo] ?? 1) - (conceptOrder[b.tipo] ?? 1));
+
+        delete d.rec;
+        delete d.monthlyRecordId;
+        delete d.lastTxDate;
+      }
+      // Recomputar los totales agregados del contrato (usados para "Total Alquileres
+      // Cobrados"/Honorarios) ahora que el crédito pudo haber corregido algún `d`.
+      entry.alquiler = round2(entry.detalle.reduce((s, d) => s + d.alquiler, 0));
+      entry.servicios = round2(entry.detalle.reduce((s, d) => s + d.servicios, 0));
+      entry.iva = round2(entry.detalle.reduce((s, d) => s + d.iva, 0));
+      entry.punitorios = round2(entry.detalle.reduce((s, d) => s + d.punitorios, 0));
     }
     return map;
   })();
 
-  // Adjuntar a cada liquidación su bloque de cobros de otros períodos
+  // Adjuntar a cada liquidación su bloque de cobros de otros períodos, y fusionar
+  // su detalle de transacciones (propias + de otros períodos) agrupado por fecha.
   const cobrosAttached = new Set();
   for (const liq of result) {
     const entry = cobrosByContract.get(liq.contractId);
+    const ownTx = liq.transacciones || [];
+    const crossTx = entry ? entry.transacciones : [];
+    liq.transacciones = groupTransaccionesByFecha([...ownTx, ...crossTx]);
     if (entry && entry.total > 0.009) {
-      liq.cobradoOtrosPeriodos = { total: entry.total, detalle: entry.detalle };
+      liq.cobradoOtrosPeriodos = {
+        total: entry.total, alquiler: entry.alquiler, servicios: entry.servicios,
+        iva: entry.iva, punitorios: entry.punitorios, detalle: entry.detalle,
+      };
       cobrosAttached.add(liq.contractId);
+
+      // "Total Alquileres Cobrados" y "Total Honorarios" deben contar también el
+      // alquiler/punitorios de deudas viejas saldadas en este período (antes daban
+      // $0 cuando el contrato solo había cobrado deuda, no alquiler del mes).
+      const debtAlqPun = round2(entry.alquiler + entry.punitorios);
+      if (debtAlqPun > 0) {
+        liq.subtotalAlquileresCobrado = round2((liq.subtotalAlquileresCobrado || 0) + debtAlqPun);
+        const honPct = options.honorariosPercent || 0;
+        if (honPct > 0 && liq.honorarios) {
+          const gastosCobrado = round2((liq.honorariosCobrado || 0) - (liq.honorarios.montoAlquiler || 0));
+          const honAlqNuevo = round2(Math.max(0, liq.subtotalAlquileresCobrado * honPct / 100));
+          liq.honorarios.montoAlquiler = honAlqNuevo;
+          liq.honorarios.monto = round2(honAlqNuevo + gastosCobrado);
+          liq.honorarios.montoEnLetras = numeroATexto(liq.honorarios.monto);
+          liq.honorariosCobrado = liq.honorarios.monto;
+        }
+      }
     } else {
       liq.cobradoOtrosPeriodos = null;
     }
@@ -761,6 +1234,19 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     const nombre = isProp
       ? (c.property?.owner?.name || 'Propietario')
       : (c.contractTenants?.length ? c.contractTenants.map((ct) => ct.tenant.name).join(' / ') : (c.tenant?.name || 'Sin inquilino'));
+
+    // Estas filas no tienen liquidación propia del mes: "Total Alquileres Cobrados" y
+    // honorarios deben salir enteramente de lo cobrado de deudas viejas.
+    const debtAlqPun = round2(entry.alquiler + entry.punitorios);
+    const honPct = options.honorariosPercent || 0;
+    let honorarios = null;
+    let honorariosCobrado = 0;
+    if (honPct > 0 && debtAlqPun > 0) {
+      const montoAlquiler = round2(Math.max(0, debtAlqPun * honPct / 100));
+      honorarios = { porcentaje: honPct, baseHonorarios: debtAlqPun, montoAlquiler, gastosAMiCargo: [], totalGastos: 0, monto: montoAlquiler, montoEnLetras: numeroATexto(montoAlquiler) };
+      honorariosCobrado = montoAlquiler;
+    }
+
     result.push({
       contractId: cid,
       contractType: c.contractType || 'INQUILINO',
@@ -769,8 +1255,18 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
       periodo: { mes: month, anio: year, label: `${MONTH_NAMES[month]} ${year}` },
       conceptos: [], serviciosDisponibles: [], deudas: [], totalDeuda: 0,
       total: 0, amountPaid: 0, paymentStatus: 'SOLO DEUDAS ANTERIORES',
-      cobradoOtrosPeriodos: { total: entry.total, detalle: entry.detalle },
+      subtotalAlquileresCobrado: debtAlqPun, honorarios, honorariosCobrado,
+      transacciones: groupTransaccionesByFecha(entry.transacciones),
+      cobradoOtrosPeriodos: {
+        total: entry.total, alquiler: entry.alquiler, servicios: entry.servicios,
+        iva: entry.iva, punitorios: entry.punitorios, detalle: entry.detalle,
+      },
     });
+  }
+
+  // Reconciliación de display: un solo bloque por mes (ver buildDeudasUnificadas).
+  for (const liq of result) {
+    liq.deudasUnificadas = buildDeudasUnificadas(liq.deudas || [], liq.cobradoOtrosPeriodos?.detalle || []);
   }
 
   // Natural sort by address: handles numbers correctly (Torre 1, Torre 2, ..., Torre 10)

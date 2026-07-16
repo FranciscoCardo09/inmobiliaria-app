@@ -1,9 +1,13 @@
 // Monthly Record Service - Core auto-generation and control logic
-const { calculatePunitoryV2, getHolidaysForYear, round2 } = require('../utils/punitory');
+const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeLiveRecordPunitory, debtDelinquencyDays } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
 const { calculateNextAdjustmentMonth } = require('./adjustmentService');
 const { MONTH_NAMES } = require('../utils/constants');
 const { sumPunitoryConcepts } = require('../utils/helpers');
+// A-25: "hoy" del negocio en ART, TZ-inmune (ver dateUtils.js). El servidor
+// corre sin TZ configurada (= UTC); usar `new Date()` crudo como "hoy" en un
+// cálculo de punitorios cuenta un día de más entre las 21:00 y las 23:59 ART.
+const { getTodayLocalString, getTodayLocalDate } = require('../utils/dateUtils');
 
 const prisma = require('../lib/prisma');
 
@@ -268,7 +272,6 @@ async function copyLastMonthServices(contract, postExpiryRecordId) {
 const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const month = parseInt(periodMonth);
   const year = parseInt(periodYear);
-  console.log(`[monthlyRecords] START month=${month} year=${year} groupId=${groupId}`);
 
   // Get contracts relevant for any period: active ones (can create new records)
   // and renewed ones (active=false + renewedAt, only read their existing records).
@@ -337,7 +340,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     });
   }
 
-  console.log(`[monthlyRecords] activeContracts=${activeContracts.length} of ${contracts.length} total`);
   if (activeContracts.length === 0) return [];
 
   const contractIds = activeContracts.map(ac => ac.contract.id);
@@ -422,6 +424,29 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     prevRecordsByContractId.set(pr.contractId, pr);
   }
 
+  // --- BATCH 3b: Final saldo a favor de los contratos que este batch renovó DESDE
+  // (C-06). Las deudas ya se encadenan vía renewedFromContractId/expandToChain; el
+  // crédito no tenía ningún mecanismo equivalente y se perdía en la renovación.
+  const renewedFromIds = Array.from(new Set(
+    activeContracts
+      .filter(({ monthNumber, contract }) => monthNumber === 1 && contract.renewedFromContractId)
+      .map(({ contract }) => contract.renewedFromContractId)
+  ));
+  const oldContractFinalBalance = new Map(); // oldContractId -> saldo a favor final (>=0)
+  if (renewedFromIds.length > 0) {
+    const oldLastRecords = await prisma.monthlyRecord.findMany({
+      where: { contractId: { in: renewedFromIds } },
+      select: { contractId: true, monthNumber: true, balance: true },
+      orderBy: [{ contractId: 'asc' }, { monthNumber: 'desc' }],
+    });
+    for (const r of oldLastRecords) {
+      // Primera ocurrencia por contrato = monthNumber más alto (el último mes real).
+      if (!oldContractFinalBalance.has(r.contractId)) {
+        oldContractFinalBalance.set(r.contractId, r.balance > 0 ? r.balance : 0);
+      }
+    }
+  }
+
   // --- BATCH 4: Get holidays once for the year (1 call instead of N) ---
   const holidays = await getHolidaysForYear(year);
 
@@ -490,6 +515,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         if (prevRecord && prevRecord.balance > 0) {
           previousBalance = prevRecord.balance;
         }
+      } else if (monthNumber === 1 && contract.renewedFromContractId) {
+        // C-06: mes 1 de un contrato renovado hereda el saldo a favor final del viejo
+        // (simétrico con las deudas, que ya se encadenan vía expandToChain).
+        previousBalance = oldContractFinalBalance.get(contract.renewedFromContractId) || 0;
       }
       const includeIva = !!contract.pagaIva;
       const ivaAmount = includeIva ? rentAmount * 0.21 : 0;
@@ -508,9 +537,14 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         previousBalance,
         punitoryAmount: 0,
         punitoryDays: 0,
+        // C-01: `totalDue` persistido queda clampeado (no se puede "deber negativo"),
+        // pero `balance` NO se clampea — si `previousBalance` (crédito arrastrado) supera
+        // el alquiler+IVA de este mes recién creado, el excedente debe sobrevivir como
+        // balance positivo (arrastrado al mes siguiente), no destruirse en el instante de
+        // crear el registro (mismo criterio que _recalculateCore).
         totalDue: Math.max(totalDue, 0),
         amountPaid: 0,
-        balance: -Math.max(totalDue, 0),
+        balance: -totalDue,
         comprobantesStatus: Array.isArray(contract.comprobantes) 
           ? contract.comprobantes.map(c => ({ ...c, presented: false })) 
           : [],
@@ -521,55 +555,24 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   console.log(`[monthlyRecords] existing=${existingRecords.length} toCreate=${recordsToCreate.length}`);
 
   if (recordsToCreate.length > 0) {
-    // --- FIX: Correct stale monthNumbers that would block createMany ---
-    // When a contract's startDate is edited, existing records keep old monthNumbers.
-    // This causes unique constraint conflicts when creating records for new periods.
-    const monthNumbersNeeded = new Map(); // monthNumber -> contractId
-    for (const r of recordsToCreate) {
-      monthNumbersNeeded.set(`${r.contractId}_${r.monthNumber}`, r.contractId);
-    }
-
-    // Find existing records that occupy those monthNumbers but for a DIFFERENT period
-    const contractIdsToCreate = [...new Set(recordsToCreate.map(r => r.contractId))];
-    const monthNumberValues = recordsToCreate.map(r => r.monthNumber);
-    const conflictingRecords = await prisma.monthlyRecord.findMany({
-      where: {
-        contractId: { in: contractIdsToCreate },
-        monthNumber: { in: monthNumberValues },
-        NOT: { periodMonth: month, periodYear: year },
-      },
-      select: { id: true, contractId: true, monthNumber: true, periodMonth: true, periodYear: true, amountPaid: true },
-    });
-
-    if (conflictingRecords.length > 0) {
-      console.log(`[monthlyRecords] Fixing ${conflictingRecords.length} stale monthNumber conflicts`);
-      const contractMap = new Map(activeContracts.map(ac => [ac.contract.id, ac.contract]));
-
-      for (const cr of conflictingRecords) {
-        const contract = contractMap.get(cr.contractId);
-        if (!contract) continue;
-
-        // Recalculate the correct monthNumber for the old record's actual period
-        const correctMN = getMonthNumber(contract, cr.periodMonth, cr.periodYear);
-        const endMonth = contract.startMonth + contract.durationMonths - 1;
-
-        if (correctMN < contract.startMonth || correctMN > endMonth) {
-          // Record is for a period outside the contract's active range
-          if (cr.amountPaid > 0) {
-            console.warn(`[monthlyRecords] Skipping out-of-range record with payments: ${cr.id}`);
-            continue;
-          }
-          await prisma.monthlyRecord.delete({ where: { id: cr.id } });
-        } else {
-          // Update to the correct monthNumber
-          await prisma.monthlyRecord.update({
-            where: { id: cr.id },
-            data: { monthNumber: correctMN },
-          });
-        }
-      }
-    }
-
+    // A-06/A-07/A-26 (AUDITORIA_FUNCIONAL_2026-07-10.md): este bloque ANTES
+    // reparaba inline los monthNumber obsoletos que chocan con `createMany`,
+    // borrando (`delete`) o renumerando registros por fuera de cualquier
+    // repair oficial — con un criterio de "¿tiene plata?" más laxo
+    // (`amountPaid > 0`) que `repairContractRecordMonthNumbers` (chequea
+    // también `debt` y `transactions`), sin transacción, y disparado por un
+    // simple GET (incluso para el rol VIEWER). Podía borrar un registro con
+    // deuda o transacciones y `amountPaid === 0`, o tirar 500 si violaba el
+    // `@@unique([contractId, monthNumber])`.
+    //
+    // Decisión del usuario (2026-07-12): el GET deja de reparar. El repair de
+    // monthNumbers vive SOLO en `repairContractRecordMonthNumbers`
+    // (contractsController.js, tras editar startDate/duration), que ya usa el
+    // criterio correcto y corre en una transacción de dos fases. Si un
+    // contrato quedó con monthNumbers obsoletos sin pasar por ese repair,
+    // `createMany` con `skipDuplicates: true` simplemente omite ese registro en
+    // particular (no crashea, no borra nada) — el mes en cuestión queda
+    // ausente del Control Mensual hasta que se corra el repair explícito.
     try {
       // skipDuplicates handles race conditions (another request already created the record)
       await prisma.monthlyRecord.createMany({
@@ -711,8 +714,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       continue; // Skip this contract instead of crashing
     }
 
-    // Refresh rentAmount, IVA for ALL existing records (including COMPLETE)
-    // Refresh previousBalance only for non-COMPLETE records
+    // A-06 (AUDITORIA_FUNCIONAL_2026-07-10.md): este refresh corre en cada GET
+    // (pantalla mensual, dashboard, reportes), incluso para el rol VIEWER.
+    // ANTES recalculaba y persistía rentAmount/IVA/status de meses YA
+    // COMPLETE (solo el previousBalance se protegía) — un simple "refrescar la
+    // pantalla" podía cambiar montos de un mes ya pagado y cerrado, sin ningún
+    // usuario/acción trazable detrás. Decisión del usuario (2026-07-12):
+    // enfoque quirúrgico — un mes que YA está COMPLETE al entrar acá queda
+    // completamente congelado (ni rentAmount, ni IVA, ni totalDue/balance, ni
+    // status se tocan). Un mes PENDING/PARTIAL sigue pudiendo recalcularse y
+    // transicionar a COMPLETE normalmente (eso no es "mutar un mes cerrado":
+    // es el recálculo en vivo de un mes todavía abierto).
+    // Refresh rentAmount, IVA, previousBalance, totalDue, balance y status
+    // SOLO para registros que no están COMPLETE.
     // For penalty records: convert from old format (rentAmount=0, servicesTotal=penalty) if needed
     if (record && isPenaltyRecord) {
       const penalty = contract.rescissionPenalty || 0;
@@ -734,34 +748,71 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         });
         Object.assign(record, { rentAmount: penalty, servicesTotal: svcTotal, services: refreshed, totalDue: newTotalDue, balance: newBalance });
       }
-    } else if (record && !isPenaltyRecord && !isPostExpiry && contract.active) {
+    } else if (record && !isPenaltyRecord && !isPostExpiry && contract.active && record.status !== 'COMPLETE') {
       // Renewed/inactive contracts have frozen historical records: do not
       // recalculate rent/IVA/balance from the current contract config — that
       // would clobber legitimate historical values.
       // Post-expiry records (alquiler $0, solo servicios) tampoco se recalculan:
       // recomputaríamos el alquiler desde el historial y romperíamos el $0.
+      // A-06: un mes ya COMPLETE nunca entra a este bloque (ver guard arriba)
+      // — queda completamente congelado, no solo el previousBalance.
       const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 
-      // Sync includeIva from contract
-      const contractIva = !!contract.pagaIva;
-      const ivaChanged = contractIva !== record.includeIva;
+      // Bug (2026-07-14): este bloque solía "sincronizar" includeIva desde
+      // contract.pagaIva en cada GET (cualquier mismatch se trataba como
+      // desactualizado), pero eso no distingue "cambié pagaIva en el contrato"
+      // de "el usuario tildó/destildó el IVA a mano para este mes puntual" —
+      // el toggle manual por período (checkbox de Control Mensual, endpoint
+      // PATCH .../iva) quedaba pisado apenas se refrescaba la pantalla (el
+      // siguiente GET, disparado automáticamente tras la mutación, lo revertía
+      // en milisegundos). `record.includeIva` es la fuente de verdad para un
+      // registro ya creado; el contrato solo define el default al GENERARLO
+      // (más arriba, `const includeIva = !!contract.pagaIva`).
+      const effectiveIva = record.includeIva;
 
-      // Refresh previousBalance from batch (only for non-COMPLETE records)
+      // Refresh previousBalance from batch (el mes ya no puede estar COMPLETE acá)
       let latestPrevBalance = record.previousBalance;
       let prevBalanceChanged = false;
-      if (record.status !== 'COMPLETE' && monthNumber - 1 >= 1) {
+      if (monthNumber - 1 >= 1) {
         const prevRecord = prevRecordsByContractId.get(contract.id);
         latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
         prevBalanceChanged = latestPrevBalance !== record.previousBalance;
       }
 
-      if (rentChanged || prevBalanceChanged || ivaChanged) {
+      if (rentChanged || prevBalanceChanged) {
         const effectiveRent = rentChanged ? currentRent : record.rentAmount;
-        const effectiveIva = ivaChanged ? contractIva : record.includeIva;
         const recordIva = round2(effectiveIva ? effectiveRent * 0.21 : 0);
-        const newTotalDue = round2(effectiveRent + record.servicesTotal + record.punitoryAmount + recordIva - latestPrevBalance);
-        const newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
+        // A-04: usar el punitorio VIVO (misma función que el display y _recalculateCore),
+        // no el CONGELADO (record.punitoryAmount) — antes este refresh y el recálculo
+        // asíncrono podían competir con dos totalDue distintos para el mismo mes,
+        // según cuál hubiera corrido último (oscilación clase Brunello/Etica).
+        //
+        // Bug (2026-07-13, mismo caso que _recalculateCore, ver comentario ahí): este
+        // refresh corre en CADA GET a Control Mensual (getOrCreateMonthlyRecords), así
+        // que aunque `_recalculateCore` ya esté arreglado, este bloque hermano pisaba el
+        // totalDue/balance correctos con el mismo saldo a favor falso en la próxima
+        // carga de la pantalla. Cuando el mes tiene una Deuda abierta/parcial, el
+        // punitorio tiene que salir del `accumulatedPunitory` congelado de la Deuda
+        // (misma fuente que usa `debt.currentTotal`), no de `computeLiveRecordPunitory`
+        // (que cae a $0 si el pago cubrió alquiler+servicios pero no todos los
+        // punitorios, ya que ese registro nunca tuvo una transacción propia antes de
+        // la deuda).
+        const openDebtForRefresh = record.debt && record.debt.status !== 'PAID' ? record.debt : null;
+        const recordForLivePunitory = { ...record, rentAmount: effectiveRent, includeIva: effectiveIva };
+        let livePunitory = openDebtForRefresh
+          ? (openDebtForRefresh.accumulatedPunitory || 0)
+          : computeLiveRecordPunitory(recordForLivePunitory, contract, holidays, { isFullyPaid: false }).amount;
+        let newTotalDue = round2(effectiveRent + record.servicesTotal + livePunitory + recordIva - latestPrevBalance);
+        let newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
+        if (!openDebtForRefresh && newBalance >= -0.01) {
+          // Segunda pasada con el punitorio ya COBRADO (suma de conceptos PUNITORIOS
+          // reales), igual que _recalculateCore: evita reintroducir un saldo a favor
+          // falso cuando los punitorios se pagaron en varias tandas.
+          livePunitory = computeLiveRecordPunitory(recordForLivePunitory, contract, holidays, { isFullyPaid: true }).amount;
+          newTotalDue = round2(effectiveRent + record.servicesTotal + livePunitory + recordIva - latestPrevBalance);
+          newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
+        }
 
         const updateData = {
           previousBalance: latestPrevBalance,
@@ -770,14 +821,21 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         };
         if (rentChanged) {
           updateData.rentAmount = currentRent;
-        }
-        if (rentChanged || ivaChanged) {
-          updateData.includeIva = effectiveIva;
+          // El % de IVA es sobre el alquiler: si el alquiler cambió, el monto de
+          // IVA debe recalcularse — pero `includeIva` en sí NUNCA se toca acá
+          // (ver comentario arriba, es la fuente de verdad del registro).
           updateData.ivaAmount = recordIva;
         }
 
-        // Recalculate status based on new amounts
-        if (newBalance >= -0.01) {
+        // Recalculate status based on new amounts. Un mes con Deuda abierta/parcial
+        // nunca pasa a COMPLETE acá (mismo criterio que `computeTotals` en
+        // `_recalculateCore`): lo representa la Deuda, que se cierra en `payDebt`.
+        if (openDebtForRefresh) {
+          updateData.isPaid = false;
+          updateData.status = record.amountPaid > 0 ? 'PARTIAL' : 'PENDING';
+          updateData.isCancelled = false;
+          updateData.fullPaymentDate = null;
+        } else if (newBalance >= -0.01) {
           updateData.isPaid = true;
           updateData.status = 'COMPLETE';
           updateData.isCancelled = true;
@@ -835,115 +893,45 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
 
     if (record.debt && record.debt.status !== 'PAID') {
       // Optimize: skip individual debt updates and use preloaded data to avoid N+1 queries.
-      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, newPunitoryAmount } = await calculateDebtPunitory(record.debt, new Date(), debtPreloaded, true);
+      // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, newPunitoryAmount, grossPunitoryToDate } = await calculateDebtPunitory(record.debt, getTodayLocalString(), debtPreloaded, true);
       debtInfo = {
         ...record.debt,
         liveAccumulatedPunitory: amount,
-        livePunitoryDays: days,
+        // Días TOTALES de mora (desde punitoryStartDate hasta hoy), no el tramo `days`
+        // desde el último pago parcial — con varios pagos en tandas ese tramo puede dar
+        // "2 días" cuando la deuda lleva 20 días de atraso real.
+        livePunitoryDays: debtDelinquencyDays(record.debt, endDate || getTodayLocalDate()),
         liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + amount,
         remainingDebt,
         unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
         newPunitoryAmount: newPunitoryAmount || 0,
+        grossPunitoryToDate: grossPunitoryToDate || 0,
         punitoryFromDate: startDate,
         punitoryToDate: endDate,
       };
     } else if (record.debt) {
-      debtInfo = { ...record.debt, liveCurrentTotal: 0, liveAccumulatedPunitory: 0, livePunitoryDays: 0, remainingDebt: 0, newPunitoryAmount: 0, punitoryFromDate: null, punitoryToDate: null };
+      debtInfo = {
+        ...record.debt, liveCurrentTotal: 0, liveAccumulatedPunitory: 0,
+        // Deuda saldada: días totales hasta que se saldó (lastPaymentDate/closedAt).
+        livePunitoryDays: debtDelinquencyDays(record.debt),
+        remainingDebt: 0, newPunitoryAmount: 0, punitoryFromDate: null, punitoryToDate: null,
+      };
     }
 
-    // Calculate LIVE punitorios for display
-    // IMPORTANT: record.punitoryAmount is the frozen value from the last payment.
-    // We need to:
-    // 1. Keep frozen punitorios that were not covered by payments
-    // 2. Calculate additional LIVE punitorios on remaining unpaid rent since last payment
-    let livePunitoryAmount = record.punitoryAmount || 0;
-    let livePunitoryDays = record.punitoryDays || 0;
+    // FUENTE ÚNICA: punitorios en vivo del record (reemplaza el bloque inline de ~80 líneas).
+    // computeLiveRecordPunitory centraliza las reglas de: isFullyPaid, isPostExpiry,
+    // punitoryForgiven, unpaidFrozenPunitory, calculatePunitoryV2 y sumPunitoryConcepts.
     const isFullyPaid = record.status === 'COMPLETE';
-
-    let punitoriosAnteriores = 0;
-    let punitoriosActuales = 0;
-
-    // Mes extra post-vencimiento: nunca genera punitorios (solo servicios del mes vencido).
-    if (!isFullyPaid && !record.punitoryForgiven && !isPostExpiry) {
-      try {
-        const amountPaid = record.amountPaid || 0;
-        const servicesTotal = record.servicesTotal || 0;
-        const frozenPunitory = record.punitoryAmount || 0;
-        // Base de punitorios: SOLO pagos reales, NUNCA el saldo a favor del mes anterior.
-        // El crédito (previousBalance) se aplica al total al final (liveTotalDue), no acá.
-        const totalCredits = amountPaid;
-        const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
-
-        // Saldo restante base (sin punitorios), considerando solo pagos reales
-        const baseNonPunitory = record.rentAmount + servicesTotal + ivaForPunitory;
-        const remainingBalance = Math.max(baseNonPunitory - totalCredits, 0);
-
-        // Regla de base para punitorios:
-        // - Sin pagos: solo sobre alquiler
-        // - Con pagos: sobre el saldo restante total (sin contar el saldo a favor)
-        const punitoryBase = totalCredits <= 0 ? record.rentAmount : remainingBalance;
-
-        // Punitorios congelados IMPAGOS = congelado del último pago MENOS lo que ese
-        // pago imputó realmente a punitorios (concepto PUNITORIOS). Misma lógica que
-        // registerPayment — la estimación por orden de imputación fallaba cuando un
-        // pago de deuda cubrió solo punitorios (caso Etica S.A.).
-        const lastTxForPunitory = record.transactions?.[record.transactions.length - 1] || null;
-        const lastTxPunitoryPaid = (lastTxForPunitory?.concepts || [])
-          .filter((c) => c.type === 'PUNITORIOS')
-          .reduce((s, c) => s + c.amount, 0);
-        const unpaidFrozenPunitory = lastTxForPunitory?.punitoryForgiven
-          ? 0
-          : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
-
-        // Get last payment date (if partial payment was made)
-        let lastPaymentDate = null;
-        if (record.transactions && record.transactions.length > 0) {
-          const lastTx = record.transactions[record.transactions.length - 1];
-          lastPaymentDate = new Date(lastTx.paymentDate);
-        }
-
-        const calculationDate = new Date();
-
-        if (punitoryBase > 0) {
-          const liveResult = calculatePunitoryV2(
-            calculationDate,
-            month,
-            year,
-            punitoryBase,
-            contract.punitoryStartDay,
-            contract.punitoryGraceDay,
-            contract.punitoryPercent,
-            holidays,
-            lastPaymentDate
-          );
-          livePunitoryAmount = unpaidFrozenPunitory + liveResult.amount;
-          livePunitoryDays = liveResult.days;
-          punitoriosAnteriores = unpaidFrozenPunitory;
-          punitoriosActuales = liveResult.amount;
-        } else {
-          // punitoryBase = 0: all base costs (rent + services + IVA) are covered by payments.
-          // Display the full frozen punitorios amount (what was charged at payment time),
-          // NOT just the tiny uncovered remainder (unpaidFrozenPunitory).
-          livePunitoryAmount = frozenPunitory;
-          livePunitoryDays = record.punitoryDays || 0;
-          punitoriosAnteriores = frozenPunitory;
-          punitoriosActuales = 0;
-        }
-
-      } catch (e) {
-        console.error('[monthlyRecordService] Error calculating live punitory:', e.message);
-        // If calculation fails, keep the stored values
-      }
-    }
-
-    // Registro COMPLETE (sin condonar): el punitorio a MOSTRAR es la SUMA real de los
-    // conceptos PUNITORIOS de todas las transacciones, no el congelado del último pago
-    // (record.punitoryAmount). Si el mes se pagó en varias tandas, el congelado subestima
-    // los punitorios efectivamente cobrados → liveTotalDue/totalHistorico quedaban bajos.
-    // El branch de deuda (más abajo) sobrescribe esto para COMPLETE-con-deuda.
-    if (isFullyPaid && !record.punitoryForgiven) {
-      livePunitoryAmount = sumPunitoryConcepts(record.transactions);
-    }
+    const livePunResult = computeLiveRecordPunitory(record, contract, holidays, {
+      isFullyPaid,
+      isPostExpiry,
+      calculationDate: getTodayLocalString(),
+    });
+    let livePunitoryAmount = livePunResult.amount;
+    let livePunitoryDays = livePunResult.days;
+    let punitoriosAnteriores = livePunResult.unpaidFrozenPunitory;
+    let punitoriosActuales = livePunResult.newPunitory;
 
     // Calculate IVA (21% of rent if includeIva is true)
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
@@ -965,13 +953,25 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         punitoriosAnteriores = record.debt.accumulatedPunitory || 0;
         punitoriosActuales = 0;
       } else {
-        // Deuda viva: punitorios IMPAGOS = viejos impagos (anteriores) + nuevos en vivo (actuales).
-        // OJO: NO usar accumulatedPunitory + newPunitoryAmount. Para una deuda NUNCA pagada,
-        // newPunitoryAmount ya cuenta desde el inicio del período, así que incluye lo que
-        // accumulatedPunitory (congelado al cierre) representa → se duplicaría (caso Airaldi).
-        // unpaidAccumulatedPunitory es 0 cuando no hubo pagos, y el viejo impago cuando sí.
-        punitoriosAnteriores = debtInfo.unpaidAccumulatedPunitory || 0;
+        // Deuda viva: punitorios TOTALES (pagados + impagos) = "anteriores" (congelado
+        // previo) + "actuales" (devengado desde entonces). `totalPunitoriosHistoricos`
+        // se compara más abajo contra `totalAbonado` (TODO lo pagado en efectivo), así
+        // que acá necesitamos el BRUTO total, no el neto impago.
+        //
+        // Bug (2026-07-13, caso Ponce Emilia Roxana, pago parcial que cubre alquiler+
+        // servicios pero deja punitorios sin pagar): NO usar directamente
+        // `unpaidAccumulatedPunitory`/`newPunitoryAmount` acá — en la rama "base
+        // agotada" de `calculateDebtPunitory` (remainingBase<=0) `unpaidAccumulatedPunitory`
+        // queda hardcodeado en 0 y `newPunitoryAmount` es solo el incremento del día (0
+        // si el pago fue hoy), perdiendo los punitorios ya pagados. `grossPunitoryToDate`
+        // (nuevo campo en `calculateDebtPunitory`) ya resuelve esto correctamente en
+        // TODAS las ramas (incluida la rama "nunca se pagó nada", caso Airaldi, donde
+        // NO hay que sumarle `accumulatedPunitory` aparte — `grossPunitoryToDate` ya lo
+        // contempla). Reconstruimos el split anteriores/actuales restando el incremento
+        // del día del bruto total — da 0 exactamente en el caso Airaldi (bruto ==
+        // incremento ahí), y el congelado correcto en los demás casos.
         punitoriosActuales = debtInfo.newPunitoryAmount || 0;
+        punitoriosAnteriores = round2((debtInfo.grossPunitoryToDate || 0) - punitoriosActuales);
       }
       totalPunitoriosHistoricos = Math.round((punitoriosAnteriores + punitoriosActuales) * 100) / 100;
 
@@ -1088,7 +1088,6 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   // Perform non-nested updates in small chunks to avoid pool exhaustion
   if (updatesToPerform.length > 0) {
     const CHUNK_SIZE = 5;
-    console.log(`[monthlyRecords] Performing ${updatesToPerform.length} updates in chunks of ${CHUNK_SIZE}`);
     for (let i = 0; i < updatesToPerform.length; i += CHUNK_SIZE) {
       const chunk = updatesToPerform.slice(i, i + CHUNK_SIZE);
       await Promise.all(chunk.map(update => 
@@ -1153,10 +1152,16 @@ const _recalculateCore = async (recordIds, tx) => {
     }
   }
 
+  // A-16 (AUDITORIA_FUNCIONAL_2026-07-10.md): antes se acotaba con
+  // `periodYear: data.periodYear`, cortando la cascada en el 31/12 — una
+  // corrección de diciembre nunca propagaba a enero del año siguiente (un
+  // sobrepago de diciembre podía dejar un crédito fantasma en enero para
+  // siempre). `monthNumber` es el contador continuo del contrato (1..N, NO se
+  // reinicia cada año calendario), así que `monthNumber: { gte }` por sí solo
+  // ya cruza el límite de año correctamente sin necesidad de fijar el año.
   const orConditions = Array.from(minMonthsByContract.entries()).map(([contractId, data]) => ({
     contractId,
     monthNumber: { gte: data.monthNumber },
-    periodYear: data.periodYear // Strictly bound the cascade to the same calendar year
   }));
 
   if (orConditions.length === 0) return 0;
@@ -1182,12 +1187,21 @@ const _recalculateCore = async (recordIds, tx) => {
         orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
         include: { concepts: { select: { type: true, amount: true } } },
       },
+      // Necesario para computeLivePunitoryAmount (C-02): base de punitorios en vivo.
+      contract: { select: { punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true } },
     },
     orderBy: [
       { contractId: 'asc' },
       { monthNumber: 'asc' }
     ]
   });
+
+  // Feriados por año, precargados una sola vez (evita N+1 en computeLivePunitoryAmount).
+  const distinctYears = Array.from(new Set(records.map((r) => r.periodYear)));
+  const holidaysByYear = new Map();
+  for (const y of distinctYears) {
+    holidaysByYear.set(y, await getHolidaysForYear(y));
+  }
 
   let numUpdated = 0;
   let currentContractId = null;
@@ -1212,19 +1226,11 @@ const _recalculateCore = async (recordIds, tx) => {
     let punitoryAmount = record.punitoryAmount;
     let punitoryDays = record.punitoryDays;
     let punitoryForgiven = false;
-    // `totalPunitory`: punitorios efectivamente IMPUTADOS a lo largo de TODAS las
-    // transacciones del mes (suma de conceptos 'PUNITORIOS'). Es lo que se usa en
-    // `totalDue` para que `balance` no genere un saldo a favor falso cuando los
-    // punitorios se pagan en varias tandas (caso típico de deudores: un pago de deuda
-    // más un pago posterior de punitorios). Para un mes con una sola transacción esta
-    // suma equivale al punitorio de esa única transacción → comportamiento idéntico.
-    let totalPunitory = 0;
     if (record.transactions.length > 0) {
       const lastTx = record.transactions[record.transactions.length - 1];
       punitoryAmount = lastTx.punitoryForgiven ? 0 : lastTx.punitoryAmount;
       punitoryDays = lastTx.punitoryForgiven ? 0 : record.punitoryDays;
       punitoryForgiven = lastTx.punitoryForgiven;
-      totalPunitory = sumPunitoryConcepts(record.transactions);
     } else {
       punitoryAmount = 0;
       punitoryDays = 0;
@@ -1238,17 +1244,91 @@ const _recalculateCore = async (recordIds, tx) => {
       console.warn(`[Integridad] Secuencia rota para el contrato ${record.contractId}: salto del mes esperado ${expectedNextMonthNumber} al ${record.monthNumber}. Continuando con saldo previo.`);
     }
 
-    const activePreviousBalance = isNewContract 
-      ? record.previousBalance 
+    const activePreviousBalance = isNewContract
+      ? record.previousBalance
       : runningPreviousBalance;
 
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
-    // Usar `totalPunitory` (suma de punitorios imputados en todas las transacciones),
-    // NO `punitoryAmount` (solo el del último pago), para que `balance` refleje los
-    // punitorios realmente pagados y no genere saldo a favor falso en deudores.
-    const totalDue = record.rentAmount + servicesTotal + totalPunitory + ivaAmount - activePreviousBalance;
-    const balance = Math.round((amountPaid - Math.max(totalDue, 0)) * 100) / 100;
-    const effectiveBalance = balance + (record.balanceForgiven || 0);
+
+    // Simple check for open debt (una sola vez; se reutiliza en las dos pasadas de abajo)
+    const openDebt = await tx.debt.findFirst({
+      where: { monthlyRecordId: record.id, status: { in: ['OPEN', 'PARTIAL'] } },
+    });
+
+    // Sincronizar el saldo a favor (appliedCredit) de la deuda con el previousBalance
+    // EN VIVO de este mes (bug reportado 2026-07-12: Control Mensual y Deudas mostraban
+    // números distintos porque appliedCredit quedaba congelado desde el cierre). Ver
+    // `syncDebtAppliedCreditFromRecord` (debtService.js) para el detalle y las guardas.
+    if (openDebt) {
+      const { syncDebtAppliedCreditFromRecord } = require('./debtService');
+      await syncDebtAppliedCreditFromRecord(openDebt.id, activePreviousBalance, tx);
+    }
+    // Un saldo condonado (balanceForgiven) salda el registro aunque no haya pago real:
+    // permite "perdonar multa"/condonar el total de un registro nunca pagado (status COMPLETE).
+    const isForgiven = (record.balanceForgiven || 0) > 0;
+
+    const computeTotals = (punitoryForTotalDue) => {
+      const td = record.rentAmount + servicesTotal + punitoryForTotalDue + ivaAmount - activePreviousBalance;
+      // C-01: el balance se computa con `td` SIN clampear. Si el crédito arrastrado
+      // (activePreviousBalance) supera los cargos brutos del mes, `td` da negativo — y
+      // restarlo (sin clamp) es lo que hace sobrevivir el excedente como balance
+      // positivo, para que se arrastre al mes siguiente (runningPreviousBalance más
+      // abajo). Clampear acá (como antes) perdía ese excedente sin dejar rastro. El
+      // campo PERSISTIDO `totalDue` sigue clampeado a 0 al escribir (no se puede
+      // "deber negativo") — eso no cambia.
+      const bal = Math.round((amountPaid - td) * 100) / 100;
+      const effBal = bal + (record.balanceForgiven || 0);
+      let st = 'PENDING';
+      if (openDebt) {
+        st = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
+      } else if (effBal >= -1 && (amountPaid > 0 || isForgiven)) {
+        st = 'COMPLETE';
+      } else if (amountPaid > 0) {
+        st = 'PARTIAL';
+      }
+      return { totalDue: td, balance: bal, effectiveBalance: effBal, status: st };
+    };
+
+    // C-02: el punitorio que cuenta en `totalDue` es el VIVO (calculado, se haya
+    // cobrado o no) — así una mora nunca cobrada sigue marcando el mes PARTIAL en vez
+    // de auto-condonarse (antes se usaba solo la suma de conceptos PUNITORIOS ya
+    // pagados, que da $0 si el pago no alcanzó para cubrirlos). Si esa primera pasada
+    // YA da COMPLETE, se recalcula una segunda vez con el punitorio CONGELADO a lo
+    // efectivamente cobrado — evita reintroducir el saldo a favor falso de pagos de
+    // punitorios en varias tandas (memoria punitory-totaldue-concept-rule).
+    //
+    // Cuando el mes tiene una Deuda abierta/parcial asociada, el punitorio de `totalDue`
+    // tiene que venir del `accumulatedPunitory` CONGELADO de la Deuda (fuente única de
+    // verdad, actualizado por `payDebt` en cada pago — el mismo valor con el que la Deuda
+    // calcula su propio `currentTotal`), NO recomputarse acá de forma independiente. Bug
+    // (2026-07-13, caso Ponce Emilia Roxana / Los Pinos 4171 PB D, Mayo 2026): un pago de
+    // deuda PARCIAL que alcanza para cubrir alquiler+servicios pero no todos los
+    // punitorios hace que `computePunitoryBase` dé 0 y `computeLiveRecordPunitory` caiga
+    // en su rama "base agotada", que devuelve el punitorio CONGELADO del propio `record`
+    // — $0 para un mes recién cerrado que nunca tuvo una transacción antes de la deuda.
+    // Eso pierde los punitorios reales ya pagados/adeudados e infla `balance` como saldo
+    // a favor falso (por el monto exacto de los punitorios pagados), que además se
+    // arrastra como `previousBalance` al mes siguiente mientras la Deuda sigue
+    // reclamando el resto. Como un mes con Deuda abierta nunca llega a `COMPLETE` (ver
+    // `computeTotals` arriba), la rama de `sumPunitoryConcepts` tampoco llega a
+    // corregirlo. (No se usa el punitorio EN VIVO de `calculateDebtPunitory` acá: ese
+    // devuelve el remanente NETO impago en la rama "base agotada", no el bruto — sumarlo
+    // al bruto pagado duplicaría/reduciría mal el total. `accumulatedPunitory` es el
+    // mismo bruto congelado que ya usa `debt.currentTotal`, así que Control Mensual y
+    // Deudas quedan consistentes en el mismo instante congelado.)
+    const holidaysForRecord = holidaysByYear.get(record.periodYear) || [];
+    let totalPunitory;
+    if (openDebt) {
+      totalPunitory = openDebt.accumulatedPunitory || 0;
+    } else {
+      totalPunitory = computeLiveRecordPunitory(record, record.contract, holidaysForRecord, { isFullyPaid: false }).amount;
+    }
+    let totals = computeTotals(totalPunitory);
+    if (!openDebt && totals.status === 'COMPLETE') {
+      totalPunitory = computeLiveRecordPunitory(record, record.contract, holidaysForRecord, { isFullyPaid: true }).amount;
+      totals = computeTotals(totalPunitory);
+    }
+    const { totalDue, balance, effectiveBalance, status } = totals;
 
     // Update tracking variables for the next iteration.
     // IMPORTANTE: solo se arrastra el saldo A FAVOR (positivo). El saldo negativo
@@ -1258,23 +1338,6 @@ const _recalculateCore = async (recordIds, tx) => {
     currentContractId = record.contractId;
     expectedNextMonthNumber = record.monthNumber + 1;
     runningPreviousBalance = Math.max(effectiveBalance, 0);
-
-    // Simple check for open debt
-    const openDebt = await tx.debt.findFirst({
-      where: { monthlyRecordId: record.id, status: { in: ['OPEN', 'PARTIAL'] } },
-    });
-
-    // Un saldo condonado (balanceForgiven) salda el registro aunque no haya pago real:
-    // permite "perdonar multa"/condonar el total de un registro nunca pagado (status COMPLETE).
-    const isForgiven = (record.balanceForgiven || 0) > 0;
-    let status = 'PENDING';
-    if (openDebt) {
-      status = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
-    } else if (effectiveBalance >= -1 && (amountPaid > 0 || isForgiven)) {
-      status = 'COMPLETE';
-    } else if (amountPaid > 0) {
-      status = 'PARTIAL';
-    }
 
     const isPaid = status === 'COMPLETE';
     const fullPaymentDate = isPaid && !record.fullPaymentDate ? new Date() : (isPaid ? record.fullPaymentDate : null);
@@ -1294,7 +1357,7 @@ const _recalculateCore = async (recordIds, tx) => {
       record.isPaid !== isPaid ||
       record.isCancelled !== isPaid;
 
-    if (shouldUpdate || ids.includes(record.id)) {
+    if (shouldUpdate || ids.includes(record.id) || record.needsRecalculation) {
       await tx.monthlyRecord.update({
         where: { id: record.id },
         data: {
@@ -1310,6 +1373,14 @@ const _recalculateCore = async (recordIds, tx) => {
           isPaid,
           isCancelled: isPaid,
           fullPaymentDate,
+          // Bug (2026-07-14): _recalculateCore corre tanto por el camino INLINE
+          // (pagos, síncrono) como por processDirtyRecords (async) — pero antes
+          // solo processDirtyRecords limpiaba needsRecalculation (con su propio
+          // updateMany posterior). Un recálculo inline dejaba el registro
+          // correctamente actualizado pero TODAVÍA marcado sucio, y el frontend
+          // (useMonthlyRecords.js) sondea en bucle mientras algún registro cargado
+          // tenga needsRecalculation=true — parecía "tardar" sin motivo real.
+          needsRecalculation: false,
         }
       });
       numUpdated++;
@@ -1370,23 +1441,26 @@ const processDirtyRecords = async () => {
 const _markRecordsDirty = async (recordIds, txClient) => {
   const records = await txClient.monthlyRecord.findMany({
     where: { id: { in: recordIds } },
-    select: { contractId: true, periodYear: true, periodMonth: true }
+    select: { contractId: true, monthNumber: true }
   });
 
   if (records.length === 0) return;
 
-  const minMonthsByContractAndYear = new Map();
+  // A-16: igual que en `_recalculateCore`, se usa `monthNumber` (contador
+  // continuo del contrato) en vez de `periodYear`+`periodMonth` — antes esto
+  // solo marcaba dirty los meses del MISMO año calendario (`periodMonth: {gte}`
+  // combinado con `periodYear` fijo), así que una corrección de diciembre
+  // nunca disparaba el recálculo async de enero del año siguiente.
+  const minMonthsByContract = new Map();
   for (const r of records) {
-    const key = `${r.contractId}_${r.periodYear}`;
-    if (!minMonthsByContractAndYear.has(key) || r.periodMonth < minMonthsByContractAndYear.get(key).periodMonth) {
-      minMonthsByContractAndYear.set(key, { contractId: r.contractId, periodYear: r.periodYear, periodMonth: r.periodMonth });
+    if (!minMonthsByContract.has(r.contractId) || r.monthNumber < minMonthsByContract.get(r.contractId).monthNumber) {
+      minMonthsByContract.set(r.contractId, { monthNumber: r.monthNumber });
     }
   }
 
-  const orConditions = Array.from(minMonthsByContractAndYear.values()).map(r => ({
-    contractId: r.contractId,
-    periodYear: r.periodYear,
-    periodMonth: { gte: r.periodMonth }
+  const orConditions = Array.from(minMonthsByContract.entries()).map(([contractId, data]) => ({
+    contractId,
+    monthNumber: { gte: data.monthNumber },
   }));
 
   if (orConditions.length > 0) {

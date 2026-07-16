@@ -75,7 +75,7 @@ export const ContractForm = () => {
         propertyId: contract.propertyId || '',
         startDate: isRenewing ? '' : (contract.startDate ? contract.startDate.split('T')[0] : ''),
         durationMonths: contract.durationMonths?.toString() || '24',
-        currentMonth: '1',
+        currentMonth: contract.currentMonth?.toString() || '1',
         baseRent: contract.baseRent?.toString() || '',
         baseRentDisplay: contract.baseRent ? contract.baseRent.toLocaleString('es-AR', { minimumFractionDigits: contract.baseRent % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 }) : '',
         adjustmentIndexId: contract.adjustmentIndexId || '',

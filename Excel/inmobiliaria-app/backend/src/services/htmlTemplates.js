@@ -215,13 +215,21 @@ const generateLiquidacionAllHTML = (dataArray) => {
       </div>`;
     }
 
-    // Cobrado de deudas anteriores (vista de caja del período)
+    // Cobrado de deudas anteriores (vista de caja del período) — desglose completo,
+    // línea por línea, igual que un pago del mes actual.
     let cobradosHtml = '';
     const cobr = data.cobradoOtrosPeriodos;
     if (cobr && cobr.total > 0) {
-      const cRows = cobr.detalle.map(d =>
-        `<tr><td style="padding:2px 20px;font-family:Arial;font-size:8pt;color:#666">${escHtml(d.periodLabel)}</td><td style="padding:2px 10px;font-family:Arial;font-size:8pt;color:#333;text-align:right">${fmt(d.monto, currency)}</td></tr>`
-      ).join('');
+      const cRows = cobr.detalle.map(d => {
+        const estadoLabel = d.saldada ? 'Deuda saldada' : 'Pago parcial de deuda';
+        const diasLabel = d.dias > 0 ? ` (${d.dias} días de atraso)` : '';
+        const conceptoRows = (d.conceptos || []).map(c =>
+          `<tr><td style="padding:1px 32px;font-family:Arial;font-size:8pt;color:#666">${escHtml(c.label)}</td><td style="padding:1px 10px;font-family:Arial;font-size:8pt;color:#333;text-align:right">${fmt(c.monto, currency)}</td></tr>`
+        ).join('');
+        return `<tr><td colspan="2" style="padding:3px 20px 1px;font-family:Arial;font-size:8pt;font-weight:bold;font-style:italic;color:#0066CC">${escHtml(estadoLabel)} · ${escHtml(d.periodLabel)}${escHtml(diasLabel)}</td></tr>
+        ${conceptoRows}
+        <tr><td style="padding:1px 32px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333">Cobrado</td><td style="padding:1px 10px;font-family:Arial;font-size:8pt;font-weight:bold;color:#333;text-align:right">${fmt(d.monto, currency)}</td></tr>`;
+      }).join('');
       cobradosHtml = `<table style="width:100%;margin-top:4px;border-top:1px solid #A0D0FF;padding-top:4px">
         <tr><td colspan="2" style="padding:2px 12px;font-family:Arial;font-size:8pt;font-weight:bold;color:#0066CC">Cobrado de deudas anteriores (en ${escHtml(data.periodo.label)})</td></tr>
         ${cRows}

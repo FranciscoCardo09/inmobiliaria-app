@@ -13,6 +13,10 @@ const {
   calculateDebtPunitory,
 } = require('../services/debtService');
 const { previewCloseMonth, closeMonth } = require('../services/monthlyCloseService');
+// A-25: si el operador no elige fecha de pago, usar el día ART correcto
+// (string, TZ-inmune), no `new Date().toISOString()` crudo del proceso
+// (que en horario vespertino ya cae en el día UTC siguiente).
+const { getTodayLocalString } = require('../utils/dateUtils');
 
 const prisma = require('../lib/prisma');
 
@@ -75,14 +79,21 @@ const getDebtById = async (req, res, next) => {
       return ApiResponse.notFound(res, 'Deuda no encontrada');
     }
 
-    // Enriquecer con punitorios actuales
+    // Enriquecer con punitorios actuales.
+    // Bug reportado (2026-07-12): esta ruta calculaba `remainingDebt` a mano
+    // (`unpaidRentAmount - amountPaid`), ignorando `unpaidServicesAmount` Y
+    // `appliedCredit` (saldo a favor del mes anterior) — mostraba de más
+    // exactamente el monto del crédito no descontado. `getOpenDebts`/`getDebts`
+    // (debtService.js) ya calculaban esto bien vía `calculateDebtPunitory`;
+    // se reutiliza esa misma fórmula acá en vez de duplicarla mal.
     if (debt.status !== 'PAID') {
-      const { amount, days, startDate, endDate } = await calculateDebtPunitory(debt);
-      const remainingDebt = Math.max(0, debt.unpaidRentAmount - debt.amountPaid);
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } =
+        await calculateDebtPunitory(debt, getTodayLocalString());
       debt.liveAccumulatedPunitory = amount;
       debt.livePunitoryDays = days;
-      debt.liveCurrentTotal = remainingDebt + amount;
+      debt.liveCurrentTotal = remainingDebt + (unpaidAccumulatedPunitory || 0) + amount;
       debt.remainingDebt = remainingDebt;
+      debt.unpaidAccumulatedPunitory = unpaidAccumulatedPunitory || 0;
       debt.punitoryFromDate = startDate;
       debt.punitoryToDate = endDate;
     }
@@ -97,7 +108,7 @@ const getDebtById = async (req, res, next) => {
 const payDebtHandler = async (req, res, next) => {
   try {
     const { groupId, id } = req.params;
-    const { amount, paymentDate, paymentMethod, observations } = req.body;
+    const { amount, paymentDate, paymentMethod, observations, forgivePunitorios } = req.body;
 
     if (!amount || parseFloat(amount) <= 0) {
       return ApiResponse.badRequest(res, 'Monto inválido');
@@ -112,9 +123,10 @@ const payDebtHandler = async (req, res, next) => {
     const result = await payDebt(
       id,
       parseFloat(amount),
-      paymentDate || new Date().toISOString(),
+      paymentDate || getTodayLocalString(),
       paymentMethod || 'EFECTIVO',
-      observations
+      observations,
+      forgivePunitorios || false
     );
 
     return ApiResponse.success(res, result, 'Pago de deuda registrado');
@@ -130,16 +142,16 @@ const payDebtHandler = async (req, res, next) => {
 const bulkDebtPreviewHandler = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { debtIds, paymentDate } = req.body;
+    const { debtIds, paymentDate, currentRecordId } = req.body;
 
     if (!Array.isArray(debtIds) || debtIds.length === 0) {
       return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
     }
 
-    const preview = await previewBulkDebtPayment(groupId, debtIds, paymentDate);
+    const preview = await previewBulkDebtPayment(groupId, debtIds, paymentDate, currentRecordId || null);
     return ApiResponse.success(res, preview);
   } catch (error) {
-    if (error.code === 'ORDER_BLOCK' || error.message?.includes('deuda')) {
+    if (error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('mes actual')) {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
@@ -150,7 +162,7 @@ const bulkDebtPreviewHandler = async (req, res, next) => {
 const payDebtsBulkHandler = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { debtIds, amount, paymentDate, paymentMethod, observations } = req.body;
+    const { debtIds, amount, paymentDate, paymentMethod, observations, currentRecordId, forgivePunitorios } = req.body;
 
     if (!Array.isArray(debtIds) || debtIds.length === 0) {
       return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
@@ -163,14 +175,16 @@ const payDebtsBulkHandler = async (req, res, next) => {
       groupId,
       debtIds,
       parseFloat(amount),
-      paymentDate || new Date().toISOString(),
+      paymentDate || getTodayLocalString(),
       paymentMethod || 'EFECTIVO',
-      observations
+      observations,
+      currentRecordId || null,
+      !!forgivePunitorios
     );
 
     return ApiResponse.success(res, result, 'Pago múltiple registrado');
   } catch (error) {
-    if (error.code === 'ORDER_BLOCK' || error.message?.includes('deuda') || error.message?.includes('contrato') || error.message?.includes('Monto')) {
+    if (error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('contrato') || error.message?.includes('Monto') || error.message?.includes('mes actual')) {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);

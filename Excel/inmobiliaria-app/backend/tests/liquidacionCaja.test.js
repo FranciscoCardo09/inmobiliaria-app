@@ -21,11 +21,17 @@
  * Regla de negocio (agrupado): 3 pagos el mismo día deben aparecer en el detalle
  * como UN solo renglón sumado.
  *
- * PARTE 1 — documenta el comportamiento ACTUAL de getLiquidacionesAllContracts
- * (período de deuda + bloque secundario de caja) → expone los Hallazgos #1/#2/#4.
+ * PARTE 1 — verifica el comportamiento CORRECTO (post-fix) de
+ * getLiquidacionesAllContracts: la fila de marzo conserva su documento de
+ * período (amountPaid propio, conceptos, total, pendiente — decisión del
+ * usuario 2026-07-14: esa estructura no se toca), pero la CAJA del mes
+ * (computeGrandTotals, cobradoOtrosPeriodos, transacciones) ahora refleja los
+ * 250.000 reales cobrados en marzo. Antes del fix estas mismas aserciones
+ * documentaban los Hallazgos #1/#2/#4 (ver git history de este archivo).
  * PARTE 2 — especifica el modelo DESEADO mediante un agregador de referencia que
  * opera sobre los mismos datos crudos (PaymentTransaction + TransactionConcept),
- * sirviendo de documentación ejecutable para el fix propuesto.
+ * sirviendo de documentación ejecutable del fix — y de spec contra la que se
+ * verifica PARTE 1.
  *
  * Run with: cd inmobiliaria-app/backend && npm test
  */
@@ -112,11 +118,11 @@ async function seedJuanEscenario(prisma) {
 }
 
 // ============================================================================
-// PARTE 1 — comportamiento ACTUAL (documenta los Hallazgos #1, #2, #4)
+// PARTE 1 — comportamiento CORRECTO post-fix (Hallazgos #1, #2, #4, #5)
 // ============================================================================
 
-describe('Liquidación de MARZO — comportamiento ACTUAL (período de deuda)', () => {
-  test('Hallazgo #1: la fila principal de marzo NO incluye lo cobrado de enero/febrero', async () => {
+describe('Liquidación de MARZO — comportamiento CORRECTO (criterio de caja)', () => {
+  test('la fila principal de marzo conserva su documento de período (amountPaid propio = 42000)', async () => {
     const prisma = makeFakePrisma();
     const svc = buildReportService(prisma);
     await seedJuanEscenario(prisma);
@@ -125,13 +131,13 @@ describe('Liquidación de MARZO — comportamiento ACTUAL (período de deuda)', 
 
     const marchRow = result.find((r) => r.monthlyRecordId === 'mr-mar');
     assert.ok(marchRow, 'debe existir la fila de marzo');
-    // BUG: el modelo de caja pide 250000 (ene+feb+mar); el código actual solo
-    // muestra lo propio de marzo porque selecciona por periodMonth/periodYear.
-    assert.strictEqual(marchRow.amountPaid, 42000, 'FALLA EL MODELO DE CAJA — hoy solo muestra el amountPaid propio del período');
-    assert.notStrictEqual(marchRow.amountPaid, 250000, 'el modelo deseado (P1) pide 250000 — hoy no se cumple, ver Hallazgo #1');
+    // Decisión del usuario (2026-07-14): el documento del período (conceptos, total,
+    // pendiente, amountPaid propio) NO se toca — solo se corrige la CAJA del mes
+    // (cobradoOtrosPeriodos / computeGrandTotals / transacciones, abajo).
+    assert.strictEqual(marchRow.amountPaid, 42000, 'amountPaid sigue siendo el propio del período de marzo');
   });
 
-  test('el bloque secundario "cobradoOtrosPeriodos" SÍ captura ene+feb (parcialmente cubre el criterio de caja)', async () => {
+  test('"cobradoOtrosPeriodos" captura ene+feb con desglose por concepto (alquiler/punitorios)', async () => {
     const prisma = makeFakePrisma();
     const svc = buildReportService(prisma);
     await seedJuanEscenario(prisma);
@@ -142,9 +148,13 @@ describe('Liquidación de MARZO — comportamiento ACTUAL (período de deuda)', 
     assert.ok(marchRow.cobradoOtrosPeriodos, 'debe traer el bloque de cobros de otros períodos');
     assert.strictEqual(marchRow.cobradoOtrosPeriodos.total, 208000, 'ene(105000)+feb(103000) cobrados en marzo');
     assert.strictEqual(marchRow.cobradoOtrosPeriodos.detalle.length, 2, 'un renglón por período de origen (ene y feb)');
+    // Hallazgo #2: desglose leído de los TransactionConcept reales (ene 100000 alq +
+    // 5000 punit; feb 100000 alq + 3000 punit), no re-derivado.
+    assert.strictEqual(marchRow.cobradoOtrosPeriodos.alquiler, 200000);
+    assert.strictEqual(marchRow.cobradoOtrosPeriodos.punitorios, 8000);
   });
 
-  test('Hallazgo #4: computeGrandTotals del reporte de marzo NO suma cobradoOtrosPeriodos → subestima la caja real', async () => {
+  test('FIX Hallazgo #4: computeGrandTotals del reporte de marzo suma cobradoOtrosPeriodos → refleja la caja real (250000)', async () => {
     const prisma = makeFakePrisma();
     const svc = buildReportService(prisma);
     await seedJuanEscenario(prisma);
@@ -152,11 +162,12 @@ describe('Liquidación de MARZO — comportamiento ACTUAL (período de deuda)', 
     const result = await svc.getLiquidacionesAllContracts(GROUP, 3, 2026, null, { soloConPago: false, includePlaceholders: true }, null, null);
     const grand = svc.computeGrandTotals(result);
 
-    // Caja real de marzo = 250000; el header del reporte hoy muestra solo 42000.
-    assert.strictEqual(grand.grandTotal, 42000, 'FALLA EL MODELO DE CAJA — grandTotal ignora los 208000 cobrados de ene/feb');
+    assert.strictEqual(grand.grandTotal, 250000, 'caja real de marzo = 42000 propio + 208000 de ene/feb');
+    assert.strictEqual(grand.grandPunitoriosCobrado, 8000, 'punitorios cobrados = 0 (propio marzo) + 8000 (ene/feb congelados)');
+    assert.strictEqual(grand.grandAlquilerCobrado, 242000, 'alquiler cobrado = 42000 (propio) + 200000 (ene/feb)');
   });
 
-  test('el detalle de transacciones de la fila de marzo NO agrupa los pagos de ene/feb (viven en otro registro)', async () => {
+  test('FIX Hallazgo #5: el detalle de transacciones de marzo agrupa ene+feb+mar en UN renglón de 250000 (mismo día)', async () => {
     const prisma = makeFakePrisma();
     const svc = buildReportService(prisma);
     await seedJuanEscenario(prisma);
@@ -164,8 +175,9 @@ describe('Liquidación de MARZO — comportamiento ACTUAL (período de deuda)', 
     const result = await svc.getLiquidacionesAllContracts(GROUP, 3, 2026, null, { soloConPago: false, includePlaceholders: true }, null, null);
     const marchRow = result.find((r) => r.monthlyRecordId === 'mr-mar');
 
-    assert.strictEqual(marchRow.transacciones.length, 1, 'solo ve su propia transacción (42000), no las 3 del día 14/03');
-    assert.strictEqual(marchRow.transacciones[0].monto, 42000);
+    assert.strictEqual(marchRow.transacciones.length, 1, '3 pagos el mismo día (14/03) se agrupan en un solo renglón');
+    assert.strictEqual(marchRow.transacciones[0].monto, 250000);
+    assert.strictEqual(new Date(marchRow.transacciones[0].fecha).toDateString(), MARCH_14.toDateString());
   });
 });
 
@@ -266,5 +278,151 @@ describe('Liquidación de MARZO — modelo DESEADO (caja, spec de referencia)', 
     // Saldo pendiente final de marzo = totalDue(100000) - (amountPaid propio 42000 + este pago 58000) = 0
     const marzoTotalPagado = 42000 + 58000;
     assert.strictEqual(100000 - marzoTotalPagado, 0, 'marzo queda en 0 tras la liquidación total');
+  });
+});
+
+// ============================================================================
+// PARTE 3 — "Deuda saldada" con desglose real (2026-07-14): debtService.payDebt()
+// graba los conceptos de una deuda vieja como ALQUILER_DEUDA / SERVICIOS_DEUDA
+// (no ALQUILER/SERVICIOS, que son los tipos del mes corriente). El fixture de
+// PARTE 1/2 usa 'ALQUILER' también para los pagos de ene/feb, lo cual no refleja
+// la producción real. Este bloque reproduce el escenario real reportado por el
+// usuario: "si pago 3 meses con deuda, Total Alquileres Cobrados debería sumar
+// el alquiler de esos 3 meses" (antes daba $0 porque ALQUILER_DEUDA caía en el
+// bucket 'servicios').
+// ============================================================================
+
+function makeTxRealista({ id, monthlyRecordId, periodMonth, periodYear, alquilerDeuda, serviciosDeuda, punitorios, paymentDate, recOverrides = {} }) {
+  const concepts = [];
+  if (alquilerDeuda > 0) concepts.push({ type: 'ALQUILER_DEUDA', description: 'Pago deuda alquiler', amount: alquilerDeuda });
+  if (serviciosDeuda > 0) concepts.push({ type: 'SERVICIOS_DEUDA', description: 'Pago deuda servicios', amount: serviciosDeuda });
+  if (punitorios > 0) concepts.push({ type: 'PUNITORIOS', description: 'Punitorios por mora', amount: punitorios });
+  const amount = alquilerDeuda + serviciosDeuda + punitorios;
+  return {
+    id, groupId: GROUP, monthlyRecordId, paymentDate, amount,
+    punitoryAmount: punitorios, punitoryForgiven: false,
+    concepts,
+    // Incluye `id` porque el código real ahora selecciona monthlyRecord.id para
+    // resolver el status del Debt asociado (flag "saldada"). monthNumber/rentAmount/
+    // services/includeIva/ivaAmount: para reconstruir etiquetas ricas en "Deudas
+    // Pagadas" (buildConceptosDeudaPagada) — sin servicios en el fixture, así que
+    // el desglose de servicios cae al fallback genérico "Pago deuda servicios".
+    // `rentAmount` por defecto = alquilerDeuda de ESTE pago (caso de un solo pago que
+    // cubre todo); `recOverrides.rentAmount` permite fijar el alquiler ORIGINAL real
+    // cuando la deuda se paga en VARIOS pagos parciales (cada uno cubre una porción).
+    monthlyRecord: {
+      id: monthlyRecordId, groupId: GROUP, periodMonth, periodYear, contractId: CONTRACT_ID, contract: CONTRACT_OBJ,
+      monthNumber: periodMonth, rentAmount: alquilerDeuda, includeIva: false, ivaAmount: 0, services: [],
+      ...recOverrides,
+    },
+  };
+}
+
+describe('Deuda saldada — tipos reales ALQUILER_DEUDA/SERVICIOS_DEUDA de debtService.payDebt()', () => {
+  test('BUG: ALQUILER_DEUDA debe contar como alquiler (no caer en "servicios")', async () => {
+    const prisma = makeFakePrisma();
+    const svc = buildReportService(prisma);
+
+    // Enero: deuda de 100.000 alquiler + 20.000 servicios + 5.000 punitorios, saldada en marzo.
+    const txJan = makeTxRealista({ id: 'tx-jan', monthlyRecordId: 'mr-jan', periodMonth: 1, periodYear: 2026, alquilerDeuda: 100000, serviciosDeuda: 20000, punitorios: 5000, paymentDate: MARCH_14 });
+    const mrJan = makeMonthlyRecordRow({ id: 'mr-jan', periodMonth: 1, periodYear: 2026, rentAmount: 100000, punitoryAmount: 5000, amountPaid: 125000, totalDue: 125000, status: 'COMPLETE', isCancelled: true, tx: txJan });
+    prisma.monthlyRecord._rows.push(mrJan);
+    prisma.paymentTransaction._rows.push(txJan);
+    prisma.debt._rows.push({ id: 'debt-jan', monthlyRecordId: 'mr-jan', status: 'PAID' });
+
+    // Marzo: sin liquidación propia, solo cobró la deuda de enero (fila sintética "SOLO DEUDAS ANTERIORES").
+    const result = await svc.getLiquidacionesAllContracts(GROUP, 3, 2026, null, { soloConPago: false, includePlaceholders: true, honorariosPercent: 10 }, null, null);
+    const row = result.find((r) => r.contractId === CONTRACT_ID);
+    assert.ok(row, 'debe existir la fila sintética del contrato');
+    assert.strictEqual(row.paymentStatus, 'SOLO DEUDAS ANTERIORES');
+
+    // Antes del fix: alquiler=0, servicios=120000 (alquiler mal cayendo en servicios).
+    assert.strictEqual(row.cobradoOtrosPeriodos.alquiler, 100000, 'ALQUILER_DEUDA debe contarse como alquiler');
+    assert.strictEqual(row.cobradoOtrosPeriodos.servicios, 20000, 'SERVICIOS_DEUDA se mantiene como servicios (payDebt no desglosa IVA)');
+    assert.strictEqual(row.cobradoOtrosPeriodos.punitorios, 5000);
+
+    // "Total Alquileres Cobrados" (subtotalAlquileresCobrado): antes daba $0 en este caso.
+    assert.strictEqual(row.subtotalAlquileresCobrado, 105000, 'alquiler(100000) + punitorios(5000) de la deuda saldada');
+
+    // TOTAL HONORARIOS = 10% de (alquiler + punitorios cobrados, incluida la deuda).
+    assert.strictEqual(row.honorariosCobrado, 10500, '10% de subtotalAlquileresCobrado (105000)');
+
+    // Desglose línea por línea + estado de la deuda.
+    const det = row.cobradoOtrosPeriodos.detalle[0];
+    assert.strictEqual(det.saldada, true, 'Debt.status = PAID → deuda saldada');
+    // Etiquetas ricas (2026-07-15): alquiler con mes/período, servicios sin
+    // itemizar (el fixture no define servicios originales para reconciliar).
+    const labels = det.conceptos.map((c) => c.label);
+    assert.deepStrictEqual(labels, ['Pago deuda Alquiler Enero 2026 (Mes 1)', 'Pago deuda servicios', 'Punitorios pagados']);
+    assert.strictEqual(det.conceptos[0].monto, 100000);
+  });
+
+  test('Pago parcial de deuda: Debt.status distinto de PAID → saldada = false', async () => {
+    const prisma = makeFakePrisma();
+    const svc = buildReportService(prisma);
+
+    const txJan = makeTxRealista({ id: 'tx-jan', monthlyRecordId: 'mr-jan', periodMonth: 1, periodYear: 2026, alquilerDeuda: 50000, serviciosDeuda: 0, punitorios: 0, paymentDate: MARCH_14 });
+    const mrJan = makeMonthlyRecordRow({ id: 'mr-jan', periodMonth: 1, periodYear: 2026, rentAmount: 100000, punitoryAmount: 5000, amountPaid: 50000, totalDue: 105000, status: 'PARTIAL', isCancelled: true, tx: txJan });
+    prisma.monthlyRecord._rows.push(mrJan);
+    prisma.paymentTransaction._rows.push(txJan);
+    prisma.debt._rows.push({ id: 'debt-jan', monthlyRecordId: 'mr-jan', status: 'PARTIAL' });
+
+    const result = await svc.getLiquidacionesAllContracts(GROUP, 3, 2026, null, { soloConPago: false, includePlaceholders: true }, null, null);
+    const row = result.find((r) => r.contractId === CONTRACT_ID);
+
+    assert.strictEqual(row.cobradoOtrosPeriodos.detalle[0].saldada, false, 'Debt.status = PARTIAL → no saldada');
+  });
+});
+
+describe('Crédito aplicado a una deuda vieja pagada en VARIOS pagos (caso C21_credit_to_debt real)', () => {
+  test('el crédito se reparte en cascada servicios→alquiler→punitorios sobre el TOTAL de todos los pagos del período', async () => {
+    const prisma = makeFakePrisma();
+    const svc = buildReportService(prisma);
+
+    // Deuda de Enero: alquiler original 200.000, sin servicios, punitorio final
+    // acumulado 50.000 (total adeudado = 250.000). Crédito aplicado: 100.000.
+    // Se paga en DOS pagos distintos, el mismo mes de reporte:
+    //   Pago 1: 80.000 → tageado 100% alquiler.
+    //   Pago 2: 70.000 → 20.000 alquiler + 50.000 punitorios (cubre TODO el punitorio).
+    // Cash total: 100.000 alquiler + 50.000 punitorios = 150.000.
+    // Al crédito (100.000) ya no le queda punitorio pendiente (cubierto por cash),
+    // así que va ENTERO a alquiler: 100.000(cash) + 100.000(crédito) = 200.000.
+    const recOverrides = { rentAmount: 200000, services: [] };
+    const txJan1 = makeTxRealista({
+      id: 'tx-jan-1', monthlyRecordId: 'mr-jan', periodMonth: 1, periodYear: 2026,
+      alquilerDeuda: 80000, serviciosDeuda: 0, punitorios: 0,
+      paymentDate: new Date(2026, 2, 14, 10, 0, 0), recOverrides,
+    });
+    const txJan2 = makeTxRealista({
+      id: 'tx-jan-2', monthlyRecordId: 'mr-jan', periodMonth: 1, periodYear: 2026,
+      alquilerDeuda: 20000, serviciosDeuda: 0, punitorios: 50000,
+      paymentDate: new Date(2026, 2, 14, 11, 0, 0), recOverrides,
+    });
+    const mrJan = makeMonthlyRecordRow({
+      id: 'mr-jan', periodMonth: 1, periodYear: 2026, rentAmount: 200000, punitoryAmount: 50000,
+      amountPaid: 150000, totalDue: 250000, status: 'COMPLETE', isCancelled: true, tx: txJan1,
+    });
+    prisma.monthlyRecord._rows.push(mrJan);
+    prisma.paymentTransaction._rows.push(txJan1, txJan2);
+    prisma.debt._rows.push({
+      id: 'debt-jan', monthlyRecordId: 'mr-jan', status: 'PAID',
+      appliedCredit: 100000, accumulatedPunitory: 50000,
+    });
+
+    const result = await svc.getLiquidacionesAllContracts(GROUP, 3, 2026, null, { soloConPago: false, includePlaceholders: true }, null, null);
+    const row = result.find((r) => r.contractId === CONTRACT_ID);
+    const det = row.cobradoOtrosPeriodos.detalle[0];
+
+    assert.strictEqual(det.saldada, true);
+    assert.strictEqual(det.alquiler, 200000, 'cash (100.000) + crédito (100.000, todo a alquiler) = 200.000');
+    assert.strictEqual(det.punitorios, 50000, 'ya cubierto 100% por cash; el crédito no le agrega nada');
+    assert.strictEqual(det.servicios, 0);
+    assert.strictEqual(det.debtTotal, 250000, 'alquiler(200.000) + punitorios(50.000) = total real de la deuda');
+    assert.strictEqual(det.sobrepago, 0, 'cash + crédito (250.000) cubren exacto, sin sobrepago');
+
+    // También debe reflejarse en los totales agregados del contrato (usados para
+    // "Total Alquileres Cobrados" y Honorarios), no solo en el detalle por período.
+    assert.strictEqual(row.cobradoOtrosPeriodos.alquiler, 200000);
+    assert.strictEqual(row.cobradoOtrosPeriodos.punitorios, 50000);
   });
 });

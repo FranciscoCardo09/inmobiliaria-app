@@ -9,9 +9,14 @@ import {
   ClockIcon,
   TrashIcon,
   NoSymbolIcon,
+  CheckCircleIcon,
+  EnvelopeIcon,
+  PhoneIcon,
 } from '@heroicons/react/24/outline'
 import DateInput, { getLocalToday } from './ui/DateInput'
 import { useDebtPunitoryPreview, useDebts, useDebt, useCanPayCurrentMonth } from '../hooks/useDebts'
+import { useNotifications } from '../hooks/useNotifications'
+import api from '../services/api'
 import toast from 'react-hot-toast'
 
 const formatCurrency = (amount) => {
@@ -43,8 +48,13 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const [amount, setAmount] = useState('')
   const [displayAmount, setDisplayAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('EFECTIVO')
+  const [generateReceipt, setGenerateReceipt] = useState(true)
+  const [forgivePunitorios, setForgivePunitorios] = useState(false)
   const [observations, setObservations] = useState('')
   const [cancelingPaymentId, setCancelingPaymentId] = useState(null)
+  const [paymentSuccess, setPaymentSuccess] = useState(null) // { transactionId }
+
+  const { sendCashReceipt } = useNotifications(groupId)
 
   // Fetch fresh debt data from the server (auto-updates after payments)
   const { data: freshDebt } = useDebt(groupId, debtProp?.id)
@@ -63,14 +73,28 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const { data: preview } = useDebtPunitoryPreview(groupId, debt?.id, paymentDate)
   const { cancelPayment, isCancelingPayment } = useDebts(groupId)
 
-  // Use preview data when available, fallback to debt data
+  // Use preview data when available, fallback to enriched debt data from backend
   const unpaidServices = preview?.remainingServices ?? (debt?.unpaidServicesAmount || 0)
-  const unpaidRent = preview?.remainingRent ?? Math.max((debt?.unpaidRentAmount || 0) - Math.max((debt?.amountPaid || 0) - (debt?.unpaidServicesAmount || 0), 0), 0)
+  const unpaidRent = preview?.remainingRent ?? Math.max((debt?.remainingDebt || 0) - unpaidServices, 0)
   const totalPunitory = preview?.amount ?? (debt?.liveAccumulatedPunitory || 0)
   const punitoryDays = preview?.days ?? (debt?.livePunitoryDays || 0)
-  const totalToPay = preview?.totalToPay ?? (debt?.liveCurrentTotal || (unpaidServices + unpaidRent + totalPunitory))
+  const totalToPayRaw = preview?.totalToPay ?? (debt?.liveCurrentTotal || 0)
   const punitoryFrom = preview?.fromDate ?? debt?.punitoryFromDate
   const punitoryTo = preview?.toDate ?? debt?.punitoryToDate
+
+  const totalToPay = forgivePunitorios ? Math.max(0, totalToPayRaw - totalPunitory) : totalToPayRaw
+
+  // El saldo a favor (appliedCredit) ya viene restado del total por el backend
+  // (una sola vez, al calcular remainingDebt/totalToPay). Acá NO se resta de
+  // nuevo: se deriva como la diferencia entre los conceptos brutos y el total
+  // neto, solo para mostrarlo como fila informativa. Así el desglose siempre
+  // cierra exacto y es imposible contarlo dos veces.
+  const creditApplied = Math.max(0, (unpaidServices + unpaidRent + totalPunitory) - totalToPay)
+  // appliedCredit es fijo en la deuda (no se decrementa pago a pago), así que
+  // en el 2do pago (y siguientes) esta misma diferencia vuelve a aparecer.
+  // No es un descuento nuevo: aclaramos que ya se aplicó antes (mismo patrón
+  // que "previousBalance" en registerPayment/paymentTransactionService.js).
+  const creditAlreadyUsed = (debt?.amountPaid || 0) > 0 || (debt?.payments?.length || 0) > 0
 
   // Default amount to total
   useEffect(() => {
@@ -79,18 +103,62 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
     setDisplayAmount(formatInputCurrency(rounded))
   }, [totalToPay])
 
+  // Auto-generate receipt for cash payments
+  useEffect(() => {
+    setGenerateReceipt(paymentMethod === 'EFECTIVO')
+  }, [paymentMethod])
+
   const handleSubmit = async () => {
     if (!amount || amount <= 0) return
 
     try {
-      await onPay({
+      const result = await onPay({
         debtId: debt.id,
         amount: amount,
         paymentDate,
         paymentMethod,
         observations: observations || undefined,
+        forgivePunitorios,
       })
-      onClose()
+
+      // Auto-download receipt PDF for cash payments
+      if (paymentMethod === 'EFECTIVO' && generateReceipt) {
+        try {
+          const txId = result?.transaction?.id || ''
+          const tenantName = debt?.contract?.tenant?.name || 'recibo'
+          const response = await api.get(
+            `/groups/${groupId}/reports/pago-efectivo/pdf?monthlyRecordId=${debt.monthlyRecordId}${txId ? `&transactionId=${txId}` : ''}`,
+            { responseType: 'blob' }
+          )
+          const blob = new Blob([response.data], { type: 'application/pdf' })
+          const url = window.URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `recibo-${tenantName.toLowerCase().replace(/\s/g, '-')}.pdf`
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(url)
+          toast.success('Recibo descargado')
+        } catch (pdfErr) {
+          console.error('Error descargando recibo:', pdfErr)
+          toast.error('Pago registrado pero no se pudo descargar el recibo')
+        }
+      }
+
+      setPaymentSuccess({ transactionId: result?.transaction?.id })
+    } catch (e) {
+      // Error handled by hook
+    }
+  }
+
+  const handleSendReceipt = async (channel) => {
+    if (!paymentSuccess?.transactionId) return
+    try {
+      await sendCashReceipt.mutateAsync({
+        transactionId: paymentSuccess.transactionId,
+        channels: [channel],
+      })
     } catch (e) {
       // Error handled by hook
     }
@@ -119,8 +187,64 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const isPartial = parsedAmount > 0 && difference > 1
 
   return (
-    <Modal isOpen={true} onClose={onClose} title="Pagar Deuda" size="lg">
+    <Modal isOpen={true} onClose={onClose} title={paymentSuccess ? "Pago Registrado" : "Pagar Deuda"} size="lg">
       <div className="space-y-4">
+        {/* Success State - Send Receipt */}
+        {paymentSuccess && (
+          <>
+            <div className="text-center py-4">
+              <CheckCircleIcon className="w-12 h-12 text-success mx-auto mb-2" />
+              <h3 className="text-lg font-bold text-success">Pago registrado</h3>
+              <p className="text-sm text-base-content/60 mt-1">
+                {debt?.contract?.tenant?.name} — {debt?.contract?.property?.address}
+              </p>
+            </div>
+
+            <div className="bg-base-200 rounded-lg p-4 space-y-3">
+              <p className="text-sm font-medium text-center">Enviar recibo al inquilino</p>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="gap-1"
+                  loading={sendCashReceipt.isPending}
+                  onClick={() => handleSendReceipt('EMAIL')}
+                  disabled={!debt?.contract?.tenant?.email}
+                  title={!debt?.contract?.tenant?.email ? 'Sin email registrado' : ''}
+                >
+                  <EnvelopeIcon className="w-4 h-4" />
+                  Email
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="gap-1"
+                  loading={sendCashReceipt.isPending}
+                  onClick={() => handleSendReceipt('WHATSAPP')}
+                  disabled={!debt?.contract?.tenant?.phone}
+                  title={!debt?.contract?.tenant?.phone ? 'Sin teléfono registrado' : ''}
+                >
+                  <PhoneIcon className="w-4 h-4" />
+                  WhatsApp
+                </Button>
+              </div>
+              {(!debt?.contract?.tenant?.email && !debt?.contract?.tenant?.phone) && (
+                <p className="text-xs text-warning text-center">
+                  El inquilino no tiene email ni teléfono registrado
+                </p>
+              )}
+            </div>
+
+            <div className="modal-action">
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Cerrar
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Form (hidden on success) */}
+        {!paymentSuccess && <>
         {/* Debt Info */}
         <div className="bg-error/5 border border-error/20 rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -188,21 +312,40 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
               <div className="flex justify-between text-error">
                 <span>
                   Punitorios
-                  {punitoryDays > 0 && (
+                  {punitoryDays > 0 && !forgivePunitorios && (
                     <span className="text-xs text-base-content/50 ml-1">
                       ({punitoryDays} días al {(debt?.punitoryPercent * 100).toFixed(1)}% diario)
                     </span>
                   )}
+                  {forgivePunitorios && (
+                    <span className="text-xs text-success ml-1">(Condonados)</span>
+                  )}
                 </span>
-                <span className="font-mono text-error">{formatCurrency(totalPunitory)}</span>
+                <span className={`font-mono ${!forgivePunitorios ? 'text-error' : ''}`}>
+                  {forgivePunitorios ? '$0' : formatCurrency(totalPunitory)}
+                </span>
               </div>
             )}
-            {totalPunitory > 0 && punitoryFrom && punitoryTo && (
+            {totalPunitory > 0 && punitoryFrom && punitoryTo && !forgivePunitorios && (
               <div className="flex items-center gap-1 text-xs text-base-content/60">
                 <ClockIcon className="w-3.5 h-3.5" />
                 <span>
                   Desde <span className="font-semibold">{formatDateLocal(punitoryFrom)}</span> hasta <span className="font-semibold">{formatDateLocal(punitoryTo)}</span>
                 </span>
+              </div>
+            )}
+
+            {creditApplied > 0 && (
+              <div className="flex justify-between text-success">
+                <span>
+                  Saldo a favor aplicado
+                  {creditAlreadyUsed && (
+                    <span className="text-xs text-base-content/50 ml-1">
+                      (ya aplicado en un pago anterior de esta deuda)
+                    </span>
+                  )}
+                </span>
+                <span className="font-mono text-success">-{formatCurrency(creditApplied)}</span>
               </div>
             )}
 
@@ -328,7 +471,32 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
           </div>
         </div>
 
-        <div className="form-control">
+        {/* Checkboxes */}
+        <div className="flex gap-6 mt-4">
+          {totalPunitory > 0 && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-sm checkbox-success"
+                checked={forgivePunitorios}
+                onChange={(e) => setForgivePunitorios(e.target.checked)}
+              />
+              <span className="text-sm">Condonar punitorios</span>
+            </label>
+          )}
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="checkbox checkbox-sm checkbox-primary"
+              checked={generateReceipt}
+              onChange={(e) => setGenerateReceipt(e.target.checked)}
+            />
+            <span className="text-sm">Generar recibo</span>
+          </label>
+        </div>
+
+        <div className="form-control mt-2">
           <label className="label">
             <span className="label-text text-sm">Observaciones</span>
           </label>
@@ -341,25 +509,28 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
           />
         </div>
         </>}
+        </>}
       </div>
 
-      <div className="modal-action">
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          {isBlocked ? 'Cerrar' : 'Cancelar'}
-        </Button>
-        {!isBlocked && (
-        <Button
-          variant="primary"
-          size="sm"
-          loading={isPaying}
-          onClick={handleSubmit}
-          disabled={!amount || amount <= 0}
-        >
-          <CurrencyDollarIcon className="w-4 h-4" />
-          Pagar Deuda
-        </Button>
-        )}
-      </div>
+      {!paymentSuccess && (
+        <div className="modal-action">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            {isBlocked ? 'Cerrar' : 'Cancelar'}
+          </Button>
+          {!isBlocked && (
+          <Button
+            variant="primary"
+            size="sm"
+            loading={isPaying}
+            onClick={handleSubmit}
+            disabled={!amount || amount <= 0}
+          >
+            <CurrencyDollarIcon className="w-4 h-4" />
+            Pagar Deuda
+          </Button>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }

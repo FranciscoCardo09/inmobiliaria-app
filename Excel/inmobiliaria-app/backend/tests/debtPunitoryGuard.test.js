@@ -82,3 +82,35 @@ test('calculateDebtPunitory - SÍ corrige hacia abajo una deuda sobre-estimada (
   const after = await prisma.debt.findUnique({ where: { id: 'd2' } });
   assert.strictEqual(after.unpaidRentAmount, 0, 'corrección hacia abajo SÍ permitida: rent pagado → 0');
 });
+
+test('calculateDebtPunitory - NO borra el punitorio catch-up de una deuda nunca pagada (bug 2026-07-16)', async () => {
+  const prisma = makeFakePrisma();
+  // Deuda creada correctamente: al cerrar el mes quedó $500.000 de alquiler impago y,
+  // como la deuda se creó 44 días después del cierre, createDebtFromMonthlyRecord
+  // congeló ese catch-up devengado en accumulatedPunitory.
+  const debtRow = await prisma.debt.create({ data: {
+    id: 'd3', groupId: 'g1', contractId: 'c1', monthlyRecordId: 'mr1',
+    periodMonth: 5, periodYear: 2026, periodLabel: 'Mayo 2026',
+    originalAmount: 632000,
+    unpaidRentAmount: 500000, unpaidServicesAmount: 0, accumulatedPunitory: 132000,
+    currentTotal: 632000, amountPaid: 0, status: 'OPEN',
+    punitoryPercent: 0.006, punitoryStartDate: new Date(2026, 4, 1), lastPaymentDate: null,
+  }});
+
+  // MonthlyRecord sano (sin previousBalance corrupto): nunca se pagó nada, así que
+  // su punitoryAmount congelado es 0 — calculateImputation NO puede reproducir el
+  // catch-up devengado después del cierre, solo lo que el MonthlyRecord ya sabía.
+  const healthyUnpaidMR = {
+    rentAmount: 500000, servicesTotal: 0, ivaAmount: 0,
+    amountPaid: 0, punitoryAmount: 0, previousBalance: 0,
+  };
+
+  const debtService = buildService(prisma);
+  // skipUpdate=false: exactamente lo que hacen GET /debts/:id y punitory-preview
+  // (los que dispara el modal de pago) al abrir esta deuda.
+  await debtService.calculateDebtPunitory(debtRow, new Date(2026, 6, 16), preloadedFor(healthyUnpaidMR), false);
+
+  const after = await prisma.debt.findUnique({ where: { id: 'd3' } });
+  assert.strictEqual(after.accumulatedPunitory, 132000, 'el catch-up NO debe borrarse por solo abrir/leer la deuda');
+  assert.strictEqual(after.currentTotal, 632000, 'currentTotal NO debe perder el catch-up');
+});

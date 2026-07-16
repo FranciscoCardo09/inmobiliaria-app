@@ -566,6 +566,9 @@ describe('bulkAssign - respeta rescindedAt', () => {
         create: async (data) => makeRecord(contract.id, data.data.periodMonth, data.data.periodYear),
       },
       contract: { findUnique: async () => contract },
+      // Sin historial: bulkAssign cae a contract.baseRent (mismo criterio que
+      // getOrCreateMonthlyRecords cuando el contrato no tiene RentHistory).
+      rentHistory: { findFirst: async () => null },
       monthlyService: {
         findUnique: async () => null,
         upsert: async () => { upsertCallCount++; return {}; },
@@ -592,5 +595,100 @@ describe('bulkAssign - respeta rescindedAt', () => {
     // Months 1, 2, 3 should be upserted (3 is the rescission month itself, not after)
     // Months 4, 5, 6 should be skipped
     assert.strictEqual(upsertCallCount, 3, `debe upsertear solo los meses 1, 2 y 3 (rescisión en mes 3), obtuvo: ${upsertCallCount}`);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T7 — propagateServiceForward / removeServiceForward NO tocan meses que ya
+//      tienen un pago registrado (confirmado por el usuario 2026-07-14):
+//      agregar/editar/quitar un servicio en enero con propagación, si marzo
+//      ya tiene un pago, debe aplicarse a enero, febrero, abril, mayo... pero
+//      saltear marzo.
+// ────────────────────────────────────────────────────────────
+describe('propagateServiceForward - no toca meses con pago registrado', () => {
+  test('salta el mes con amountPaid>0, propaga al resto (ene, feb, abr..dic)', async () => {
+    const contract = makeContract({ startMonth: 1, durationMonths: 24 });
+    const upsertedMonths = [];
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      $transaction: async (fn) => fn(mockPrisma),
+      monthlyRecord: {
+        // Usado por el nuevo guard de propagateServiceForward: solo marzo (mes 3)
+        // ya tiene un pago registrado.
+        findMany: async () => [
+          makeRecord(contract.id, 3, 2026, { amountPaid: 105000 }),
+          makeRecord(contract.id, 1, 2026, { amountPaid: 0 }),
+        ],
+        // Usado por bulkAssign para cada mes individual (ninguno existe todavía
+        // salvo el 1 y el 3, que no deberían llegar acá para el 3 al estar filtrado).
+        findUnique: async ({ where }) => {
+          const { periodMonth } = where.contractId_periodMonth_periodYear;
+          if (periodMonth === 1) return makeRecord(contract.id, 1, 2026, { amountPaid: 0 });
+          return null;
+        },
+        create: async ({ data }) => makeRecord(contract.id, data.periodMonth, data.periodYear),
+      },
+      contract: { findUnique: async () => contract },
+      rentHistory: { findFirst: async () => ({ rentAmount: 100000 }) },
+      monthlyService: {
+        findUnique: async () => null,
+        upsert: async ({ where }) => {
+          const monthlyRecordId = where.monthlyRecordId_conceptTypeId.monthlyRecordId;
+          upsertedMonths.push(monthlyRecordId);
+          return { id: 'svc-1', monthlyRecordId, amount: 15000, conceptType: { id: 'ct-1', name: 'Agua', category: 'SERVICIO' } };
+        },
+      },
+    };
+    // syncDebtServicesFromRecord (propagación a Deudas existentes, 2026-07-16)
+    // no es lo que este test verifica — se mockea como no-op para no pegarle a
+    // la DB real con los IDs sintéticos de este fixture.
+    const mockDebtService = { syncDebtServicesFromRecord: async () => {} };
+
+    const service = proxyquire('../src/services/monthlyServiceService', {
+      '../lib/prisma': mockPrisma,
+      './monthlyRecordService': mockRecalculate,
+      './debtService': mockDebtService,
+    });
+
+    const { skippedMonths } = await service.propagateServiceForward('group-1', contract.id, 'ct-1', 15000, 1, 2026);
+
+    assert.deepStrictEqual(skippedMonths, [3], 'debe saltear exactamente marzo (mes 3), que ya tiene un pago');
+    assert.strictEqual(upsertedMonths.length, 11, 'debe propagar a los otros 11 meses (todos menos marzo)');
+    assert.ok(!upsertedMonths.includes(`record-${contract.id}-3-2026`), 'NO debe tocar el registro de marzo');
+  });
+});
+
+describe('removeServiceForward - no toca meses con pago registrado', () => {
+  test('no borra el servicio de un mes con amountPaid>0, sí de los demás', async () => {
+    const deletedFromRecordIds = [];
+
+    const mockRecalculate = { recalculateMultipleRecords: async () => {} };
+    const mockPrisma = {
+      $transaction: async (fn) => fn(mockPrisma),
+      monthlyRecord: {
+        findMany: async () => [
+          { id: 'r-1', periodMonth: 1, amountPaid: 0 },
+          { id: 'r-2', periodMonth: 2, amountPaid: 0 },
+          { id: 'r-3', periodMonth: 3, amountPaid: 105000 }, // pagado — no debe tocarse
+        ],
+      },
+      monthlyService: {
+        deleteMany: async ({ where }) => {
+          deletedFromRecordIds.push(...where.monthlyRecordId.in);
+          return { count: where.monthlyRecordId.in.length };
+        },
+      },
+    };
+
+    const service = proxyquire('../src/services/monthlyServiceService', {
+      '../lib/prisma': mockPrisma,
+      './monthlyRecordService': mockRecalculate,
+    });
+
+    const { skippedMonths } = await service.removeServiceForward('group-1', 'contract-1', 'ct-1', 1, 2026);
+
+    assert.deepStrictEqual(skippedMonths, [3]);
+    assert.deepStrictEqual(deletedFromRecordIds.sort(), ['r-1', 'r-2'], 'solo debe borrar el servicio de los meses sin pago (r-1, r-2), no de r-3 (pagado)');
   });
 });

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePaymentTransactions, usePunitoryPreview } from '../hooks/usePaymentTransactions'
-import { useCanPayCurrentMonth } from '../hooks/useDebts'
+import { useCanPayCurrentMonth, useDebts } from '../hooks/useDebts'
 import { useMonthlyRecordDetail } from '../hooks/useMonthlyRecords'
 import { useNotifications } from '../hooks/useNotifications'
 import { useAuthStore } from '../stores/authStore'
@@ -12,6 +12,7 @@ import toast from 'react-hot-toast'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import DateInput, { getLocalToday } from './ui/DateInput'
+import BulkDebtPaymentModal from './BulkDebtPaymentModal'
 import {
   CurrencyDollarIcon,
   ExclamationTriangleIcon,
@@ -64,9 +65,11 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const [generateReceipt, setGenerateReceipt] = useState(true)
   const [observations, setObservations] = useState('')
   const [paymentSuccess, setPaymentSuccess] = useState(null) // { transactionId }
+  const [showBulkModal, setShowBulkModal] = useState(false)
 
   // Notification hook for sending receipts
   const { sendCashReceipt } = useNotifications(groupId)
+  const { payDebtsBulk, isPayingBulk } = useDebts(groupId)
 
   // Get fresh record data in real-time
   // Preserve isPenaltyRecord / isPostExpiry from the list record since the detail endpoint doesn't compute them
@@ -94,14 +97,20 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
 
   const punitoryAmount = forgivePunitorios ? 0 : (punitoryPreview?.amount || 0)
 
-  // Calculate total
+  // Calculate total from raw record fields + the fresh punitory preview for the
+  // selected payment date. NOTA: `record` acá puede venir de useMonthlyRecordDetail
+  // (endpoint de detalle, sin el enrichment de la lista: no trae liveTotalDue/
+  // livePunitoryAmount) — por eso se usan los campos crudos (rentAmount,
+  // servicesTotal, ivaAmount, previousBalance), presentes en ambos endpoints, en
+  // vez de los campos "live" que solo existen en la lista de Control Mensual.
   const isMultaRescision = !!record?.isPenaltyRecord
   const alquiler = record?.rentAmount || 0
   const servicios = record?.servicesTotal || 0
   const aFavorAnterior = record?.previousBalance || 0
   const iva = record?.ivaAmount || 0
-  const totalDue = Math.round(alquiler + servicios + punitoryAmount + iva - aFavorAnterior)
   const alreadyPaid = record?.amountPaid || 0
+
+  const totalDue = Math.round(alquiler + servicios + punitoryAmount + iva - aFavorAnterior)
   const remaining = Math.max(totalDue - Math.round(alreadyPaid), 0)
 
   useEffect(() => {
@@ -175,6 +184,24 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const parsedAmount = typeof amount === 'number' ? amount : (parseFloat(amount) || 0)
   const isOverpay = parsedAmount > remaining
   const isPartial = parsedAmount > 0 && parsedAmount < remaining
+
+  // "Pagar varias": reemplaza este modal por el de pago múltiple (deudas + este mes
+  // actual como cola del waterfall), preservando debtCheck/record/groupId ya cargados.
+  if (showBulkModal) {
+    return (
+      <BulkDebtPaymentModal
+        debts={debtCheck?.debts || []}
+        groupId={groupId}
+        currentRecord={record}
+        onPay={payDebtsBulk}
+        isPaying={isPayingBulk}
+        onClose={() => {
+          setShowBulkModal(false)
+          onClose()
+        }}
+      />
+    )
+  }
 
   return (
     <Modal
@@ -335,6 +362,17 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
               <ExclamationTriangleIcon className="w-4 h-4" />
               Ir a pagar {blocker?.periodLabel || 'el período anterior'}
             </Button>
+            {debtCheck.debts?.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => setShowBulkModal(true)}
+              >
+                <CurrencyDollarIcon className="w-4 h-4" />
+                Pagar varias
+              </Button>
+            )}
           </div>
           )
         })()}
@@ -347,7 +385,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
           <div className="space-y-1 text-sm">
             <div className="flex justify-between">
               <span>{isMultaRescision ? 'Multa Rescisión' : 'Alquiler'}</span>
-              <span className="font-mono">{formatCurrency(alquiler)}</span>
+              <span className="font-mono">{formatCurrency(record?.rentAmount)}</span>
             </div>
 
             <div className="divider my-1 text-xs">Servicios/Extras</div>
@@ -367,7 +405,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
 
             <div className="flex justify-between text-base-content/80">
               <span className="font-medium">Subtotal servicios</span>
-              <span className="font-mono">{formatCurrency(servicios)}</span>
+              <span className="font-mono">{formatCurrency(record?.servicesTotal)}</span>
             </div>
 
             <div className="divider my-1"></div>

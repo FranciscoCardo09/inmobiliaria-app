@@ -75,6 +75,10 @@ test('syncDebtServicesFromRecord - NO infla servicios con previousBalance negati
   await prisma.debt.create({ data: {
     id: 'd4', monthlyRecordId: 'mr4', status: 'OPEN',
     unpaidRentAmount: 0, unpaidServicesAmount: 0, accumulatedPunitory: 76.92,
+    // previousRecordPayment: lo que createDebtFromMonthlyRecord habría congelado del
+    // mismo monthlyRecord.amountPaid al crear esta deuda — tiene que coincidir con el
+    // amountPaid real del mes (999000) para que el guard anti-inflación funcione.
+    previousRecordPayment: 999000,
     amountPaid: 0, originalAmount: 1004202.92, currentTotal: 76.92,
   }});
 
@@ -86,21 +90,49 @@ test('syncDebtServicesFromRecord - NO infla servicios con previousBalance negati
   assert.strictEqual(after.currentTotal, 76.92, 'currentTotal no cambia');
 });
 
-test('syncDebtServicesFromRecord - NO toca una deuda PAID', async () => {
+test('syncDebtServicesFromRecord - reabre una deuda PAID si el servicio/IVA nuevo supera lo ya pagado (decisión 2026-07-16: pagar y agregar IVA después tiene que reflejarse)', async () => {
   const prisma = makeFakePrisma();
   await prisma.monthlyRecord.create({ data: {
-    id: 'mr3', rentAmount: 100000, includeIva: false, amountPaid: 0, punitoryAmount: 0, previousBalance: 0,
-    services: [{ amount: 50000, conceptType: { category: 'OTROS' } }],
+    id: 'mr3', rentAmount: 100000, includeIva: true, amountPaid: 0, punitoryAmount: 0, previousBalance: 0,
+    services: [],
   }});
   await prisma.debt.create({ data: {
     id: 'd3', monthlyRecordId: 'mr3', status: 'PAID',
-    unpaidRentAmount: 0, unpaidServicesAmount: 0, accumulatedPunitory: 0,
-    amountPaid: 100000, originalAmount: 100000, currentTotal: 0,
+    unpaidRentAmount: 100000, unpaidServicesAmount: 0, accumulatedPunitory: 0,
+    amountPaid: 100000, originalAmount: 100000, currentTotal: 0, closedAt: new Date(),
   }});
 
   const debtService = buildService(prisma);
+  // IVA agregado DESPUÉS de que la deuda quedó saldada: 21000 (100000*0.21) supera lo
+  // que ya se pagó de más, así que la deuda tiene que reabrirse con ese saldo.
   const res = await debtService.syncDebtServicesFromRecord('mr3');
-  assert.strictEqual(res, null, 'deuda PAID no se modifica');
+  assert.notStrictEqual(res, null, 'ya no se ignora una deuda PAID');
+
   const after = await prisma.debt.findUnique({ where: { id: 'd3' } });
-  assert.strictEqual(after.unpaidServicesAmount, 0);
+  assert.strictEqual(after.unpaidServicesAmount, 21000, 'el IVA nuevo se suma como impago');
+  assert.strictEqual(after.currentTotal, 21000, 'currentTotal refleja el IVA pendiente');
+  assert.strictEqual(after.status, 'PARTIAL', 'se reabre (ya tenía amountPaid>0)');
+  assert.strictEqual(after.closedAt, null, 'closedAt se limpia al reabrir');
+});
+
+test('syncDebtServicesFromRecord - una deuda PAID se mantiene PAID si el servicio/IVA nuevo sigue cubierto por lo ya pagado', async () => {
+  const prisma = makeFakePrisma();
+  await prisma.monthlyRecord.create({ data: {
+    id: 'mr3b', rentAmount: 100000, includeIva: false, amountPaid: 0, punitoryAmount: 0, previousBalance: 0,
+    services: [{ amount: 50000, conceptType: { category: 'OTROS' } }],
+  }});
+  await prisma.debt.create({ data: {
+    id: 'd3b', monthlyRecordId: 'mr3b', status: 'PAID',
+    unpaidRentAmount: 100000, unpaidServicesAmount: 0, accumulatedPunitory: 0,
+    amountPaid: 150000, originalAmount: 100000, currentTotal: 0,
+  }});
+
+  const debtService = buildService(prisma);
+  const res = await debtService.syncDebtServicesFromRecord('mr3b');
+  assert.notStrictEqual(res, null);
+
+  const after = await prisma.debt.findUnique({ where: { id: 'd3b' } });
+  assert.strictEqual(after.unpaidServicesAmount, 50000, 'el bruto se actualiza igual, para reportes correctos');
+  assert.strictEqual(after.currentTotal, 0, 'lo ya pagado de más sigue cubriendo el servicio nuevo');
+  assert.strictEqual(after.status, 'PAID', 'no hay nada pendiente: se mantiene PAID');
 });

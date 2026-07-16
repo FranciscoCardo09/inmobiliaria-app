@@ -423,20 +423,48 @@ async function verifyAll() {
       else servicesTotal += s.amount;
     }
     const amountPaid = r2(r.transactions.reduce((a, t) => a + t.amount, 0));
-    const totalPunitory = r2(r.transactions.reduce((a, t) => {
-      if (t.punitoryForgiven) return a;
-      return a + t.concepts.filter((c) => c.type === 'PUNITORIOS').reduce((s, c) => s + c.amount, 0);
-    }, 0));
+    const openDebt = r.debt && r.debt.status !== 'PAID' ? r.debt : null;
     const iva = r.includeIva ? r.rentAmount * 0.21 : 0;
-    const expTotalDue = r2(Math.max(r.rentAmount + servicesTotal + totalPunitory + iva - r.previousBalance, 0));
-    const expBalance = r2(amountPaid - expTotalDue);
 
-    // A) totalDue correcto (suma punitorios de TODAS las tx)
-    check(`[${tag}] totalDue = renta+serv+punit(todas)+iva-prevBal`, Math.abs(r2(r.totalDue) - expTotalDue) <= 1,
-      `stored=${fmt(r.totalDue)} esperado=${fmt(expTotalDue)}`);
-    // B) balance = amountPaid - totalDue
-    check(`[${tag}] balance = pagado - totalDue`, Math.abs(r2(r.balance) - expBalance) <= 1,
-      `stored=${fmt(r.balance)} esperado=${fmt(expBalance)}`);
+    // Investigación 2026-07-14: con Deuda abierta, `totalDue`/`punitoryAmount` del
+    // record se sincronizan con la Deuda de forma PEREZOSA — solo cuando ALGO
+    // recalcula ese contrato desde ese mes en adelante (_recalculateCore cascada por
+    // contractId + monthNumber >= mínimo tocado, monthlyRecordService.js:1122-1150),
+    // no de forma continua/en vivo. Un mes con deuda que nunca vuelve a tocarse
+    // (p.ej. C06_none, C22_none_services: jamás pagan nada más) puede quedar con
+    // `totalDue` desactualizado (sin el punitorio acumulado de la deuda) para
+    // siempre — eso es coherente con el diseño (Control Mensual/Liquidación SÍ
+    // recalculan en vivo desde la Deuda, no confían en este campo persistido), pero
+    // significa que NO hay una fórmula única "esperada" para `totalDue` en un
+    // registro con deuda abierta sin conocer su historial de recálculos. Por eso acá
+    // solo se verifica auto-consistencia (balance = pagado - el totalDue ACTUAL,
+    // esté al día o no) en vez de re-derivar totalDue desde cero (eso daba falsos
+    // positivos: caso C18_two_debts, C06_none, C22_none_services, C09_debt_pay_full).
+    if (openDebt) {
+      const expBalanceSelf = r2(amountPaid - r.totalDue);
+      check(`[${tag}] balance = pagado - totalDue (auto-consistencia, deuda abierta)`, Math.abs(r2(r.balance) - expBalanceSelf) <= 1,
+        `stored=${fmt(r.balance)} esperado=${fmt(expBalanceSelf)}`);
+    } else {
+      const totalPunitory = r2(r.transactions.reduce((a, t) => {
+        if (t.punitoryForgiven) return a;
+        return a + t.concepts.filter((c) => c.type === 'PUNITORIOS').reduce((s, c) => s + c.amount, 0);
+      }, 0));
+      // Investigación 2026-07-14: `balance` se computa contra el totalDue SIN
+      // clampear (monthlyRecordService.js:1256-1264, fix "C-01") — si el crédito
+      // arrastrado (previousBalance) supera lo que se debe, el excedente sobrevive
+      // como balance positivo para arrastrarse al mes siguiente. El campo
+      // PERSISTIDO `totalDue` sí se clampea a >= 0 al guardarse. Usar el clampeado
+      // para `expBalance` pierde ese crédito remanente (falso positivo: caso
+      // C19_credit_consume).
+      const rawTotalDue = r.rentAmount + servicesTotal + totalPunitory + iva - r.previousBalance;
+      const expTotalDue = r2(Math.max(rawTotalDue, 0));
+      const expBalance = r2(amountPaid - rawTotalDue);
+
+      check(`[${tag}] totalDue = renta+serv+punit(todas)+iva-prevBal`, Math.abs(r2(r.totalDue) - expTotalDue) <= 1,
+        `stored=${fmt(r.totalDue)} esperado=${fmt(expTotalDue)}`);
+      check(`[${tag}] balance = pagado - totalDue`, Math.abs(r2(r.balance) - expBalance) <= 1,
+        `stored=${fmt(r.balance)} esperado=${fmt(expBalance)}`);
+    }
     // C) amountPaid coincide con la suma de transacciones
     check(`[${tag}] amountPaid = suma transacciones`, Math.abs(r2(r.amountPaid) - amountPaid) <= 1,
       `stored=${fmt(r.amountPaid)} txsum=${fmt(amountPaid)}`);
@@ -569,11 +597,29 @@ async function verifyReports() {
       const data = await reportSvc.getControlMensualData(GID, m, y);
       const rows = data?.registros;
       check(`Reporte Control Mensual ${MN[m]} corre y trae filas`, !!rows && rows.length >= 1, `rows=${rows ? rows.length : 'null'}`);
-      // cross-check: total del reporte = suma de totalDue de los registros del mes
+      // cross-check: total del reporte = suma de totales ESPERADOS por registro del mes.
+      // Investigación 2026-07-14: para registros con Deuda abierta/parcial, Control
+      // Mensual muestra el punitorio EN VIVO recalculado a "hoy" (mismo criterio que
+      // Control Mensual vs. Liquidación en AUDITORIA_CONTROL_LIQUIDACION_2026-07.md),
+      // no el `totalDue` congelado — comparar contra la suma cruda de `totalDue` daba
+      // falsos positivos crecientes mes a mes a medida que la mora envejecía.
       if (rows && data.totales) {
-        const recsMes = await prisma.monthlyRecord.findMany({ where: { groupId: GID, periodMonth: m, periodYear: y }, select: { totalDue: true } });
-        const sumDue = r2(recsMes.reduce((a, r) => a + (r.totalDue || 0), 0));
-        check(`Control Mensual ${MN[m]}: total reporte ≈ suma totalDue`, Math.abs(r2(data.totales.total) - sumDue) <= 5, `reporte=${fmt(data.totales.total)} suma=${fmt(sumDue)}`);
+        const recsMes = await prisma.monthlyRecord.findMany({
+          where: { groupId: GID, periodMonth: m, periodYear: y },
+          include: { debt: true },
+        });
+        let sumExpected = 0;
+        for (const r of recsMes) {
+          if (r.debt && r.debt.status !== 'PAID') {
+            const live = await debtSvc.computeLiveDebtTotal(r.debt, '2026-06-22', null);
+            const iva = r.includeIva ? r.ivaAmount : 0;
+            sumExpected += r2(r.rentAmount + r.servicesTotal + iva + (live.liveAccumulatedPunitory || 0) - r.previousBalance);
+          } else {
+            sumExpected += r.totalDue || 0;
+          }
+        }
+        sumExpected = r2(sumExpected);
+        check(`Control Mensual ${MN[m]}: total reporte ≈ suma esperada (viva en deudas abiertas)`, Math.abs(r2(data.totales.total) - sumExpected) <= 5, `reporte=${fmt(data.totales.total)} esperado=${fmt(sumExpected)}`);
       }
     } catch (e) { check(`Reporte Control Mensual ${MN[m]}`, false, e.message); }
   }
@@ -658,11 +704,22 @@ async function invariantScan() {
   const anomalies = [];
   const recs = await prisma.monthlyRecord.findMany({
     where: { groupId: GID },
-    select: { id: true, contractId: true, monthNumber: true, totalDue: true, amountPaid: true, balance: true, status: true, punitoryAmount: true, isCancelled: true },
+    select: { id: true, contractId: true, monthNumber: true, totalDue: true, amountPaid: true, balance: true, status: true, punitoryAmount: true, isCancelled: true, previousBalance: true },
   });
-  // balance math
+  // balance math — `totalDue` persistido está clampeado a >= 0 (no se puede "deber
+  // negativo"), pero `balance` se computa contra el total SIN clampear (fix "C-01",
+  // monthlyRecordService.js:1256-1264) para no perder el crédito remanente cuando
+  // `previousBalance` supera lo que se debe (investigación 2026-07-14, caso
+  // C19_credit_consume). En ese caso puntual (totalDue clampeado a 0 con crédito
+  // previo) la fórmula ingenua `amountPaid - totalDue` da un falso positivo — se
+  // excluye ese caso en vez de comparar contra el campo ya clampeado.
   let bad = 0;
-  for (const r of recs) { if (r.isCancelled) continue; const exp = r2((r.amountPaid || 0) - (r.totalDue || 0)); if (Math.abs(r2(r.balance || 0) - exp) > 1) bad++; }
+  for (const r of recs) {
+    if (r.isCancelled) continue;
+    if ((r.totalDue || 0) <= 0.01 && (r.previousBalance || 0) > 0) continue;
+    const exp = r2((r.amountPaid || 0) - (r.totalDue || 0));
+    if (Math.abs(r2(r.balance || 0) - exp) > 1) bad++;
+  }
   if (bad) anomalies.push(`${bad} registros con balance != pagado-totalDue`);
   // negativos
   if (recs.some((r) => (r.punitoryAmount || 0) < -0.01)) anomalies.push('punitorios negativos');
