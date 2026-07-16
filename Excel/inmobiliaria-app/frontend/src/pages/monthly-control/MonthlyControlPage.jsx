@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { useMonthlyRecords } from '../../hooks/useMonthlyRecords'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
-import { useCategories } from '../../hooks/useCategories'
+import { useConceptTypes } from '../../hooks/usePayments'
 import { formatServiceLabel } from '../../utils/serviceLabel'
 import api from '../../services/api'
 import Card from '../../components/ui/Card'
@@ -117,10 +117,25 @@ export default function MonthlyControlPage() {
     const y = parseInt(searchParams.get('year'))
     return (y >= 2020 && y <= 2100) ? y : now.getFullYear()
   })
+
+  // Re-sincronizar mes/año cuando cambian los query params SIN desmontar la página
+  // (p.ej. el botón "Ir a pagar <período>" del modal BLOQUEADO navega a esta misma
+  // ruta con otros ?month=&year= — React Router no remonta el componente porque la
+  // ruta es la misma, así que el useState lazy de arriba no se vuelve a ejecutar).
+  useEffect(() => {
+    const m = parseInt(searchParams.get('month'))
+    const y = parseInt(searchParams.get('year'))
+    if (m >= 1 && m <= 12) setPeriodMonth(m)
+    if (y >= 2020 && y <= 2100) setPeriodYear(y)
+  }, [searchParams])
   const [statusFilter, setStatusFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
   const [contractTypeFilter, setContractTypeFilter] = useState('')
+  const [serviceFilter, setServiceFilter] = useState('')
+  const [serviceMode, setServiceMode] = useState('ANY') // 'ANY' | 'ONLY'
+  const [mesOperator, setMesOperator] = useState('eq') // 'eq' | 'gt' | 'lt' | 'gte' | 'lte'
+  const [mesValue, setMesValue] = useState('')
+  const [ivaFilter, setIvaFilter] = useState('') // '' | 'CON' | 'SIN'
 
   // Sort state
   const [sortColumn, setSortColumn] = useState(null) // null | 'propiedad' | 'dueno' | 'inquilino' | 'mes' | 'alquiler' | 'total' | 'pagado'
@@ -143,8 +158,9 @@ export default function MonthlyControlPage() {
   // Debt payment hook
   const { payDebt, isPaying, forgiveDebt } = useDebts(currentGroupId)
 
-  // Categories for filter
-  const { categories } = useCategories(currentGroupId)
+  // Service catalog for the service filter
+  const { conceptTypes } = useConceptTypes(currentGroupId)
+  const activeConceptTypes = (conceptTypes || []).filter((ct) => ct.isActive)
 
   // Notification state
   const [notifyModal, setNotifyModal] = useState({ open: false, record: null })
@@ -156,7 +172,7 @@ export default function MonthlyControlPage() {
     currentGroupId,
     periodMonth,
     periodYear,
-    { status: backendStatus, categoryId: categoryFilter }
+    { status: backendStatus }
   )
 
   // Wrappers that refetch records after debt actions so the summary updates immediately
@@ -170,7 +186,18 @@ export default function MonthlyControlPage() {
     refetchRecords()
   }, [forgiveDebt, refetchRecords])
 
-  const filtersState = { statusFilter, searchFilter, categoryFilter, contractTypeFilter, sortColumn, sortDirection };
+  const filtersState = {
+    statusFilter,
+    searchFilter,
+    contractTypeFilter,
+    serviceFilter,
+    serviceMode,
+    mesOperator,
+    mesValue,
+    ivaFilter,
+    sortColumn,
+    sortDirection,
+  };
   const { filteredRecords: records, showIvaColumn } = useMonthlyFiltering(allRecords, filtersState);
 
   // Navigation between months
@@ -433,7 +460,7 @@ export default function MonthlyControlPage() {
           <FunnelIcon className="w-4 h-4" />
           <span className="text-sm font-semibold">Filtros</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <select
             className="select select-bordered select-sm w-full"
             value={statusFilter}
@@ -456,15 +483,61 @@ export default function MonthlyControlPage() {
             <option value="PROPIETARIO">Propietarios</option>
           </select>
 
+          <div className="flex gap-1">
+            <select
+              className="select select-bordered select-sm w-full"
+              value={serviceFilter}
+              onChange={(e) => setServiceFilter(e.target.value)}
+              title="Filtrar por servicio"
+            >
+              <option value="">Todos los servicios</option>
+              {activeConceptTypes.map((ct) => (
+                <option key={ct.id} value={ct.id}>{ct.label || ct.name}</option>
+              ))}
+            </select>
+            <select
+              className="select select-bordered select-sm w-full"
+              value={serviceMode}
+              onChange={(e) => setServiceMode(e.target.value)}
+              disabled={!serviceFilter}
+              title="Modo de filtrado por servicio"
+            >
+              <option value="ANY">Paga este servicio</option>
+              <option value="ONLY">Solo este servicio</option>
+            </select>
+          </div>
+
+          <div className="flex gap-1">
+            <select
+              className="select select-bordered select-sm"
+              value={mesOperator}
+              onChange={(e) => setMesOperator(e.target.value)}
+              title="Operador de comparación de mes de contrato"
+            >
+              <option value="eq">Mes =</option>
+              <option value="gt">Mes &gt;</option>
+              <option value="lt">Mes &lt;</option>
+              <option value="gte">Mes ≥</option>
+              <option value="lte">Mes ≤</option>
+            </select>
+            <input
+              type="number"
+              min="1"
+              placeholder="N°"
+              className="input input-bordered input-sm w-full"
+              value={mesValue}
+              onChange={(e) => setMesValue(e.target.value)}
+            />
+          </div>
+
           <select
             className="select select-bordered select-sm w-full"
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            value={ivaFilter}
+            onChange={(e) => setIvaFilter(e.target.value)}
           >
-            <option value="">Todas las categorías</option>
-            {(categories || []).map((cat) => (
-              <option key={cat.id} value={cat.id}>{cat.name}</option>
-            ))}
+            <option value="">IVA: todos</option>
+            <option value="CON">Con IVA</option>
+            <option value="SIN">Sin IVA</option>
           </select>
 
           <input
@@ -480,7 +553,11 @@ export default function MonthlyControlPage() {
             onClick={() => {
               setStatusFilter('')
               setContractTypeFilter('')
-              setCategoryFilter('')
+              setServiceFilter('')
+              setServiceMode('ANY')
+              setMesOperator('eq')
+              setMesValue('')
+              setIvaFilter('')
               setSearchFilter('')
             }}
           >

@@ -1,7 +1,20 @@
 import { useMemo } from 'react'
 
+const DISCOUNT_CATEGORIES = ['DESCUENTO', 'BONIFICACION']
+
 export function useMonthlyFiltering(allRecords = [], filters = {}) {
-  const { statusFilter, contractTypeFilter, searchFilter, sortColumn, sortDirection } = filters;
+  const {
+    statusFilter,
+    contractTypeFilter,
+    searchFilter,
+    sortColumn,
+    sortDirection,
+    serviceFilter,
+    serviceMode,
+    mesOperator,
+    mesValue,
+    ivaFilter,
+  } = filters;
 
   const filteredRecords = useMemo(() => {
     let filtered = allRecords
@@ -24,6 +37,45 @@ export function useMonthlyFiltering(allRecords = [], filters = {}) {
         const address = (r.property?.address || '').toLowerCase()
         const owner = (r.owner?.name || '').toLowerCase()
         return tenant.includes(term) || address.includes(term) || owner.includes(term)
+      })
+    }
+
+    // Service filter (paga este servicio / solo paga este servicio)
+    if (serviceFilter) {
+      filtered = filtered.filter((r) => {
+        const services = (r.services || []).filter(
+          (s) => !DISCOUNT_CATEGORIES.includes(s.conceptType?.category)
+        )
+        if (serviceMode === 'ONLY') {
+          return services.length > 0 && services.every((s) => s.conceptType?.id === serviceFilter)
+        }
+        return services.some((s) => s.conceptType?.id === serviceFilter)
+      })
+    }
+
+    // Month-of-contract filter (compares against the "Mes N" shown in periodLabel)
+    if (mesValue !== '' && mesValue != null && !Number.isNaN(Number(mesValue))) {
+      const target = Number(mesValue)
+      filtered = filtered.filter((r) => {
+        const match = /Mes\s+(\d+)/.exec(r.periodLabel || '')
+        if (!match) return false
+        const mesNum = Number(match[1])
+        switch (mesOperator) {
+          case 'gt': return mesNum > target
+          case 'lt': return mesNum < target
+          case 'gte': return mesNum >= target
+          case 'lte': return mesNum <= target
+          case 'eq':
+          default: return mesNum === target
+        }
+      })
+    }
+
+    // IVA filter
+    if (ivaFilter) {
+      filtered = filtered.filter((r) => {
+        const hasIva = !!(r.includeIva || r.ivaAmount > 0)
+        return ivaFilter === 'CON' ? hasIva : !hasIva
       })
     }
 
@@ -70,7 +122,19 @@ export function useMonthlyFiltering(allRecords = [], filters = {}) {
     }
 
     return filtered
-  }, [allRecords, statusFilter, searchFilter, contractTypeFilter, sortColumn, sortDirection])
+  }, [
+    allRecords,
+    statusFilter,
+    searchFilter,
+    contractTypeFilter,
+    sortColumn,
+    sortDirection,
+    serviceFilter,
+    serviceMode,
+    mesOperator,
+    mesValue,
+    ivaFilter,
+  ])
 
   const showIvaColumn = useMemo(() => {
     return allRecords.some(
