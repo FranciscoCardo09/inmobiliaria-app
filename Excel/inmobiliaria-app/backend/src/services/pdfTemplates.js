@@ -146,6 +146,13 @@ const drawHeader = (doc, emp) => {
 
 const drawFooter = (doc, emp, pg) => {
   const fy = PAGE.height - 30;
+  // fy cae DENTRO del margen inferior de la página (PAGE.height - margin < fy):
+  // sin este workaround, doc.text() dispara la auto-paginación de PDFKit (cree
+  // que el texto no entra) e inserta 1-2 páginas en blanco extra al final de
+  // CADA reporte que usa este footer.
+  const prevBottom = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+
   doc.strokeColor(C.light).lineWidth(0.3).moveTo(PAGE.margin, fy - 6).lineTo(PAGE.width - PAGE.margin, fy - 6).stroke();
 
   const parts = ['Generado por ' + (emp.nombre || 'Inmobiliaria')];
@@ -155,6 +162,8 @@ const drawFooter = (doc, emp, pg) => {
     .text(parts.join('  |  '), PAGE.margin, fy, { width: W - 40 });
   if (pg) doc.text(`${pg}`, PAGE.width - PAGE.margin - 30, fy, { width: 30, align: 'right' });
   doc.fillColor(C.black);
+
+  doc.page.margins.bottom = prevBottom;
 };
 
 // ============================================
@@ -261,7 +270,11 @@ const drawTable = (doc, startY, headers, rows, opts = {}) => {
   let y = startY;
 
   const newPage = (need) => {
-    if (y + need > PAGE.height - 50) { doc.addPage(); y = PAGE.margin; return true; }
+    // El umbral tiene que ser >= PAGE.margin: si no, PDFKit dispara su propia
+    // auto-paginación interna (basada en page.maxY() = height - margin) antes de
+    // que nuestro chequeo manual actúe, huérfanando líneas sueltas en páginas casi
+    // en blanco (ver checkNewPage más abajo, mismo bug).
+    if (y + need > PAGE.height - PAGE.margin - 2) { doc.addPage(); y = PAGE.margin; return true; }
     return false;
   };
 
@@ -1299,8 +1312,12 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
     if (dataArray.length === 0) { doc.end(); return; }
 
-    const emp = dataArray[0].empresa;
-    const currency = dataArray[0].currency;
+    // Filas de contratos que solo cobraron deuda vieja este período (sin liquidación
+    // propia) no traen `empresa`/`currency` (ver getLiquidacionesAllContracts) — buscar
+    // la primera fila que sí los tenga en vez de asumir que dataArray[0] los trae.
+    const rowWithEmpresa = dataArray.find((d) => d.empresa) || dataArray[0];
+    const emp = rowWithEmpresa.empresa;
+    const currency = rowWithEmpresa.currency;
     const periodo = dataArray[0].periodo;
 
     let y = drawHeader(doc, emp);
@@ -1308,7 +1325,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
       `${periodo.label}`);
 
     // Grand total pre-calc: includes fully-paid + partially-paid rentals
-    const { grandSubtotalAlquileres, grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, grandServiciosCobrado, grandPunitoriosCobrado, grandAlquilerCobrado, grandSaldoAFavor, paidCount, partialCount, unpaidCount } = computeGrandTotals(dataArray);
+    const { grandSubtotalAlquileresPartial, grandSubtotalAlquileresUnpaid, grandTotal, grandPending, grandServiciosCobrado, grandPunitoriosCobrado, grandAlquilerCobrado, grandSaldoAFavor, paidCount, partialCount, unpaidCount } = computeGrandTotals(dataArray);
 
     // Metric cards
     y = drawMetrics(doc, y, [
@@ -1317,7 +1334,10 @@ const generateLiquidacionAllPDF = (dataArray) => {
     ]);
 
     const checkNewPage = (need) => {
-      if (y + need > PAGE.height - 80) {
+      // Umbral >= PAGE.margin (ver newPage() de drawTable, mismo motivo: si no,
+      // PDFKit auto-paginará internamente antes que este chequeo, huérfanando
+      // líneas sueltas en una página casi en blanco).
+      if (y + need > PAGE.height - PAGE.margin - 2) {
         doc.addPage();
         y = PAGE.margin;
       }
@@ -1332,36 +1352,59 @@ const generateLiquidacionAllPDF = (dataArray) => {
         return true;
       });
 
-      const cardRows = conceptosFiltered.length;
-      let deudasH = 0;
-      if (data.deudas && data.deudas.length > 0) {
-        deudasH = 15 + data.deudas.length * 15 + 15 + 20 + 15;
-      }
-      const cobr = data.cobradoOtrosPeriodos;
-      let cobradosH = 0;
-      if (cobr && cobr.total > 0) {
-        cobradosH = 4 + 15 + cobr.detalle.length * 15 + 18;
-      }
+      const unificadas = data.deudasUnificadas || [];
+      const pendientesUni = unificadas.filter(d => d.estado === 'PENDIENTE');
+      const saldadasUni = unificadas.filter(d => d.estado === 'SALDADA');
+
+      // Altura de un mes dentro de un recuadro: encabezado (13) + una línea por
+      // concepto (14 c/u, desde `conceptos` si viene desglosado o desde los
+      // campos discretos alquiler/servicios/punitorios) + eventual "Pagado" (14) +
+      // cierre "Falta pagar"/"Saldo a favor" (15, condicional) + separación (8).
+      const pendienteRowsOf = (d) => {
+        const base = d.conceptos ? d.conceptos.length
+          : (d.alquilerPendiente > 0 ? 1 : 0) + (d.serviciosPendientes > 0 ? 1 : 0)
+            + (d.punitoriosPagados > 0 ? 1 : 0) + (d.punitoriosPendientes > 0 ? 1 : 0);
+        return base + (!d.conceptos && d.pagadoEstePeriodo > 0 ? 1 : 0);
+      };
+      // Encabezado ahora son 2 líneas (período+estado, luego total) = 21pt; el
+      // cierre "Falta pagar" (rojo) o "Saldo a favor" (azul) es condicional.
+      const monthBlockH = (d) => 21 + pendienteRowsOf(d) * 11 + (d.pendiente > 0.009 || d.sobrepago > 0 ? 12 : 0) + 5;
+
+      const HEADER_H = 26; // dirección/inquilino/estado/total + línea divisoria
+      const BOX_TOP = 14;  // padding superior + título
+      const BOX_BOTTOM = 6;
+      const SECTION_LABEL_H = 12; // "DEUDAS PAGADAS" como texto simple, sin caja propia
+
+      const liqBoxH = conceptosFiltered.length > 0
+        ? BOX_TOP + conceptosFiltered.length * 12 + 4 + 12 + BOX_BOTTOM
+        : 0;
+      const deudasBoxH = pendientesUni.length > 0
+        ? BOX_TOP + pendientesUni.reduce((s, d) => s + monthBlockH(d), 0) + 12 + BOX_BOTTOM
+        : 0;
+      // Deudas Pagadas: UN rectángulo POR MES (no una caja compartida) — cada uno
+      // con su propio estado (SALDADA) + total arriba a la derecha, mismo patrón
+      // que Deudas Acumuladas. `-5` porque monthBlockH ya trae la separación final,
+      // que acá la da boxGap entre recuadros.
+      const pagadaBoxHeights = saldadasUni.map((d) => BOX_TOP + (monthBlockH(d) - 5) + BOX_BOTTOM);
+
       const showSinAbonar = (data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0;
-      const sinAbonarH = showSinAbonar ? 18 : 0;
-      const cardH = 42 + cardRows * 15 + deudasH + cobradosH + sinAbonarH;
-      checkNewPage(cardH + 8);
+      const sinAbonarH = showSinAbonar ? 16 : 0;
+      const boxGap = 5;
 
-      // Property card - thin border; colored by status
-      const borderColor = data.paymentStatus === 'NO COBRADO' ? '#FFCCCC'
-        : data.paymentStatus === 'PAGO PARCIAL' ? '#FFE0A0'
-        : data.paymentStatus === 'SALDO A FAVOR' ? '#A0D0FF' : C.line;
-      fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
-      strokeR(doc, PAGE.margin, y, W, cardH, borderColor, 0.5, 0);
+      // Salto de página por SECCIÓN, no por propiedad entera: una propiedad con
+      // mucho historial de deuda (varios meses acumulados) no debe forzar toda su
+      // tarjeta a la página siguiente dejando la actual casi vacía — cada bloque
+      // (encabezado+Liquidación Actual, Deudas Acumuladas, cada mes de Deudas
+      // Pagadas) decide por separado si entra en el espacio que queda.
+      checkNewPage(HEADER_H + (liqBoxH > 0 ? liqBoxH + boxGap : 24));
 
-      // Property address + tenant
+      // ── Encabezado de propiedad (sin caja envolvente) ──
       const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
       doc.font(F.b).fontSize(9).fillColor(C.black)
-        .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.55 });
+        .text(addr, PAGE.margin, y, { width: W * 0.6 });
       doc.font(F.r).fontSize(8).fillColor(C.medium)
-        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.55 });
+        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin, y + 12, { width: W * 0.6 });
 
-      // Status label + total on right
       const statusLabels = {
         'PAGADO': { label: '', color: '#228B22' },
         'PAGO PARCIAL': { label: 'PAGO PARCIAL', color: C.amber },
@@ -1369,100 +1412,199 @@ const generateLiquidacionAllPDF = (dataArray) => {
         'SALDO A FAVOR': { label: 'SALDO A FAVOR', color: '#0066CC' },
       };
       const sl = statusLabels[data.paymentStatus] || { label: data.paymentStatus, color: C.dark };
-
       doc.font(F.b).fontSize(7).fillColor(sl.color)
-        .text(sl.label, PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
-        
-      const totalDisplay = data.paymentStatus === 'PAGO PARCIAL' 
-        ? `${fmt(data.amountPaid || 0, currency)} / ${fmt(data.total, currency)}` 
+        .text(sl.label, PAGE.margin, y, { width: W, align: 'right' });
+
+      const totalDisplay = data.paymentStatus === 'PAGO PARCIAL'
+        ? `${fmt(data.amountPaid || 0, currency)} / ${fmt(data.total, currency)}`
         : fmt(data.total, currency);
-
       doc.font(F.b).fontSize(10).fillColor(data.paymentStatus === 'NO COBRADO' ? '#CC0000' : C.black)
-        .text(totalDisplay, PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
+        .text(totalDisplay, PAGE.margin, y + 10, { width: W, align: 'right' });
 
-      let iy = y + 34;
+      // Línea divisoria bajo el encabezado
+      doc.strokeColor(C.line).lineWidth(0.75)
+        .moveTo(PAGE.margin, y + HEADER_H - 6).lineTo(PAGE.margin + W, y + HEADER_H - 6).stroke();
 
-      if (data.deudas && data.deudas.length > 0) {
-        doc.font(F.b).fontSize(8).fillColor(C.black).text('Deudas Acumuladas', PAGE.margin + 12, iy);
-        iy += 15;
-        for (const d of data.deudas) {
-          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodo}`, PAGE.margin + 24, iy, { width: W * 0.4 });
-          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.pendiente, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-          iy += 15;
+      let iy = y + HEADER_H;
+      // Corta a página nueva por sección (no por tarjeta completa) cuando lo que
+      // sigue no entra en el espacio restante.
+      const checkBox = (need) => {
+        if (iy + need > PAGE.height - PAGE.margin - 2) { doc.addPage(); iy = PAGE.margin; y = iy; }
+      };
+
+      // Dibuja el contenido de un mes dentro de un recuadro (sin recuadro propio,
+      // es una sección más dentro del recuadro padre). Arriba a la derecha: estado
+      // (SALDADA/SIN ABONAR) + total del período, mismo patrón que el encabezado de
+      // propiedad. Abajo: "Falta pagar" solo si todavía debe algo — nunca azul, eso
+      // queda reservado para saldo a favor a nivel propiedad.
+      const drawMonthBlock = (d, startY) => {
+        const debe = d.pendiente > 0.009;
+        const estado = debe ? 'SIN ABONAR' : 'SALDADA';
+        const estadoColor = debe ? '#CC0000' : C.black;
+        let my = startY;
+        doc.font(F.b).fontSize(7.5).fillColor(C.dark).text(d.periodLabel, PAGE.margin + 12, my, { width: W * 0.5 });
+        doc.font(F.b).fontSize(7).fillColor(estadoColor).text(estado, PAGE.margin + 12, my, { width: W - 24, align: 'right' });
+        my += 9;
+        const totalDisplay = (d.pagadoTotal > 0 && debe)
+          ? `${fmt(d.pagadoTotal, currency)} / ${fmt(d.totalAPagar, currency)}`
+          : fmt(d.totalAPagar, currency);
+        doc.font(F.b).fontSize(8).fillColor(estadoColor).text(totalDisplay, PAGE.margin + 12, my, { width: W - 24, align: 'right' });
+        my += 12;
+        if (d.conceptos) {
+          for (const c of d.conceptos) {
+            const label = c.tipo === 'PUNITORIOS' ? `Punitorios pagados${d.dias > 0 ? ` (${d.dias} días)` : ''}` : c.label;
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(label, PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(c.monto, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
+        } else {
+          if (d.alquilerPendiente > 0) {
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Alquiler pendiente', PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.alquilerPendiente, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
+          if (d.serviciosPendientes > 0) {
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Servicios pendientes', PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.serviciosPendientes, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
+          if (d.punitoriosPagados > 0) {
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Punitorios pagados', PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.punitoriosPagados, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
+          if (d.punitoriosPendientes > 0) {
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Punitorios que faltan pagar', PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.punitoriosPendientes, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
+          if (d.pagadoEstePeriodo > 0) {
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Pagado', PAGE.margin + 20, my, { width: W * 0.55 });
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.pagadoEstePeriodo, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+            my += 11;
+          }
         }
-        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin + 24, iy);
-        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-        iy += 20;
+        if (debe) {
+          doc.font(F.b).fontSize(8).fillColor('#CC0000').text('Falta pagar', PAGE.margin + 20, my, { width: W * 0.55 });
+          doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(d.pendiente, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+          my += 12;
+        } else if (d.sobrepago > 0) {
+          doc.font(F.b).fontSize(8).fillColor('#0066CC').text('Saldo a favor', PAGE.margin + 20, my, { width: W * 0.55 });
+          doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(d.sobrepago, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
+          my += 12;
+        }
+        my += 5;
+        return my;
+      };
 
-        doc.font(F.b).fontSize(8).fillColor(C.black).text('Liquidación Actual', PAGE.margin + 12, iy);
-        iy += 15;
+      // ── Rectángulo: Liquidación Actual ──
+      if (liqBoxH > 0) {
+        fillR(doc, PAGE.margin, iy, W, liqBoxH, C.snow, 0);
+        strokeR(doc, PAGE.margin, iy, W, liqBoxH, C.line, 0.5, 0);
+        let by = iy + 10;
+        doc.font(F.b).fontSize(8).fillColor(C.medium).text('LIQUIDACIÓN ACTUAL', PAGE.margin + 12, by);
+        by += 11;
+        for (const c of conceptosFiltered) {
+          const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
+          const conceptFont = c.isAjuste ? F.b : F.r;
+          doc.font(conceptFont).fontSize(8).fillColor(C.medium).text(label, PAGE.margin + 12, by, { width: W * 0.6 });
+          doc.font(conceptFont).fontSize(8).fillColor(C.dark).text(fmt(c.importe, currency), PAGE.margin + 12, by, { width: W - 24, align: 'right' });
+          by += 12;
+        }
+        doc.strokeColor(C.line).lineWidth(0.4).moveTo(PAGE.margin + 12, by).lineTo(PAGE.margin + W - 12, by).stroke();
+        by += 4;
+        // En vez de "Subtotal" (fijo, no reflejaba lo ya pagado): "Falta pagar a día
+        // de hoy" — la diferencia real contra lo pagado + crédito aplicado. Si no
+        // debe nada y quedó a favor, se muestra ese saldo en azul en su lugar.
+        if (data.pendingAmount > 0.009) {
+          doc.font(F.b).fontSize(8).fillColor('#CC0000').text('Falta pagar (a día de hoy)', PAGE.margin + 12, by, { width: W * 0.6 });
+          doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.pendingAmount, currency), PAGE.margin + 12, by, { width: W - 24, align: 'right' });
+        } else if (data.saldoAFavor > 0) {
+          doc.font(F.b).fontSize(8).fillColor('#0066CC').text('Saldo a favor', PAGE.margin + 12, by, { width: W * 0.6 });
+          doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(data.saldoAFavor, currency), PAGE.margin + 12, by, { width: W - 24, align: 'right' });
+        }
+        iy += liqBoxH + boxGap;
       }
 
-      // Conceptos
-      for (const c of conceptosFiltered) {
-        const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
-        const conceptFont = c.isAjuste ? F.b : F.r;
-        doc.font(conceptFont).fontSize(8).fillColor(C.medium)
-          .text(label, PAGE.margin + 24, iy, { width: W * 0.55 });
-        doc.font(conceptFont).fontSize(8).fillColor(C.dark)
-          .text(fmt(c.importe, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-        iy += 15;
+      // ── Rectángulo: Deudas Acumuladas ──
+      if (deudasBoxH > 0) {
+        checkBox(deudasBoxH + boxGap);
+        fillR(doc, PAGE.margin, iy, W, deudasBoxH, C.snow, 0);
+        strokeR(doc, PAGE.margin, iy, W, deudasBoxH, C.line, 0.5, 0);
+        let dy = iy + 10;
+        doc.font(F.b).fontSize(8).fillColor(C.medium).text('DEUDAS ACUMULADAS', PAGE.margin + 12, dy);
+        dy += 11;
+        for (const d of pendientesUni) {
+          dy = drawMonthBlock(d, dy);
+        }
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin + 12, dy);
+        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin + 12, dy, { width: W - 24, align: 'right' });
+        iy += deudasBoxH + boxGap;
+      }
+
+      // ── Deudas Pagadas: un rectángulo POR MES (separadas), mismo patrón que
+      // Deudas Acumuladas — estado (SALDADA) + total arriba a la derecha,
+      // "Saldo a favor" abajo si pagó de más. "DEUDAS PAGADAS" es solo un
+      // rótulo de sección, no envuelve todo en una caja compartida.
+      if (saldadasUni.length > 0) {
+        checkBox(SECTION_LABEL_H + pagadaBoxHeights[0] + boxGap);
+        doc.font(F.b).fontSize(8).fillColor(C.medium).text('DEUDAS PAGADAS', PAGE.margin, iy);
+        iy += SECTION_LABEL_H;
+        saldadasUni.forEach((d, i) => {
+          const boxH = pagadaBoxHeights[i];
+          checkBox(boxH + boxGap);
+          fillR(doc, PAGE.margin, iy, W, boxH, C.snow, 0);
+          strokeR(doc, PAGE.margin, iy, W, boxH, C.line, 0.5, 0);
+          drawMonthBlock(d, iy + 10);
+          iy += boxH + boxGap;
+        });
       }
 
       // Total combinado sin abonar: deudas anteriores + mes actual impago
       if (showSinAbonar) {
-        iy += 3;
-        doc.font(F.b).fontSize(8).fillColor('#CC0000').text('TOTAL SIN ABONAR (deudas + mes actual)', PAGE.margin + 12, iy, { width: W * 0.6 });
-        doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.totalSinAbonar, currency), PAGE.margin + 12, iy, { width: W - 24, align: 'right' });
-        iy += 15;
+        checkBox(sinAbonarH);
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text('TOTAL SIN ABONAR (deudas + mes actual)', PAGE.margin, iy, { width: W * 0.6 });
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.totalSinAbonar, currency), PAGE.margin, iy, { width: W, align: 'right' });
+        iy += sinAbonarH;
       }
 
-      // Cobrado de deudas anteriores (vista de caja del período)
-      if (cobr && cobr.total > 0) {
-        iy += 4;
-        doc.font(F.b).fontSize(8).fillColor('#0066CC')
-          .text(`Cobrado de deudas anteriores (en ${data.periodo.label})`, PAGE.margin + 12, iy, { width: W - 24 });
-        iy += 15;
-        for (const d of cobr.detalle) {
-          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodLabel}`, PAGE.margin + 24, iy, { width: W * 0.4 });
-          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.monto, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-          iy += 15;
-        }
-        doc.font(F.b).fontSize(8).fillColor('#0066CC').text('Total cobrado períodos ant.', PAGE.margin + 24, iy);
-        doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(cobr.total, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
-        iy += 18;
-      }
-
-      y += cardH + 8;
+      y = iy + 5;
     }
 
     // ── TOTALS SECTION ──
     // Calculate required height for the entire totals block so it stays together
     const pendingLines = (grandSubtotalAlquileresPartial > 0 ? 1 : 0) + (grandSubtotalAlquileresUnpaid > 0 ? 1 : 0);
-    const totalsBlockH = 34 + 20 + (pendingLines * 16) + 12 + 34 + 20 + 12; // two total bars + words + pending lines + spacing
+    const cobradoBreakdownLines = grandPunitoriosCobrado > 0 ? 1 : 0;
+    const totalsBlockH = 34 + 20 + (cobradoBreakdownLines * 13) + (pendingLines * 16) + 12 + 34 + 20 + 12; // two total bars + words + desglose + pending lines + spacing
     checkNewPage(totalsBlockH);
 
-    // TOTAL ALQUILERES COBRADOS box
+    // TOTAL ALQUILERES COBRADOS box — alquiler PURO (sin punitorios: eso es la base
+    // de Honorarios, no "alquiler". Confirmado con el usuario 2026-07-15).
     y += 4;
     const totalH = 34;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
 
     doc.font(F.b).fontSize(11).fillColor(C.white)
       .text('TOTAL ALQUILERES COBRADOS', PAGE.margin + 14, y + 10);
-    doc.text(fmt(grandSubtotalAlquileres, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
+    doc.text(fmt(grandAlquilerCobrado, currency), PAGE.margin + 14, y + 10, { width: W - 28, align: 'right' });
     y += totalH + 4;
 
     // Amount in words
-    const alquilerLetras = numeroATexto(grandSubtotalAlquileres);
+    const alquilerLetras = numeroATexto(grandAlquilerCobrado);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${alquilerLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-    y += 16;
+    y += 11;
 
-
-
+    // Informativo: punitorios cobrados en el período (van a la base de Honorarios,
+    // no al alquiler de arriba).
+    if (grandPunitoriosCobrado > 0) {
+      doc.font(F.r).fontSize(8).fillColor(C.medium).text('Punitorios cobrados', PAGE.margin + 4, y, { width: W * 0.6 });
+      doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(grandPunitoriosCobrado, currency), PAGE.margin + 4, y, { width: W - 8, align: 'right' });
+      y += 11;
+    }
 
     // TOTAL COBRADO box
-    y += 6;
+    y += 4;
     fillR(doc, PAGE.margin, y, W, totalH, C.black, 0);
     doc.font(F.b).fontSize(11).fillColor(C.white)
       .text('TOTAL COBRADO', PAGE.margin + 14, y + 10);
@@ -1472,18 +1614,19 @@ const generateLiquidacionAllPDF = (dataArray) => {
     const totalLetras = numeroATexto(grandTotal);
     doc.font(F.r).fontSize(8).fillColor(C.dark)
       .text(`Son: ${totalLetras}`, PAGE.margin + 4, y, { width: W - 8 });
-    y += 14;
+    y += 11;
 
-    // Grand pending total
-    const grandPendingTotal = dataArray.reduce((s, d) => s + (d.pendingAmount || 0), 0);
+    // Grand pending total: mes actual impago + deudas viejas abiertas (grandPending
+    // de computeGrandTotals, misma fuente que la pantalla — evita que un contrato con
+    // varios meses sin pagar (p.ej. Junio+Julio) muestre solo el más reciente).
+    const grandPendingTotal = grandPending;
     if (grandPendingTotal > 0) {
-      y += 2;
       fillR(doc, PAGE.margin, y, W, 26, '#FFF0F0', 0);
       strokeR(doc, PAGE.margin, y, W, 26, '#FFCCCC', 0.5, 0);
       doc.font(F.b).fontSize(9).fillColor('#CC0000')
         .text('TOTAL PENDIENTE', PAGE.margin + 14, y + 7);
       doc.text(fmt(grandPendingTotal, currency), PAGE.margin + 14, y + 7, { width: W - 28, align: 'right' });
-      y += 32;
+      y += 28;
     }
 
     // Grand saldo a favor
@@ -1494,10 +1637,10 @@ const generateLiquidacionAllPDF = (dataArray) => {
       doc.font(F.b).fontSize(9).fillColor('#0066CC')
         .text('TOTAL SALDO A FAVOR', PAGE.margin + 14, y + 7);
       doc.text(fmt(grandSaldoFavor, currency), PAGE.margin + 14, y + 7, { width: W - 28, align: 'right' });
-      y += 32;
+      y += 28;
     }
 
-    y += 10;
+    y += 6;
 
     // ── Honorarios (if any contract has them) ──
     const firstHon = dataArray.find(d => d.honorarios);
@@ -1512,18 +1655,18 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
       const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
       const totalHonLetras = require('../utils/helpers').numeroATexto(totalHon);
-      const rowH = 16;
+      const rowH = 13;
       const honPct = firstHon.honorarios.porcentaje;
       const alquilerLinesHon = honPct > 0 ? 1 : 0;
-      const honH = 14 + rowH * (alquilerLinesHon + gastosGrouped.length) + (gastosGrouped.length > 0 ? 10 : 0) + 34;
-      checkNewPage(honH + 20);
+      const honH = 12 + rowH * (alquilerLinesHon + gastosGrouped.length) + (gastosGrouped.length > 0 ? 6 : 0) + 26;
+      checkNewPage(honH + 14);
 
       fillR(doc, PAGE.margin, y, W, honH, C.snow, 0);
       strokeR(doc, PAGE.margin, y, W, honH, C.line, 0.5, 0);
 
       let hy = y + 8;
       doc.font(F.b).fontSize(9).fillColor(C.medium).text('HONORARIOS', PAGE.margin + 12, hy);
-      hy += 12;
+      hy += 10;
 
       if (honPct > 0) {
         const totalAlquilerHon = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
@@ -1540,18 +1683,18 @@ const generateLiquidacionAllPDF = (dataArray) => {
 
       if (gastosGrouped.length > 0) {
         doc.strokeColor(C.line).lineWidth(0.4).moveTo(PAGE.margin + 12, hy).lineTo(PAGE.width - PAGE.margin - 12, hy).stroke();
-        hy += 6;
+        hy += 4;
       }
 
       doc.font(F.b).fontSize(10).fillColor(C.black).text('TOTAL HONORARIOS', PAGE.margin + 12, hy);
       doc.text(fmt(totalHon, currency), PAGE.margin + 12, hy, { width: W - 24, align: 'right' });
-      hy += 14;
+      hy += 12;
 
       if (totalHonLetras) {
         doc.font(F.r).fontSize(7.5).fillColor(C.dark).text(`Son: ${totalHonLetras}`, PAGE.margin + 12, hy, { width: W - 24 });
       }
 
-      y += honH + 10;
+      y += honH + 6;
     }
 
     // ── SECTION: Payments ──
