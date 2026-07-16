@@ -74,8 +74,12 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const { cancelPayment, isCancelingPayment } = useDebts(groupId)
 
   // Use preview data when available, fallback to enriched debt data from backend
-  const unpaidServices = preview?.remainingServices ?? (debt?.unpaidServicesAmount || 0)
-  const unpaidRent = preview?.remainingRent ?? Math.max((debt?.remainingDebt || 0) - unpaidServices, 0)
+  // unpaidServices ya viene NETO de IVA (calculateDebtPunitory lo desglosa en el
+  // backend); `iva` es la línea separada, para no mezclarla con "Servicios impagos"
+  // y evitar la confusión reportada por el usuario (2026-07-16).
+  const unpaidServices = preview?.remainingServices ?? (debt?.remainingServices ?? debt?.unpaidServicesAmount ?? 0)
+  const iva = preview?.iva ?? (debt?.iva || 0)
+  const unpaidRent = preview?.remainingRent ?? Math.max((debt?.remainingDebt || 0) - unpaidServices - iva, 0)
   const totalPunitory = preview?.amount ?? (debt?.liveAccumulatedPunitory || 0)
   const punitoryDays = preview?.days ?? (debt?.livePunitoryDays || 0)
   const totalToPayRaw = preview?.totalToPay ?? (debt?.liveCurrentTotal || 0)
@@ -89,7 +93,7 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   // nuevo: se deriva como la diferencia entre los conceptos brutos y el total
   // neto, solo para mostrarlo como fila informativa. Así el desglose siempre
   // cierra exacto y es imposible contarlo dos veces.
-  const creditApplied = Math.max(0, (unpaidServices + unpaidRent + totalPunitory) - totalToPay)
+  const creditApplied = Math.max(0, (unpaidServices + iva + unpaidRent + totalPunitory) - totalToPay)
   // appliedCredit es fijo en la deuda (no se decrementa pago a pago), así que
   // en el 2do pago (y siguientes) esta misma diferencia vuelve a aparecer.
   // No es un descuento nuevo: aclaramos que ya se aplicó antes (mismo patrón
@@ -301,6 +305,12 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
               <div className="flex justify-between">
                 <span>Servicios impagos</span>
                 <span className="font-mono">{formatCurrency(unpaidServices)}</span>
+              </div>
+            )}
+            {iva > 0 && (
+              <div className="flex justify-between">
+                <span>IVA</span>
+                <span className="font-mono">{formatCurrency(iva)}</span>
               </div>
             )}
             <div className="flex justify-between font-medium">

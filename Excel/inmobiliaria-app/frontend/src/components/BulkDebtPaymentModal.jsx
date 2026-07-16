@@ -81,8 +81,12 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
         periodLabel: d.periodLabel,
         totalToPay: d.liveCurrentTotal ?? d.total ?? 0,
         remainingRent: d.unpaidRentAmount ?? d.remainingDebt ?? 0,
-        remainingServices: d.unpaidServicesAmount ?? 0,
-        iva: 0,
+        // d.remainingServices/d.iva ya vienen desglosados (getOpenDebts →
+        // computeLiveDebtTotal → calculateDebtPunitory). Fallback a
+        // unpaidServicesAmount (bundle IVA+servicios) solo si `d` viene de un shape
+        // más viejo que todavía no los expone.
+        remainingServices: d.remainingServices ?? d.unpaidServicesAmount ?? 0,
+        iva: d.iva ?? 0,
         punitory: d.liveAccumulatedPunitory ?? d.punitory ?? 0,
         punitoryDays: d.livePunitoryDays ?? 0,
       }))

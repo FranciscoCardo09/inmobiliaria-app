@@ -87,7 +87,7 @@ const getDebtById = async (req, res, next) => {
     // (debtService.js) ya calculaban esto bien vía `calculateDebtPunitory`;
     // se reutiliza esa misma fórmula acá en vez de duplicarla mal.
     if (debt.status !== 'PAID') {
-      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate } =
+      const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, remainingServices, remainingRent, iva } =
         await calculateDebtPunitory(debt, getTodayLocalString());
       debt.liveAccumulatedPunitory = amount;
       debt.livePunitoryDays = days;
@@ -96,6 +96,12 @@ const getDebtById = async (req, res, next) => {
       debt.unpaidAccumulatedPunitory = unpaidAccumulatedPunitory || 0;
       debt.punitoryFromDate = startDate;
       debt.punitoryToDate = endDate;
+      // remainingServices ya viene NETO de IVA e `iva` como línea separada — el
+      // modal de pago (DebtPaymentModal) usa esto como fallback mientras carga el
+      // preview, para no mostrar el IVA mezclado con "Servicios impagos".
+      debt.remainingServices = remainingServices || 0;
+      debt.remainingRent = remainingRent || 0;
+      debt.iva = iva || 0;
     }
 
     return ApiResponse.success(res, debt);
@@ -262,10 +268,10 @@ const getDebtPunitoryPreview = async (req, res, next) => {
     }
 
     if (debt.status === 'PAID') {
-      return ApiResponse.success(res, { days: 0, amount: 0, remainingDebt: 0, totalToPay: 0 });
+      return ApiResponse.success(res, { days: 0, amount: 0, remainingDebt: 0, remainingServices: 0, remainingRent: 0, iva: 0, totalToPay: 0 });
     }
 
-    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate, accumulatedPunitory, newPunitoryAmount, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
+    const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, accumulatedPunitory, newPunitoryAmount, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
     // Punitorios TOTALES impagos = acumulado impago (congelado de pagos previos) + nuevo en vivo.
     // BUG previo: se omitía unpaidAccumulatedPunitory, por lo que el modal mostraba menos plata
     // que el Control Mensual (que sí suma el acumulado en liveCurrentTotal).
@@ -279,8 +285,12 @@ const getDebtPunitoryPreview = async (req, res, next) => {
       unpaidAccumulatedPunitory: unpaidAccum, // acumulado impago de pagos anteriores
       accumulatedPunitory,
       remainingDebt,
+      // remainingServices ya viene NETO de IVA (calculateDebtPunitory lo desglosa);
+      // `iva` es la línea separada para que el modal no lo muestre mezclado con
+      // "Servicios impagos" (pedido del usuario, 2026-07-16).
       remainingServices: remainingServices || 0,
       remainingRent: remainingRent || 0,
+      iva: iva || 0,
       totalToPay: r2(remainingDebt + totalPunitoryOwed),
       fromDate: startDate,
       toDate: endDate,

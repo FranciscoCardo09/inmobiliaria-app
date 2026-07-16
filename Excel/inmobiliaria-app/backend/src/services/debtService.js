@@ -366,8 +366,30 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
 
   // Para display: cuánto queda de servicios vs alquiler (imputación servicios → alquiler)
   const servicePaid = Math.min(debt.amountPaid, unpaidServicesAmount);
-  const remainingServices = round2(unpaidServicesAmount - servicePaid);
+  const remainingServicesGross = round2(unpaidServicesAmount - servicePaid);
   const remainingRent = round2(Math.max(unpaidRentAmount - Math.max(debt.amountPaid - unpaidServicesAmount, 0), 0));
+
+  // IVA como línea aparte para el desglose (unpaidServicesAmount es "servicios + IVA"
+  // en un solo campo, ver calculateImputation más arriba): se deriva del ivaAmount
+  // original del MonthlyRecord que originó la deuda. Exacto si la deuda no tuvo pagos
+  // parciales previos a su cierre; aproximado (proporcional a lo que quede de
+  // "servicios") si los tuvo, ya que ese reparto no se guarda por separado. Antes esto
+  // solo lo calculaba `previewBulkDebtPayment` para el pago en lote; vive acá para que
+  // TODO consumidor de `calculateDebtPunitory` (modal de una deuda, GET /debts/:id,
+  // preview individual, bulk) muestre el IVA separado y no mezclado con "servicios".
+  let ivaOriginal = 0;
+  if (debt.monthlyRecordId) {
+    let mrForIva = preloaded?.monthlyRecordMap?.get(debt.monthlyRecordId);
+    if (!mrForIva) {
+      mrForIva = await prisma.monthlyRecord.findUnique({
+        where: { id: debt.monthlyRecordId },
+        select: { ivaAmount: true },
+      });
+    }
+    ivaOriginal = mrForIva?.ivaAmount || 0;
+  }
+  const remainingIva = round2(Math.min(remainingServicesGross, ivaOriginal));
+  const remainingServices = round2(remainingServicesGross - remainingIva);
 
   // Helper to get contract - from preloaded cache or DB
   const getContract = async () => {
@@ -425,7 +447,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
     const unpaidPunitory = round2(Math.max(0, totalPunitory - amountPaidToPunitory));
 
     if (unpaidPunitory <= 0) {
-      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, unpaidAccumulatedPunitory: 0, grossPunitoryToDate: totalPunitory, remainingDebt: 0, remainingServices: 0, remainingRent: 0, startDate: null, endDate: null };
+      return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory: 0, unpaidAccumulatedPunitory: 0, grossPunitoryToDate: totalPunitory, remainingDebt: 0, remainingServices: 0, remainingRent: 0, iva: 0, startDate: null, endDate: null };
     }
 
     return {
@@ -443,6 +465,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
       remainingDebt: 0,
       remainingServices: 0,
       remainingRent: 0,
+      iva: 0,
       startDate: newPunitorios.fromDate,
       endDate: newPunitorios.toDate,
     };
@@ -530,6 +553,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
     remainingDebt: round2(Math.max(remainingBase - (debt.appliedCredit || 0), 0) - Math.max(paidToPunitory - accumulatedPunitory, 0)),
     remainingServices,
     remainingRent,
+    iva: remainingIva,
     startDate: result.fromDate,
     endDate: result.toDate,
   };
@@ -853,23 +877,13 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
 
   const items = [];
   for (const debt of debts) {
-    const { amount, days, remainingDebt, remainingServices, remainingRent, startDate, endDate, unpaidAccumulatedPunitory } =
+    // remainingServices/iva ya vienen desglosados de calculateDebtPunitory (el IVA se
+    // deriva ahí una sola vez desde el ivaAmount original del MonthlyRecord).
+    const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, unpaidAccumulatedPunitory } =
       await calculateDebtPunitory(debt, date);
     // Punitorios totales impagos = acumulado impago (de pagos previos) + nuevo en vivo.
     // Sin sumar el acumulado el total quedaba por debajo del real (mismo bug que el preview individual).
     const totalPunitory = round2((unpaidAccumulatedPunitory || 0) + amount);
-    // IVA como línea aparte para el desglose (unpaidServicesAmount de la deuda es
-    // "servicios + IVA" en un solo campo): se deriva del ivaAmount original del
-    // MonthlyRecord que originó la deuda. Exacto si la deuda no tuvo pagos parciales
-    // previos a su cierre; aproximado (proporcional a lo que quede de "servicios")
-    // si los tuvo, ya que ese reparto no se guarda por separado.
-    const record = await prisma.monthlyRecord.findUnique({
-      where: { id: debt.monthlyRecordId },
-      select: { ivaAmount: true },
-    });
-    const ivaOriginal = record?.ivaAmount || 0;
-    const iva = round2(Math.min(remainingServices || 0, ivaOriginal));
-    const servicios = round2((remainingServices || 0) - iva);
     items.push({
       type: 'DEBT',
       id: debt.id,
@@ -877,8 +891,8 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
       periodMonth: debt.periodMonth,
       periodYear: debt.periodYear,
       remainingRent: remainingRent || 0,
-      remainingServices: servicios,
-      iva,
+      remainingServices: remainingServices || 0,
+      iva: iva || 0,
       punitory: totalPunitory,
       punitoryDays: days,
       totalToPay: round2(remainingDebt + totalPunitory),
@@ -1040,10 +1054,11 @@ const computeLiveDebtTotal = async (debt, calculationDate, preloaded = null) => 
       unpaidAccumulatedPunitory: 0,
       remainingRent: 0,
       remainingServices: 0,
+      iva: 0,
     };
   }
 
-  const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, remainingRent, remainingServices } = await calculateDebtPunitory(debt, calculationDate, preloaded, true);
+  const { amount: currentPunitory, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, remainingRent, remainingServices, iva } = await calculateDebtPunitory(debt, calculationDate, preloaded, true);
   return {
     ...debt,
     liveAccumulatedPunitory: currentPunitory,
@@ -1053,10 +1068,13 @@ const computeLiveDebtTotal = async (debt, calculationDate, preloaded = null) => 
     unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
     punitoryFromDate: startDate,
     punitoryToDate: endDate,
-    // Desglose alquiler vs servicios pendientes (para mostrar "Deudas Acumuladas"
-    // con el mismo nivel de detalle que "Cobrado de deudas anteriores").
+    // Desglose alquiler vs servicios (neto de IVA) vs IVA pendientes (para mostrar
+    // "Deudas Acumuladas" con el mismo nivel de detalle que "Cobrado de deudas
+    // anteriores", y para que el modal de pago muestre el IVA en su propia línea
+    // en vez de mezclado con "servicios").
     remainingRent: remainingRent || 0,
     remainingServices: remainingServices || 0,
+    iva: iva || 0,
   };
 };
 
