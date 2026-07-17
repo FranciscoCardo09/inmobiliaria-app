@@ -1375,8 +1375,12 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const BOX_BOTTOM = 6;
       const SECTION_LABEL_H = 12; // "DEUDAS PAGADAS" como texto simple, sin caja propia
 
+      // El título de este recuadro ocupa 21pt reales (10 padding + 11 línea),
+      // no el BOX_TOP genérico (14) — sin esto el monto de cierre se sale
+      // del rectángulo (queda pegado o por fuera del borde inferior).
+      const LIQ_TITLE_H = 21;
       const liqBoxH = conceptosFiltered.length > 0
-        ? BOX_TOP + conceptosFiltered.length * 12 + 4 + 12 + BOX_BOTTOM
+        ? LIQ_TITLE_H + conceptosFiltered.length * 12 + 4 + 12 + BOX_BOTTOM
         : 0;
       const deudasBoxH = pendientesUni.length > 0
         ? BOX_TOP + pendientesUni.reduce((s, d) => s + monthBlockH(d), 0) + 12 + BOX_BOTTOM
