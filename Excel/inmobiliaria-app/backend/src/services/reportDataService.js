@@ -47,6 +47,16 @@ const groupTransaccionesByFecha = (txList) => {
   return Array.from(byDate.values()).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 };
 
+// Detecta si el contrato tuvo un ajuste de alquiler REAL (no el ajuste INICIAL)
+// en un mes de contrato dado (`monthNumber`, no calendario) — usado para el
+// sufijo "Ajuste de X%" en el label de Alquiler, compartido por las 3
+// secciones del reporte de Liquidación (mes actual, deudas acumuladas, deudas
+// pagadas).
+const findAjusteForMonth = (rentHistory, monthNumber) =>
+  (rentHistory || []).find(
+    (h) => h.effectiveFromMonth === monthNumber && h.reason !== 'INICIAL' && h.adjustmentPercent != null
+  );
+
 // Reconciliación de DISPLAY (no toca ningún cálculo de plata): unifica, por mes,
 // la deuda todavía abierta (`deudas`, viene de contract.debts con status != PAID)
 // con lo cobrado de ese mismo mes en `cobradoOtrosPeriodos.detalle`. Antes un mes
@@ -464,9 +474,7 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   }
 
   // Detect if contract had a rent adjustment this month
-  const ajusteEstesMes = (contract.rentHistory || []).find(
-    h => h.effectiveFromMonth === monthlyRecord.monthNumber && h.reason !== 'INICIAL' && h.adjustmentPercent != null
-  );
+  const ajusteEstesMes = findAjusteForMonth(contract.rentHistory, monthlyRecord.monthNumber);
 
   // Only show IMPUESTO, SERVICIO, DESCUENTO, BONIFICACION in liquidation reports
   const LIQUIDACION_CATEGORIES = new Set(['IMPUESTO', 'SERVICIO', 'DESCUENTO', 'BONIFICACION']);
@@ -490,7 +498,7 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
 
     if (!isMultaRescision && ajusteEstesMes) {
       const pctStr = ajusteEstesMes.adjustmentPercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-      alquilerLabel += ` Ajuste ${pctStr}%`;
+      alquilerLabel += ` Ajuste de ${pctStr}%`;
     }
     conceptos.push({
       concepto: alquilerLabel,
@@ -2274,4 +2282,5 @@ module.exports = {
   getVencimientosData,
   resolveOwnerBank,
   MONTH_NAMES,
+  findAjusteForMonth,
 };
