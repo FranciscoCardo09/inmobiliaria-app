@@ -1356,40 +1356,38 @@ const generateLiquidacionAllPDF = (dataArray) => {
       const pendientesUni = unificadas.filter(d => d.estado === 'PENDIENTE');
       const saldadasUni = unificadas.filter(d => d.estado === 'SALDADA');
 
-      // Altura de un mes dentro de un recuadro: encabezado (13) + una línea por
-      // concepto (14 c/u, desde `conceptos` si viene desglosado o desde los
-      // campos discretos alquiler/servicios/punitorios) + eventual "Pagado" (14) +
-      // cierre "Falta pagar"/"Saldo a favor" (15, condicional) + separación (8).
+      // Filas de concepto dentro de la CAJA de un mes (desde `conceptos` si viene
+      // desglosado, o desde los campos discretos alquiler/servicios/punitorios).
       const pendienteRowsOf = (d) => {
         const base = d.conceptos ? d.conceptos.length
           : (d.alquilerPendiente > 0 ? 1 : 0) + (d.serviciosPendientes > 0 ? 1 : 0)
             + (d.punitoriosPagados > 0 ? 1 : 0) + (d.punitoriosPendientes > 0 ? 1 : 0);
         return base + (!d.conceptos && d.pagadoEstePeriodo > 0 ? 1 : 0);
       };
-      // Encabezado ahora son 2 líneas (período+estado, luego total) = 21pt; el
-      // cierre "Falta pagar" (rojo) o "Saldo a favor" (azul) es condicional.
-      const monthBlockH = (d) => 21 + pendienteRowsOf(d) * 11 + (d.pendiente > 0.009 || d.sobrepago > 0 ? 12 : 0) + 5;
 
       const HEADER_H = 26; // dirección/inquilino/estado/total + línea divisoria
-      const BOX_TOP = 14;  // padding superior + título
       const BOX_BOTTOM = 6;
-      const SECTION_LABEL_H = 12; // "DEUDAS PAGADAS" como texto simple, sin caja propia
+      const SECTION_LABEL_H = 12; // "DEUDAS PAGADAS"/"DEUDAS ACUMULADAS" como texto simple, sin caja propia
+
+      // Encabezado de mes (período+estado, luego total) — se dibuja AFUERA de la
+      // caja, mismo patrón que ya usa el encabezado de propiedad.
+      const MONTH_HEADER_H = 21;
+      // Caja de un mes: padding superior sin título (10, el período/estado/total
+      // ahora van afuera vía drawMonthHeader) + una línea por concepto + cierre
+      // "Falta pagar"/"Saldo a favor" (12, condicional) + padding inferior.
+      const monthBoxH = (d) => 10 + pendienteRowsOf(d) * 11 + (d.pendiente > 0.009 || d.sobrepago > 0 ? 12 : 0) + BOX_BOTTOM;
 
       // El título de este recuadro ocupa 21pt reales (10 padding + 11 línea),
-      // no el BOX_TOP genérico (14) — sin esto el monto de cierre se sale
-      // del rectángulo (queda pegado o por fuera del borde inferior).
+      // no un BOX_TOP genérico — sin esto el monto de cierre se sale del
+      // rectángulo (queda pegado o por fuera del borde inferior).
       const LIQ_TITLE_H = 21;
       const liqBoxH = conceptosFiltered.length > 0
         ? LIQ_TITLE_H + conceptosFiltered.length * 12 + 4 + 12 + BOX_BOTTOM
         : 0;
-      const deudasBoxH = pendientesUni.length > 0
-        ? BOX_TOP + pendientesUni.reduce((s, d) => s + monthBlockH(d), 0) + 12 + BOX_BOTTOM
-        : 0;
-      // Deudas Pagadas: UN rectángulo POR MES (no una caja compartida) — cada uno
-      // con su propio estado (SALDADA) + total arriba a la derecha, mismo patrón
-      // que Deudas Acumuladas. `-5` porque monthBlockH ya trae la separación final,
-      // que acá la da boxGap entre recuadros.
-      const pagadaBoxHeights = saldadasUni.map((d) => BOX_TOP + (monthBlockH(d) - 5) + BOX_BOTTOM);
+      // Deudas Acumuladas y Deudas Pagadas: UN rectángulo POR MES cada una (mismo
+      // patrón en las dos), con el encabezado de mes afuera de la caja.
+      const acumuladaBoxHeights = pendientesUni.map((d) => monthBoxH(d));
+      const pagadaBoxHeights = saldadasUni.map((d) => monthBoxH(d));
 
       const showSinAbonar = (data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0;
       const sinAbonarH = showSinAbonar ? 16 : 0;
@@ -1436,24 +1434,34 @@ const generateLiquidacionAllPDF = (dataArray) => {
         if (iy + need > PAGE.height - PAGE.margin - 2) { doc.addPage(); iy = PAGE.margin; y = iy; }
       };
 
-      // Dibuja el contenido de un mes dentro de un recuadro (sin recuadro propio,
-      // es una sección más dentro del recuadro padre). Arriba a la derecha: estado
-      // (SALDADA/SIN ABONAR) + total del período, mismo patrón que el encabezado de
-      // propiedad. Abajo: "Falta pagar" solo si todavía debe algo — nunca azul, eso
-      // queda reservado para saldo a favor a nivel propiedad.
-      const drawMonthBlock = (d, startY) => {
+      // Encabezado de un mes de deuda (período+estado, luego total) — se dibuja
+      // AFUERA de la caja, mismo patrón que el encabezado de propiedad y que ya
+      // usa la etiqueta de sección "DEUDAS PAGADAS"/"DEUDAS ACUMULADAS".
+      const drawMonthHeader = (d, startY) => {
         const debe = d.pendiente > 0.009;
         const estado = debe ? 'SIN ABONAR' : 'SALDADA';
         const estadoColor = debe ? '#CC0000' : C.black;
         let my = startY;
-        doc.font(F.b).fontSize(7.5).fillColor(C.dark).text(d.periodLabel, PAGE.margin + 12, my, { width: W * 0.5 });
-        doc.font(F.b).fontSize(7).fillColor(estadoColor).text(estado, PAGE.margin + 12, my, { width: W - 24, align: 'right' });
+        doc.font(F.b).fontSize(7.5).fillColor(C.dark).text(d.periodLabel, PAGE.margin, my, { width: W * 0.5 });
+        doc.font(F.b).fontSize(7).fillColor(estadoColor).text(estado, PAGE.margin, my, { width: W, align: 'right' });
         my += 9;
         const totalDisplay = (d.pagadoTotal > 0 && debe)
           ? `${fmt(d.pagadoTotal, currency)} / ${fmt(d.totalAPagar, currency)}`
           : fmt(d.totalAPagar, currency);
-        doc.font(F.b).fontSize(8).fillColor(estadoColor).text(totalDisplay, PAGE.margin + 12, my, { width: W - 24, align: 'right' });
+        doc.font(F.b).fontSize(8).fillColor(estadoColor).text(totalDisplay, PAGE.margin, my, { width: W, align: 'right' });
         my += 12;
+        return my;
+      };
+
+      // Contenido de un mes DENTRO de la caja: conceptos + cierre "Falta pagar"/
+      // "Saldo a favor" (nunca azul a este nivel, "Saldo a favor" en azul queda
+      // reservado para la propiedad). El "Ajuste de X%" de Deudas Pagadas ya viene
+      // embebido en `c.label` (ver reportDataService.buildConceptosDeudaPagada);
+      // el fallback "Alquiler pendiente" (Deudas Acumuladas sin desglose por
+      // concepto) arma su propio sufijo acá con `d.ajustePercent`.
+      const drawMonthBox = (d, startY) => {
+        const debe = d.pendiente > 0.009;
+        let my = startY;
         if (d.conceptos) {
           for (const c of d.conceptos) {
             const label = c.tipo === 'PUNITORIOS' ? `Punitorios pagados${d.dias > 0 ? ` (${d.dias} días)` : ''}` : c.label;
@@ -1463,7 +1471,12 @@ const generateLiquidacionAllPDF = (dataArray) => {
           }
         } else {
           if (d.alquilerPendiente > 0) {
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Alquiler pendiente', PAGE.margin + 20, my, { width: W * 0.55 });
+            let label = 'Alquiler pendiente';
+            if (d.ajustePercent != null) {
+              const pctStr = d.ajustePercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+              label += ` Ajuste de ${pctStr}%`;
+            }
+            doc.font(F.r).fontSize(8).fillColor(C.dark).text(label, PAGE.margin + 20, my, { width: W * 0.55 });
             doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.alquilerPendiente, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
             my += 11;
           }
@@ -1497,7 +1510,6 @@ const generateLiquidacionAllPDF = (dataArray) => {
           doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(d.sobrepago, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
           my += 12;
         }
-        my += 5;
         return my;
       };
 
@@ -1530,36 +1542,41 @@ const generateLiquidacionAllPDF = (dataArray) => {
         iy += liqBoxH + boxGap;
       }
 
-      // ── Rectángulo: Deudas Acumuladas ──
-      if (deudasBoxH > 0) {
-        checkBox(deudasBoxH + boxGap);
-        fillR(doc, PAGE.margin, iy, W, deudasBoxH, C.snow, 0);
-        strokeR(doc, PAGE.margin, iy, W, deudasBoxH, C.line, 0.5, 0);
-        let dy = iy + 10;
-        doc.font(F.b).fontSize(8).fillColor(C.medium).text('DEUDAS ACUMULADAS', PAGE.margin + 12, dy);
-        dy += 11;
-        for (const d of pendientesUni) {
-          dy = drawMonthBlock(d, dy);
-        }
-        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin + 12, dy);
-        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin + 12, dy, { width: W - 24, align: 'right' });
-        iy += deudasBoxH + boxGap;
+      // ── Deudas Acumuladas: un rectángulo POR MES, con el encabezado (período/
+      // estado/total) afuera de la caja — mismo patrón que Deudas Pagadas.
+      // "Total Deuda" cierra la sección, también afuera de las cajas.
+      if (pendientesUni.length > 0) {
+        checkBox(SECTION_LABEL_H + MONTH_HEADER_H + acumuladaBoxHeights[0] + boxGap);
+        doc.font(F.b).fontSize(8).fillColor(C.medium).text('DEUDAS ACUMULADAS', PAGE.margin, iy);
+        iy += SECTION_LABEL_H;
+        pendientesUni.forEach((d, i) => {
+          const boxH = acumuladaBoxHeights[i];
+          checkBox(MONTH_HEADER_H + boxH + boxGap);
+          iy = drawMonthHeader(d, iy);
+          fillR(doc, PAGE.margin, iy, W, boxH, C.snow, 0);
+          strokeR(doc, PAGE.margin, iy, W, boxH, C.line, 0.5, 0);
+          drawMonthBox(d, iy + 10);
+          iy += boxH + boxGap;
+        });
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin, iy, { width: W * 0.6 });
+        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin, iy, { width: W, align: 'right' });
+        iy += 14;
       }
 
-      // ── Deudas Pagadas: un rectángulo POR MES (separadas), mismo patrón que
-      // Deudas Acumuladas — estado (SALDADA) + total arriba a la derecha,
-      // "Saldo a favor" abajo si pagó de más. "DEUDAS PAGADAS" es solo un
-      // rótulo de sección, no envuelve todo en una caja compartida.
+      // ── Deudas Pagadas: un rectángulo POR MES, con el encabezado (período/
+      // estado/total) afuera de la caja. "DEUDAS PAGADAS" es solo un rótulo de
+      // sección, no envuelve todo en una caja compartida.
       if (saldadasUni.length > 0) {
-        checkBox(SECTION_LABEL_H + pagadaBoxHeights[0] + boxGap);
+        checkBox(SECTION_LABEL_H + MONTH_HEADER_H + pagadaBoxHeights[0] + boxGap);
         doc.font(F.b).fontSize(8).fillColor(C.medium).text('DEUDAS PAGADAS', PAGE.margin, iy);
         iy += SECTION_LABEL_H;
         saldadasUni.forEach((d, i) => {
           const boxH = pagadaBoxHeights[i];
-          checkBox(boxH + boxGap);
+          checkBox(MONTH_HEADER_H + boxH + boxGap);
+          iy = drawMonthHeader(d, iy);
           fillR(doc, PAGE.margin, iy, W, boxH, C.snow, 0);
           strokeR(doc, PAGE.margin, iy, W, boxH, C.line, 0.5, 0);
-          drawMonthBlock(d, iy + 10);
+          drawMonthBox(d, iy + 10);
           iy += boxH + boxGap;
         });
       }
