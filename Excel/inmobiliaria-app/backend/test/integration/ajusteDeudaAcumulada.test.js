@@ -2,12 +2,17 @@
  * Deudas Acumuladas debe poder mostrar "Ajuste de X%" en el mes pendiente
  * cuando ese mes de contrato tuvo un ajuste real de alquiler — mismo dato
  * que ya usa Liquidación Actual, ahora también disponible acá.
+ *
+ * deudasUnificadas solo lo produce getLiquidacionesAllContracts (la función
+ * que alimenta el reporte "Liquidación General" / generateLiquidacionAllPDF),
+ * por eso el test llama a esa función y no a getLiquidacionData (que es la
+ * de un solo contrato y no calcula deudasUnificadas).
  */
 const test = require('node:test');
 const assert = require('node:assert');
 const prisma = require('./prismaClient');
 const { seedScenario, createMonthlyRecord, cleanupGroup } = require('./fixtures');
-const { getLiquidacionData } = require('../../src/services/reportDataService');
+const { getLiquidacionesAllContracts } = require('../../src/services/reportDataService');
 
 test('Deudas Acumuladas: ajustePercent viene seteado cuando el mes de la deuda tuvo ajuste', async (t) => {
   const { group, contract, monthlyRecord: oldRecord } = await seedScenario(prisma, {
@@ -45,12 +50,18 @@ test('Deudas Acumuladas: ajustePercent viene seteado cuando el mes de la deuda t
       },
     });
 
+    // El mes que se está liquidando (Feb 2026) tiene que quedar "cerrado"
+    // (isCancelled: true) para que getLiquidacionesAllContracts lo traiga
+    // en su query global por defecto (soloConPago !== false -> isCancelled: true).
     await createMonthlyRecord(prisma, { groupId: group.id, contractId: contract.id }, {
-      monthNumber: 2, periodMonth: 2, periodYear: 2026, rentAmount: 100000, amountPaid: 100000, status: 'PAID',
+      monthNumber: 2, periodMonth: 2, periodYear: 2026, rentAmount: 100000, amountPaid: 100000, status: 'PAID', isCancelled: true,
     });
 
-    const result = await getLiquidacionData(group.id, contract.id, 2, 2026, {});
-    const pendiente = result.deudasUnificadas.find((d) => d.estado === 'PENDIENTE');
+    const all = await getLiquidacionesAllContracts(group.id, 2, 2026);
+    const liq = all.find((item) => item.contractId === contract.id);
+    assert.ok(liq, 'debe existir una liquidación para este contrato en el array devuelto');
+
+    const pendiente = liq.deudasUnificadas.find((d) => d.estado === 'PENDIENTE');
 
     assert.ok(pendiente, 'debe existir un mes PENDIENTE (la deuda de Enero)');
     assert.strictEqual(pendiente.ajustePercent, 15, `ajustePercent debía ser 15, fue ${pendiente.ajustePercent}`);
@@ -86,11 +97,14 @@ test('Deudas Acumuladas: ajustePercent es null cuando no hubo ajuste ese mes', a
     });
 
     await createMonthlyRecord(prisma, { groupId: group.id, contractId: contract.id }, {
-      monthNumber: 2, periodMonth: 2, periodYear: 2026, rentAmount: 100000, amountPaid: 100000, status: 'PAID',
+      monthNumber: 2, periodMonth: 2, periodYear: 2026, rentAmount: 100000, amountPaid: 100000, status: 'PAID', isCancelled: true,
     });
 
-    const result = await getLiquidacionData(group.id, contract.id, 2, 2026, {});
-    const pendiente = result.deudasUnificadas.find((d) => d.estado === 'PENDIENTE');
+    const all = await getLiquidacionesAllContracts(group.id, 2, 2026);
+    const liq = all.find((item) => item.contractId === contract.id);
+    assert.ok(liq, 'debe existir una liquidación para este contrato en el array devuelto');
+
+    const pendiente = liq.deudasUnificadas.find((d) => d.estado === 'PENDIENTE');
 
     assert.ok(pendiente, 'debe existir un mes PENDIENTE (la deuda de Enero)');
     assert.strictEqual(pendiente.ajustePercent, null);

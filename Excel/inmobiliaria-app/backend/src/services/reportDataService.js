@@ -824,12 +824,6 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
     deudas: deudasVivas,
-    // getLiquidacionData no trackea cobros de otros períodos (eso es propio de
-    // getLiquidacionesAllContracts, que sí compara contra cobradoOtrosPeriodos),
-    // así que acá `buildDeudasUnificadas` no tiene "SALDADA" para reconciliar:
-    // solo re-envuelve deudasVivas como PENDIENTE (mismo shape que el reporte
-    // general, con ajustePercent ya incluido).
-    deudasUnificadas: buildDeudasUnificadas(deudasVivas, []),
     totalDeuda,
     totalSinAbonar,
     transacciones: groupTransaccionesByFecha(monthlyRecord.transactions.map((t) => ({
