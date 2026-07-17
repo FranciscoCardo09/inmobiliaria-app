@@ -83,6 +83,7 @@ const buildDeudasUnificadas = (deudasVivas, cobradoDetalle) => {
       conceptos: null, // se arma desde alquilerPendiente/serviciosPendientes/punitorios*
       alquilerPendiente: d.alquilerPendiente,
       serviciosPendientes: d.serviciosPendientes,
+      ajustePercent: d.ajustePercent ?? null,
       // Punitorios de esta deuda: lo ya cobrado en el período (real, va a honorarios)
       // vs lo que todavía falta pagar (incluye lo viejo acumulado + lo nuevo en vivo).
       // Antes se mostraba solo una porción de "faltan pagar" y no cerraba contra `pendiente`.
@@ -369,7 +370,13 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
             include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true },
           },
           rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
-          debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
+          debts: {
+            where: { status: { not: 'PAID' } },
+            orderBy: { createdAt: 'asc' },
+            // monthNumber (índice de mes de CONTRATO, no calendario) para poder
+            // cruzar contra rentHistory.effectiveFromMonth y detectar ajustes.
+            include: { monthlyRecord: { select: { monthNumber: true } } },
+          },
         },
       },
       services: {
@@ -397,7 +404,13 @@ const getLiquidacionData = async (groupId, contractId, month, year, options = {}
               contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },
               property: { include: { owner: { include: { transferBeneficiary: true } }, transferBeneficiary: true } },
               rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
-              debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
+              debts: {
+                where: { status: { not: 'PAID' } },
+                orderBy: { createdAt: 'asc' },
+                // monthNumber (índice de mes de CONTRATO, no calendario) para poder
+                // cruzar contra rentHistory.effectiveFromMonth y detectar ajustes.
+                include: { monthlyRecord: { select: { monthNumber: true } } },
+              },
             },
           },
           services: { include: { conceptType: true } },
@@ -726,6 +739,10 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
       // con el mismo nivel de detalle que "Cobrado de deudas anteriores".
       alquilerPendiente: live.alquiler,
       serviciosPendientes: live.servicios,
+      // % de ajuste de alquiler vigente desde ese mes de contrato (si hubo) —
+      // para que "Alquiler pendiente" muestre "Ajuste de X%", igual que
+      // Liquidación Actual y Deudas Pagadas.
+      ajustePercent: findAjusteForMonth(contract.rentHistory, d.monthlyRecord?.monthNumber)?.adjustmentPercent ?? null,
     };
   }));
 
@@ -807,6 +824,12 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     fechaPago: monthlyRecord.fullPaymentDate,
     honorarios,
     deudas: deudasVivas,
+    // getLiquidacionData no trackea cobros de otros períodos (eso es propio de
+    // getLiquidacionesAllContracts, que sí compara contra cobradoOtrosPeriodos),
+    // así que acá `buildDeudasUnificadas` no tiene "SALDADA" para reconciliar:
+    // solo re-envuelve deudasVivas como PENDIENTE (mismo shape que el reporte
+    // general, con ajustePercent ya incluido).
+    deudasUnificadas: buildDeudasUnificadas(deudasVivas, []),
     totalDeuda,
     totalSinAbonar,
     transacciones: groupTransaccionesByFecha(monthlyRecord.transactions.map((t) => ({
@@ -918,7 +941,13 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
           }
         },
         rentHistory: { orderBy: { effectiveFromMonth: 'desc' } },
-        debts: { where: { status: { not: 'PAID' } }, orderBy: { createdAt: 'asc' } },
+        debts: {
+          where: { status: { not: 'PAID' } },
+          orderBy: { createdAt: 'asc' },
+          // monthNumber (índice de mes de CONTRATO, no calendario) para poder
+          // cruzar contra rentHistory.effectiveFromMonth y detectar ajustes.
+          include: { monthlyRecord: { select: { monthNumber: true } } },
+        },
       },
     },
     services: { include: { conceptType: true } },
