@@ -1558,6 +1558,7 @@ const generateLiquidacionAllPDF = (dataArray) => {
           drawMonthBox(d, iy + 10);
           iy += boxH + boxGap;
         });
+        checkBox(14);
         doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin, iy, { width: W * 0.6 });
         doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin, iy, { width: W, align: 'right' });
         iy += 14;
