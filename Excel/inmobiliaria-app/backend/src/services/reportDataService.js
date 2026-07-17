@@ -184,7 +184,7 @@ const splitCreditCascade = (credit, faltaServicios, faltaAlquiler, faltaPunitori
  * includeIva, ivaAmount, periodMonth/Year) — no el registro del mes que se está
  * liquidando ahora.
  */
-const buildConceptosDeudaPagada = (rec, det) => {
+const buildConceptosDeudaPagada = (rec, det, rentHistory) => {
   const items = [];
   if (!rec) {
     // Sin el record original (no debería pasar, pero por las dudas no perder el dato).
@@ -195,9 +195,15 @@ const buildConceptosDeudaPagada = (rec, det) => {
   }
 
   if (det.alquiler > 0.009) {
+    let alquilerLabel = `Pago deuda Alquiler ${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear} (Mes ${rec.monthNumber})`;
+    const ajuste = findAjusteForMonth(rentHistory, rec.monthNumber);
+    if (ajuste) {
+      const pctStr = ajuste.adjustmentPercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      alquilerLabel += ` Ajuste de ${pctStr}%`;
+    }
     items.push({
       tipo: 'ALQUILER_DEUDA',
-      label: `Pago deuda Alquiler ${MONTH_NAMES[rec.periodMonth]} ${rec.periodYear} (Mes ${rec.monthNumber})`,
+      label: alquilerLabel,
       monto: det.alquiler,
     });
   }
@@ -1057,6 +1063,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
                 tenant: { select: { name: true } },
                 contractTenants: { select: { tenant: { select: { name: true } } }, orderBy: { isPrimary: 'desc' } },
                 property: { select: { address: true, floor: true, apartment: true, owner: { select: { name: true } } } },
+                rentHistory: { select: { effectiveFromMonth: true, reason: true, adjustmentPercent: true } },
               },
             },
           },
@@ -1181,7 +1188,7 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         // para otro período) — `d.monto` sigue siendo el efectivo real cobrado (para
         // caja/grandTotal), pero para mostrar "Saldada $X" hay que usar este total.
         d.debtTotal = round2(d.alquiler + d.servicios + d.iva + d.punitorios);
-        d.conceptos = buildConceptosDeudaPagada(d.rec, d)
+        d.conceptos = buildConceptosDeudaPagada(d.rec, d, entry.contract?.rentHistory)
           .sort((a, b) => (conceptOrder[a.tipo] ?? 1) - (conceptOrder[b.tipo] ?? 1));
 
         delete d.rec;
@@ -2283,4 +2290,5 @@ module.exports = {
   resolveOwnerBank,
   MONTH_NAMES,
   findAjusteForMonth,
+  buildConceptosDeudaPagada,
 };

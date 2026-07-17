@@ -32,3 +32,23 @@ test('findAjusteForMonth: rentHistory vacío/null no rompe', () => {
   assert.strictEqual(findAjusteForMonth(null, 1), undefined);
   assert.strictEqual(findAjusteForMonth([], 1), undefined);
 });
+
+const { buildConceptosDeudaPagada } = require('../src/services/reportDataService');
+
+test('buildConceptosDeudaPagada: agrega "Ajuste de X%" al label de alquiler cuando hubo ajuste ese mes', () => {
+  const rec = { periodMonth: 6, periodYear: 2026, monthNumber: 5, rentAmount: 100000, services: [], includeIva: false, ivaAmount: 0 };
+  const det = { alquiler: 100000, servicios: 0, punitorios: 0 };
+  const rentHistory = [{ effectiveFromMonth: 5, reason: 'AJUSTE_AUTOMATICO', adjustmentPercent: 10 }];
+  const items = buildConceptosDeudaPagada(rec, det, rentHistory);
+  const alquilerItem = items.find((i) => i.tipo === 'ALQUILER_DEUDA');
+  assert.ok(alquilerItem, 'debe haber un item de alquiler');
+  assert.ok(alquilerItem.label.includes('Ajuste de 10%'), `label fue: "${alquilerItem.label}"`);
+});
+
+test('buildConceptosDeudaPagada: sin ajuste ese mes no agrega sufijo', () => {
+  const rec = { periodMonth: 6, periodYear: 2026, monthNumber: 5, rentAmount: 100000, services: [], includeIva: false, ivaAmount: 0 };
+  const det = { alquiler: 100000, servicios: 0, punitorios: 0 };
+  const items = buildConceptosDeudaPagada(rec, det, []);
+  const alquilerItem = items.find((i) => i.tipo === 'ALQUILER_DEUDA');
+  assert.ok(!alquilerItem.label.includes('Ajuste'), `label fue: "${alquilerItem.label}"`);
+});
