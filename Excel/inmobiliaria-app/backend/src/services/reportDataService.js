@@ -33,18 +33,28 @@ const getPrimaryTenant = (contract) => {
 // de distintos meses de origen, cancelando deudas viejas + el mes actual en un
 // solo cobro) aparecen como UN solo renglón sumado, no uno por transacción
 // (AUDITORIA_CONTROL_LIQUIDACION_2026-07.md, punto 5).
+// TRANSFERENCIA nunca se agrupa (cada transferencia queda en su propia fila,
+// sea o no el mismo día) — EFECTIVO sí se agrupa por mismo día, como antes.
+// Efectivo y transferencia nunca se mezclan en una misma fila.
 const groupTransaccionesByFecha = (txList) => {
-  const byDate = new Map();
+  const grouped = [];
+  const byKey = new Map();
   for (const t of txList) {
-    const key = new Date(t.fecha).toDateString();
-    if (!byDate.has(key)) {
-      byDate.set(key, { fecha: t.fecha, monto: 0, metodo: t.metodo, inquilino: t.inquilino, propiedad: t.propiedad, conceptos: [] });
+    if (t.metodo === 'TRANSFERENCIA') {
+      grouped.push({ fecha: t.fecha, monto: round2(t.monto), metodo: t.metodo, inquilino: t.inquilino, propiedad: t.propiedad, conceptos: [...t.conceptos] });
+      continue;
     }
-    const row = byDate.get(key);
+    const key = `${t.metodo}|${new Date(t.fecha).toDateString()}`;
+    let row = byKey.get(key);
+    if (!row) {
+      row = { fecha: t.fecha, monto: 0, metodo: t.metodo, inquilino: t.inquilino, propiedad: t.propiedad, conceptos: [] };
+      byKey.set(key, row);
+      grouped.push(row);
+    }
     row.monto = round2(row.monto + t.monto);
     row.conceptos.push(...t.conceptos);
   }
-  return Array.from(byDate.values()).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+  return grouped.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 };
 
 // Detecta si el contrato tuvo un ajuste de alquiler REAL (no el ajuste INICIAL)
@@ -2314,4 +2324,5 @@ module.exports = {
   MONTH_NAMES,
   findAjusteForMonth,
   buildConceptosDeudaPagada,
+  groupTransaccionesByFecha,
 };

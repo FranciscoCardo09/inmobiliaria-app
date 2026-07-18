@@ -52,3 +52,47 @@ test('buildConceptosDeudaPagada: sin ajuste ese mes no agrega sufijo', () => {
   const alquilerItem = items.find((i) => i.tipo === 'ALQUILER_DEUDA');
   assert.ok(!alquilerItem.label.includes('Ajuste'), `label fue: "${alquilerItem.label}"`);
 });
+
+const { groupTransaccionesByFecha } = require('../src/services/reportDataService');
+
+test('groupTransaccionesByFecha: dos TRANSFERENCIA el mismo día NO se agrupan', () => {
+  const txs = [
+    { fecha: '2026-06-10T12:00:00', monto: 1000, metodo: 'TRANSFERENCIA', conceptos: [] },
+    { fecha: '2026-06-10T15:00:00', monto: 2000, metodo: 'TRANSFERENCIA', conceptos: [] },
+  ];
+  const result = groupTransaccionesByFecha(txs);
+  assert.strictEqual(result.length, 2, 'cada transferencia debe quedar en su propia fila');
+});
+
+test('groupTransaccionesByFecha: dos EFECTIVO el mismo día SÍ se agrupan (comportamiento previo)', () => {
+  const txs = [
+    { fecha: '2026-06-10T12:00:00', monto: 1000, metodo: 'EFECTIVO', conceptos: [] },
+    { fecha: '2026-06-10T15:00:00', monto: 2000, metodo: 'EFECTIVO', conceptos: [] },
+  ];
+  const result = groupTransaccionesByFecha(txs);
+  assert.strictEqual(result.length, 1, 'ambos pagos en efectivo del mismo día deben quedar en una sola fila');
+  assert.strictEqual(result[0].monto, 3000);
+});
+
+test('groupTransaccionesByFecha: EFECTIVO en días distintos NO se agrupan', () => {
+  const txs = [
+    { fecha: '2026-06-10T12:00:00', monto: 1000, metodo: 'EFECTIVO', conceptos: [] },
+    { fecha: '2026-06-11T12:00:00', monto: 2000, metodo: 'EFECTIVO', conceptos: [] },
+  ];
+  const result = groupTransaccionesByFecha(txs);
+  assert.strictEqual(result.length, 2);
+});
+
+test('groupTransaccionesByFecha: EFECTIVO y TRANSFERENCIA el mismo día nunca se mezclan', () => {
+  const txs = [
+    { fecha: '2026-06-10T12:00:00', monto: 1000, metodo: 'EFECTIVO', conceptos: [] },
+    { fecha: '2026-06-10T13:00:00', monto: 2000, metodo: 'TRANSFERENCIA', conceptos: [] },
+    { fecha: '2026-06-10T14:00:00', monto: 500, metodo: 'EFECTIVO', conceptos: [] },
+  ];
+  const result = groupTransaccionesByFecha(txs);
+  assert.strictEqual(result.length, 2, 'una fila de efectivo agrupado + una fila de transferencia, nunca mezcladas');
+  const efectivoRow = result.find((r) => r.metodo === 'EFECTIVO');
+  const transferenciaRow = result.find((r) => r.metodo === 'TRANSFERENCIA');
+  assert.strictEqual(efectivoRow.monto, 1500);
+  assert.strictEqual(transferenciaRow.monto, 2000);
+});
