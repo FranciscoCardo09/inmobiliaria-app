@@ -1352,250 +1352,108 @@ const generateLiquidacionAllPDF = (dataArray) => {
         return true;
       });
 
-      const unificadas = data.deudasUnificadas || [];
-      const pendientesUni = unificadas.filter(d => d.estado === 'PENDIENTE');
-      const saldadasUni = unificadas.filter(d => d.estado === 'SALDADA');
-
-      // Filas de concepto dentro de la CAJA de un mes (desde `conceptos` si viene
-      // desglosado, o desde los campos discretos alquiler/servicios/punitorios).
-      const pendienteRowsOf = (d) => {
-        const base = d.conceptos ? d.conceptos.length
-          : (d.alquilerPendiente > 0 ? 1 : 0) + (d.serviciosPendientes > 0 ? 1 : 0)
-            + (d.punitoriosPagados > 0 ? 1 : 0) + (d.punitoriosPendientes > 0 ? 1 : 0);
-        return base + (!d.conceptos && d.pagadoEstePeriodo > 0 ? 1 : 0);
-      };
-
-      // "Liquidación actual" es un título de sección (mismo estilo que "DETALLE
-      // POR PROPIEDAD", vía drawSection: título + línea) y solo aparece si hay
-      // algo que mostrar dentro de esa caja.
-      const showLiqLabel = conceptosFiltered.length > 0;
-      const HEADER_H = showLiqLabel ? 48 : 26; // dirección/inquilino + título de sección (o línea simple si no hay Liquidación Actual)
-      const BOX_BOTTOM = 6;
-      const SECTION_LABEL_H = 24; // "Deudas Acumuladas"/"Deudas Pagadas", mismo estilo de sección (título + línea) que drawSection
-
-      // Bloque de estado (período a la izquierda si corresponde + label/monto
-      // a la derecha) + línea divisoria antes de los conceptos, todo ADENTRO
-      // de la caja. Mismo alto para "Liquidación Actual" y para cada caja de
-      // mes — ver drawStatusBlock.
-      const STATUS_BLOCK_H = 38;
-      // +12 extra cuando el mes/período cierra con saldo a favor: se agrega una
-      // línea "Saldo a favor" abajo de todo, adentro de la caja — sin este
-      // margen esa línea se sale del borde inferior.
-      const monthBoxH = (d) => STATUS_BLOCK_H + pendienteRowsOf(d) * 11 + (d.pendiente <= 0.009 && d.sobrepago > 0 ? 12 : 0) + BOX_BOTTOM;
-
-      const liqTieneSaldoAFavor = data.paymentStatus === 'SALDO A FAVOR' && data.saldoAFavor > 0;
-      const liqBoxH = conceptosFiltered.length > 0
-        ? STATUS_BLOCK_H + conceptosFiltered.length * 12 + (liqTieneSaldoAFavor ? 12 : 0) + BOX_BOTTOM
-        : 0;
-      // Deudas Acumuladas y Deudas Pagadas: UN rectángulo POR MES cada una (mismo
-      // patrón en las dos), con el encabezado de mes afuera de la caja.
-      const acumuladaBoxHeights = pendientesUni.map((d) => monthBoxH(d));
-      const pagadaBoxHeights = saldadasUni.map((d) => monthBoxH(d));
-
+      const cardRows = conceptosFiltered.length;
+      let deudasH = 0;
+      if (data.deudas && data.deudas.length > 0) {
+        deudasH = 15 + data.deudas.length * 15 + 15 + 20 + 15;
+      }
+      const cobr = data.cobradoOtrosPeriodos;
+      let cobradosH = 0;
+      if (cobr && cobr.total > 0) {
+        cobradosH = 4 + 15 + cobr.detalle.length * 15 + 18;
+      }
       const showSinAbonar = (data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0;
-      const sinAbonarH = showSinAbonar ? 16 : 0;
-      const boxGap = 5;
+      const sinAbonarH = showSinAbonar ? 18 : 0;
+      const cardH = 42 + cardRows * 15 + deudasH + cobradosH + sinAbonarH;
+      checkNewPage(cardH + 8);
 
-      // Salto de página por SECCIÓN, no por propiedad entera: una propiedad con
-      // mucho historial de deuda (varios meses acumulados) no debe forzar toda su
-      // tarjeta a la página siguiente dejando la actual casi vacía — cada bloque
-      // (encabezado+Liquidación Actual, Deudas Acumuladas, cada mes de Deudas
-      // Pagadas) decide por separado si entra en el espacio que queda.
-      checkNewPage(HEADER_H + (liqBoxH > 0 ? liqBoxH + boxGap : 24));
+      // Property card - thin border; colored by status
+      const borderColor = data.paymentStatus === 'NO COBRADO' ? '#FFCCCC'
+        : data.paymentStatus === 'PAGO PARCIAL' ? '#FFE0A0'
+        : data.paymentStatus === 'SALDO A FAVOR' ? '#A0D0FF' : C.line;
+      fillR(doc, PAGE.margin, y, W, cardH, C.snow, 0);
+      strokeR(doc, PAGE.margin, y, W, cardH, borderColor, 0.5, 0);
 
-      // ── Encabezado de propiedad (sin caja envolvente) ──
+      // Property address + tenant
       const addr = [data.propiedad.direccion, data.propiedad.piso ? `Piso ${data.propiedad.piso}` : null, data.propiedad.depto].filter(Boolean).join(', ');
       doc.font(F.b).fontSize(9).fillColor(C.black)
-        .text(addr, PAGE.margin, y, { width: W });
+        .text(addr, PAGE.margin + 12, y + 8, { width: W * 0.55 });
       doc.font(F.r).fontSize(8).fillColor(C.medium)
-        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin, y + 12, { width: W });
+        .text(`${data.inquilino.nombre}${data.inquilino.dni ? ` - ${formatDocumento(data.inquilino.dni).label}: ${formatDocumento(data.inquilino.dni).formatted}` : ''}`, PAGE.margin + 12, y + 20, { width: W * 0.55 });
 
-      // Estado (SIN ABONAR/PAGO PARCIAL/SALDO A FAVOR/PAGADO): ya no flota como
-      // badge afuera de la caja — se dibuja adentro, arriba a la derecha, vía
-      // drawStatusBlock.
+      // Status label + total on right
       const statusLabels = {
-        'PAGADO': { label: 'PAGADO', color: '#000000' },
-        'PAGO PARCIAL': { label: 'PAGO PARCIAL', color: '#E67E22' },
+        'PAGADO': { label: '', color: '#228B22' },
+        'PAGO PARCIAL': { label: 'PAGO PARCIAL', color: C.amber },
         'NO COBRADO': { label: 'SIN ABONAR', color: '#CC0000' },
-        'SALDO A FAVOR': { label: 'SALDO A FAVOR', color: '#0EA5E9' },
+        'SALDO A FAVOR': { label: 'SALDO A FAVOR', color: '#0066CC' },
       };
       const sl = statusLabels[data.paymentStatus] || { label: data.paymentStatus, color: C.dark };
 
-      let iy;
-      if (showLiqLabel) {
-        iy = drawSection(doc, y + 24, 'Liquidación actual');
-      } else {
-        // Sin "Liquidación actual" (raro: propiedad sin conceptos del período
-        // actual, solo deudas viejas) — línea divisoria simple bajo el encabezado.
-        doc.strokeColor(C.line).lineWidth(0.75).moveTo(PAGE.margin, y + 20).lineTo(PAGE.margin + W, y + 20).stroke();
-        iy = y + HEADER_H;
-      }
-      // Corta a página nueva por sección (no por tarjeta completa) cuando lo que
-      // sigue no entra en el espacio restante.
-      const checkBox = (need) => {
-        if (iy + need > PAGE.height - PAGE.margin - 2) { doc.addPage(); iy = PAGE.margin; y = iy; }
-      };
+      doc.font(F.b).fontSize(7).fillColor(sl.color)
+        .text(sl.label, PAGE.margin + 12, y + 8, { width: W - 24, align: 'right' });
 
-      // Estado de un mes: SIN ABONAR (rojo) si queda pendiente, SALDO A FAVOR
-      // (celeste) si hubo sobrepago puntual de ese mes, SALDADA (negro) si está
-      // saldado sin sobrepago. Se usa tanto para el borde de la caja como para
-      // el bloque de estado adentro de ella.
-      const monthStatusOf = (d) => {
-        if (d.pendiente > 0.009) return { label: 'SIN ABONAR', color: '#CC0000' };
-        if (d.sobrepago > 0) return { label: 'SALDO A FAVOR', color: '#0EA5E9' };
-        return { label: 'SALDADA', color: '#000000' };
-      };
+      const totalDisplay = data.paymentStatus === 'PAGO PARCIAL'
+        ? `${fmt(data.amountPaid || 0, currency)} / ${fmt(data.total, currency)}`
+        : fmt(data.total, currency);
 
-      // Bloque de estado adentro de una caja: período (opcional, izquierda) +
-      // label/monto de estado (derecha), seguido de línea divisoria. Devuelve
-      // la Y donde arrancan los conceptos. Compartido por "Liquidación Actual"
-      // (sin período) y por cada caja de mes de Deudas Acumuladas/Pagadas (con
-      // período).
-      const drawStatusBlock = (x, startY, w, { period, label, color, amount, amountDisplay }) => {
-        let by = startY + 10;
-        if (period) {
-          doc.font(F.b).fontSize(13).fillColor(C.dark).text(period, x + 12, by + 4, { width: w * 0.5 });
-        }
-        doc.font(F.b).fontSize(7.5).fillColor(color).text(label, x + 12, by, { width: w - 24, align: 'right' });
-        by += 11;
-        doc.font(F.b).fontSize(9).fillColor(color).text(amountDisplay || fmt(amount, currency), x + 12, by, { width: w - 24, align: 'right' });
-        by += 13;
-        doc.strokeColor(C.line).lineWidth(0.4).moveTo(x + 12, by).lineTo(x + w - 12, by).stroke();
-        by += 4;
-        return by;
-      };
+      doc.font(F.b).fontSize(10).fillColor(data.paymentStatus === 'NO COBRADO' ? '#CC0000' : C.black)
+        .text(totalDisplay, PAGE.margin + 12, y + 18, { width: W - 24, align: 'right' });
 
-      // Contenido de un mes DENTRO de la caja: bloque de estado (arriba) +
-      // conceptos. El "Ajuste de X%" de Deudas Pagadas ya viene embebido en
-      // `c.label` (ver reportDataService.buildConceptosDeudaPagada); el
-      // fallback "Alquiler pendiente" (Deudas Acumuladas sin desglose por
-      // concepto) arma su propio sufijo acá con `d.ajustePercent`.
-      const drawMonthBox = (d, startY) => {
-        const debe = d.pendiente > 0.009;
-        const ms = monthStatusOf(d);
-        // El monto grande junto al estado siempre es el TOTAL que había que
-        // pagar ese mes — nunca lo pendiente ni el saldo a favor. "Pago
-        // parcial" (ya pagó algo pero todavía debe) muestra "pagado / total";
-        // el saldo a favor se agrega como línea aparte, abajo de todo.
-        const amountDisplay = (debe && d.pagadoTotal > 0)
-          ? `${fmt(d.pagadoTotal, currency)} / ${fmt(d.totalAPagar, currency)}`
-          : fmt(d.totalAPagar, currency);
-        let my = drawStatusBlock(PAGE.margin, startY, W, { period: d.periodLabel, label: ms.label, color: ms.color, amountDisplay });
-        if (d.conceptos) {
-          for (const c of d.conceptos) {
-            const label = c.tipo === 'PUNITORIOS' ? `Punitorios pagados${d.dias > 0 ? ` (${d.dias} días)` : ''}` : c.label;
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(label, PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(c.monto, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-        } else {
-          if (d.alquilerPendiente > 0) {
-            let label = 'Alquiler pendiente';
-            if (d.ajustePercent != null) {
-              const pctStr = d.ajustePercent.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-              label += ` Ajuste de ${pctStr}%`;
-            }
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(label, PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.alquilerPendiente, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-          if (d.serviciosPendientes > 0) {
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Servicios pendientes', PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.serviciosPendientes, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-          if (d.punitoriosPagados > 0) {
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Punitorios pagados', PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.punitoriosPagados, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-          if (d.punitoriosPendientes > 0) {
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Punitorios que faltan pagar', PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.punitoriosPendientes, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-          if (d.pagadoEstePeriodo > 0) {
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text('Pagado', PAGE.margin + 20, my, { width: W * 0.55 });
-            doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.pagadoEstePeriodo, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-            my += 11;
-          }
-        }
-        if (!debe && d.sobrepago > 0) {
-          doc.font(F.b).fontSize(8).fillColor('#0EA5E9').text('Saldo a favor', PAGE.margin + 20, my, { width: W * 0.55 });
-          doc.font(F.b).fontSize(8).fillColor('#0EA5E9').text(fmt(d.sobrepago, currency), PAGE.margin + 20, my, { width: W - 40, align: 'right' });
-          my += 12;
-        }
-        return my;
-      };
+      let iy = y + 34;
 
-      // ── Rectángulo: Liquidación Actual ──
-      if (liqBoxH > 0) {
-        fillR(doc, PAGE.margin, iy, W, liqBoxH, C.snow, 0);
-        strokeR(doc, PAGE.margin, iy, W, liqBoxH, sl.color, 0.5, 0);
-        // El monto grande junto al estado siempre es el TOTAL que había que
-        // pagar este período — nunca el saldo a favor ni solo lo pendiente.
-        // "Pago parcial" muestra "pagado / total"; el saldo a favor se agrega
-        // como línea aparte, abajo de todo, dentro de la caja.
-        const amountDisplay = data.paymentStatus === 'PAGO PARCIAL'
-          ? `${fmt(data.amountPaid || 0, currency)} / ${fmt(data.total, currency)}`
-          : fmt(data.total, currency);
-        let by = drawStatusBlock(PAGE.margin, iy, W, { period: periodo.label, label: sl.label, color: sl.color, amountDisplay });
-        for (const c of conceptosFiltered) {
-          const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
-          const conceptFont = c.isAjuste ? F.b : F.r;
-          doc.font(conceptFont).fontSize(8).fillColor(C.medium).text(label, PAGE.margin + 12, by, { width: W * 0.6 });
-          doc.font(conceptFont).fontSize(8).fillColor(C.dark).text(fmt(c.importe, currency), PAGE.margin + 12, by, { width: W - 24, align: 'right' });
-          by += 12;
+      if (data.deudas && data.deudas.length > 0) {
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Deudas Acumuladas', PAGE.margin + 12, iy);
+        iy += 15;
+        for (const d of data.deudas) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodo}`, PAGE.margin + 24, iy, { width: W * 0.4 });
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.pendiente, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+          iy += 15;
         }
-        if (liqTieneSaldoAFavor) {
-          doc.font(F.b).fontSize(8).fillColor('#0EA5E9').text('Saldo a favor', PAGE.margin + 12, by, { width: W * 0.6 });
-          doc.font(F.b).fontSize(8).fillColor('#0EA5E9').text(fmt(data.saldoAFavor, currency), PAGE.margin + 12, by, { width: W - 24, align: 'right' });
-          by += 12;
-        }
-        iy += liqBoxH + boxGap;
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Total Deuda', PAGE.margin + 24, iy);
+        doc.font(F.b).fontSize(8).fillColor(C.black).text(fmt(data.totalDeuda, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+        iy += 20;
+
+        doc.font(F.b).fontSize(8).fillColor(C.black).text('Liquidación Actual', PAGE.margin + 12, iy);
+        iy += 15;
       }
 
-      // ── Deudas Acumuladas: un rectángulo POR MES, con el período afuera de la
-      // caja (estado+total van adentro, arriba a la derecha) — mismo patrón que
-      // Deudas Pagadas.
-      if (pendientesUni.length > 0) {
-        checkBox(SECTION_LABEL_H + acumuladaBoxHeights[0] + boxGap);
-        iy = drawSection(doc, iy, 'Deudas Acumuladas');
-        pendientesUni.forEach((d, i) => {
-          const boxH = acumuladaBoxHeights[i];
-          checkBox(boxH + boxGap);
-          fillR(doc, PAGE.margin, iy, W, boxH, C.snow, 0);
-          strokeR(doc, PAGE.margin, iy, W, boxH, monthStatusOf(d).color, 0.5, 0);
-          drawMonthBox(d, iy);
-          iy += boxH + boxGap;
-        });
-      }
-
-      // ── Deudas Pagadas: un rectángulo POR MES, con el período afuera de la
-      // caja (estado+total van adentro, arriba a la derecha). "Deudas Pagadas"
-      // es un título de sección, no envuelve todo en una caja compartida.
-      if (saldadasUni.length > 0) {
-        checkBox(SECTION_LABEL_H + pagadaBoxHeights[0] + boxGap);
-        iy = drawSection(doc, iy, 'Deudas Pagadas');
-        saldadasUni.forEach((d, i) => {
-          const boxH = pagadaBoxHeights[i];
-          checkBox(boxH + boxGap);
-          fillR(doc, PAGE.margin, iy, W, boxH, C.snow, 0);
-          strokeR(doc, PAGE.margin, iy, W, boxH, monthStatusOf(d).color, 0.5, 0);
-          drawMonthBox(d, iy);
-          iy += boxH + boxGap;
-        });
+      // Conceptos
+      for (const c of conceptosFiltered) {
+        const label = c.concepto.includes('Punitorios (0') ? 'Punitorios' : c.concepto;
+        const conceptFont = c.isAjuste ? F.b : F.r;
+        doc.font(conceptFont).fontSize(8).fillColor(C.medium)
+          .text(label, PAGE.margin + 24, iy, { width: W * 0.55 });
+        doc.font(conceptFont).fontSize(8).fillColor(C.dark)
+          .text(fmt(c.importe, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+        iy += 15;
       }
 
       // Total combinado sin abonar: deudas anteriores + mes actual impago
       if (showSinAbonar) {
-        checkBox(sinAbonarH);
-        doc.font(F.b).fontSize(8).fillColor('#CC0000').text('TOTAL SIN ABONAR (deudas + mes actual)', PAGE.margin, iy, { width: W * 0.6 });
-        doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.totalSinAbonar, currency), PAGE.margin, iy, { width: W, align: 'right' });
-        iy += sinAbonarH;
+        iy += 3;
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text('TOTAL SIN ABONAR (deudas + mes actual)', PAGE.margin + 12, iy, { width: W * 0.6 });
+        doc.font(F.b).fontSize(8).fillColor('#CC0000').text(fmt(data.totalSinAbonar, currency), PAGE.margin + 12, iy, { width: W - 24, align: 'right' });
+        iy += 15;
       }
 
-      y = iy + 5;
+      // Cobrado de deudas anteriores (vista de caja del período)
+      if (cobr && cobr.total > 0) {
+        iy += 4;
+        doc.font(F.b).fontSize(8).fillColor('#0066CC')
+          .text(`Cobrado de deudas anteriores (en ${data.periodo.label})`, PAGE.margin + 12, iy, { width: W - 24 });
+        iy += 15;
+        for (const d of cobr.detalle) {
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(`Período ${d.periodLabel}`, PAGE.margin + 24, iy, { width: W * 0.4 });
+          doc.font(F.r).fontSize(8).fillColor(C.dark).text(fmt(d.monto, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+          iy += 15;
+        }
+        doc.font(F.b).fontSize(8).fillColor('#0066CC').text('Total cobrado períodos ant.', PAGE.margin + 24, iy);
+        doc.font(F.b).fontSize(8).fillColor('#0066CC').text(fmt(cobr.total, currency), PAGE.margin + 24, iy, { width: W - 48, align: 'right' });
+        iy += 18;
+      }
+
+      y += cardH + 8;
     }
 
     // ── TOTALS SECTION ──
