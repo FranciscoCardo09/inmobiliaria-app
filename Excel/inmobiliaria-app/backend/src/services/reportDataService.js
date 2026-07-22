@@ -701,9 +701,12 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   } else {
     // Fallback: records legacy/de test sin TransactionConcept reales →
     // asignación secuencial anterior sobre amountPaid (servicios+IVA →
-    // alquiler → punitorios). Poder de pago = pagado + crédito previo +
-    // BONIFICACIONES (no descuentos, que ya restan dentro de serviciosTotal).
-    let remaining = amtPaid + previousBalance + bonificacionesTotal;
+    // alquiler → punitorios). NO se suma bonificacionesTotal como poder de pago
+    // extra acá: el ajuste "solo BONIFICACION debe reducir la base de honorarios,
+    // DESCUENTO no" se hace de forma centralizada y uniforme (ambas ramas) más
+    // abajo, sobre paidAlquiler ya neto — ver bloque "GROSS-UP" cerca de
+    // subtotalAlquileresCobrado.
+    let remaining = amtPaid + previousBalance;
     paidServicios = Math.min(remaining, serviciosIvaTotal);
     remaining -= paidServicios;
     paidAlquiler = Math.min(remaining, alquilerTotal);
@@ -761,8 +764,11 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   const totalDeuda = deudasVivas.reduce((sum, d) => sum + d.pendiente, 0);
   const totalSinAbonar = pendingAmount + totalDeuda;
 
-  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados - descuentos
-  // DESCUENTO reduce el alquiler cobrado (y por ende los honorarios). BONIFICACION no.
+  // DISPLAY TOTALS: "Total Alquileres Cobrados" = alquiler pagado + punitorios pagados.
+  // Regla de negocio (confirmada 2026-07-22): BONIFICACION reduce el alquiler cobrado
+  // (y por ende los honorarios). DESCUENTO no — se cobra sobre el alquiler completo,
+  // como si el descuento no existiera (única excepción: el descuento MANUAL cargado a
+  // mano en la UI, options.descuentosAlquiler, que sí resta — ver más abajo).
   // El saldo a favor previo (prevCredit) representa alquiler de este mes pagado con crédito de
   // un mes anterior — no se restan honorarios por eso (ese mes anterior no cobró honorarios
   // sobre la sobre-pago).
@@ -770,7 +776,22 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   const descuentosTotal = conceptos
     .filter(c => c.isService && c.category === 'DESCUENTO')
     .reduce((s, c) => s + Math.abs(c.importe), 0);
-  const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - descuentosTotal;
+
+  // GROSS-UP: paidAlquiler (real o fallback, arriba) viene NETO de DESCUENTO+BONIFICACION
+  // combinados — el motor de pagos (paymentTransactionService.js) no distingue categoría al
+  // armar la cascada servicios→alquiler, ambas reducen el mismo servicesTotal. Por regla de
+  // negocio, BONIFICACION sí debe reducir la base (se deja neteada, tal cual ya viene).
+  // DESCUENTO NO debe reducir la base (hay que "devolverlo"/gross-up).
+  // netRentDueReal = techo real que usó el motor de pagos (ambas categorías incluidas).
+  // netRentDueHonorarios = techo deseado para honorarios (solo bonificación resta).
+  const netRentDueHonorarios = round2(Math.max(0, alquilerTotal - bonificacionesTotal));
+  const netRentDueReal = round2(Math.max(0, alquilerTotal - descuentosTotal - bonificacionesTotal));
+  const paidAlquilerHonorarios = netRentDueReal <= 0.009
+    // Descuento (+bonificación) ya cubre todo el alquiler: no queda "techo real" contra el
+    // cual escalar — el alquiler queda siempre resuelto (perdonado) si se cobró algo este mes.
+    ? (amtPaid > 0 ? netRentDueHonorarios : 0)
+    : Math.min(netRentDueHonorarios, round2(paidAlquiler * (netRentDueHonorarios / netRentDueReal)));
+  const subtotalAlquileresCobrado = paidAlquilerHonorarios + paidPunitorios;
 
   // HONORARIOS: pct% of (subtotalAlquileresCobrado - descuento manual de honorarios).
   // El descuento manual (options.descuentosAlquiler, cargado a mano por contrato) reduce
@@ -832,6 +853,10 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     paidServicios,
     paidPunitorios,
     paidAlquiler,
+    // Alquiler cobrado ajustado (BONIFICACION resta, DESCUENTO no) — mismo criterio
+    // que subtotalAlquileresCobrado/honorarios, sin punitorios. Usado por
+    // computeGrandTotals para unificar "Total Alquileres Cobrados" con el de Honorarios.
+    paidAlquilerHonorarios,
     honorariosCobrado,
     amountPaid: monthlyRecord.amountPaid,
     balance: monthlyRecord.balance,
@@ -877,7 +902,10 @@ const computeGrandTotals = (dataArray) => {
     // Allocation breakdown totals — incluyen lo cobrado de otros períodos por concepto
     grandServiciosCobrado: dataArray.reduce((s, d) => s + (d.paidServicios || 0) + (d.cobradoOtrosPeriodos?.servicios || 0), 0),
     grandPunitoriosCobrado: dataArray.reduce((s, d) => s + (d.paidPunitorios || 0) + (d.cobradoOtrosPeriodos?.punitorios || 0), 0),
-    grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquiler || 0) + (d.cobradoOtrosPeriodos?.alquiler || 0), 0),
+    // Unificado con grandSubtotalAlquileres/honorarios (BONIFICACION resta, DESCUENTO no):
+    // usa paidAlquilerHonorarios en vez de paidAlquiler crudo. cobradoOtrosPeriodos.alquiler
+    // (deudas viejas) ya viene "limpio" de descuento/bonificación, no necesita ajuste.
+    grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquilerHonorarios ?? d.paidAlquiler ?? 0) + (d.cobradoOtrosPeriodos?.alquiler || 0), 0),
     grandSaldoAFavor: dataArray.reduce((s, d) => s + (d.saldoAFavor || 0), 0),
     // Counts
     paidCount: paidRows.length,
@@ -1263,6 +1291,15 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
       // "Total Alquileres Cobrados" y "Total Honorarios" deben contar también el
       // alquiler/punitorios de deudas viejas saldadas en este período (antes daban
       // $0 cuando el contrato solo había cobrado deuda, no alquiler del mes).
+      //
+      // NOTA (2026-07-22, bug conocido/pendiente): entry.alquiler viene del concepto
+      // ALQUILER_DEUDA de debtService.payDebt(), que nunca se ve afectado por
+      // DESCUENTO ni BONIFICACION (ambas categorías quedan mezcladas dentro del balde
+      // "servicios" de la deuda — Debt no guarda ese desglose). Con la regla vigente
+      // (BONIFICACION resta la base de honorarios, DESCUENTO no), esto deja a las
+      // deudas viejas SIN aplicar la reducción por BONIFICACION que deberían tener.
+      // Arreglarlo requiere guardar el desglose descuento/bonificación en el modelo
+      // Debt (cambio de esquema) — fuera de alcance, decisión del usuario.
       const debtAlqPun = round2(entry.alquiler + entry.punitorios);
       if (debtAlqPun > 0) {
         liq.subtotalAlquileresCobrado = round2((liq.subtotalAlquileresCobrado || 0) + debtAlqPun);
