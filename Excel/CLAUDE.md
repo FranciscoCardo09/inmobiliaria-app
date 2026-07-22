@@ -8,7 +8,7 @@ Full-stack real estate management SaaS (inmobiliaria) for managing properties, t
 
 ## Tech Stack
 
-- **Backend**: Node.js + Express + Prisma ORM + PostgreSQL (SQLite in dev)
+- **Backend**: Node.js + Express + Prisma ORM + PostgreSQL (Neon in prod)
 - **Frontend**: React 18 + Vite + Tailwind CSS + DaisyUI + Zustand + TanStack Query
 - **Auth**: JWT + Google OAuth 2.0 (Passport.js)
 - **Notifications**: Resend (email), Twilio (SMS/WhatsApp)
@@ -72,13 +72,13 @@ inmobiliaria-app/
 
 ## Database
 
-Prisma with PostgreSQL (Supabase in prod, SQLite in dev). Key models: User, Group, Property, Owner, Tenant, Contract, Payment, PaymentTransaction, Debt, DebtPayment, MonthlyRecord, NotificationLog.
+Prisma with PostgreSQL (Neon in prod). Key models: User, Group, Property, Owner, Tenant, Contract, Payment, PaymentTransaction, Debt, DebtPayment, MonthlyRecord, NotificationLog.
 
 Punitory (late fee) rate is configurable per Group (default 0.6% daily).
 
 ## Deployment
 
-- **DB**: Supabase PostgreSQL
+- **DB**: Neon PostgreSQL
 - **Backend**: Render
 - **Frontend**: Vercel (config in `vercel.json`)
 - See `DEPLOY_INSTRUCTIONS.md` and `GOOGLE_OAUTH_SETUP.md` for details

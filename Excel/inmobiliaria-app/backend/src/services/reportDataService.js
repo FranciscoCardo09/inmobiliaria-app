@@ -716,6 +716,30 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     saldoAFavor = remaining > 0 ? remaining : 0;
   }
 
+  // RECONCILIACIÓN CONTRA EL BALANCE AUTORITATIVO (2026-07-22, caso real: Cazaux
+  // Pedro — Rondeau 551 Torre II). saldoAFavor arriba se deriva sumando los
+  // conceptos SOBREPAGO de las transacciones reales. Si un servicio (BONIFICACION/
+  // DESCUENTO) estaba cargado AL MOMENTO de registrar el pago y luego se corrigió o
+  // borró (carga errónea), la cascada del motor de pagos (paymentTransactionService.js)
+  // calculó mal cuánto ya estaba "cubierto" en ESE momento, dejando un SOBREPAGO
+  // fantasma congelado en la transacción vieja que nunca se recalcula
+  // retroactivamente (el concepto TransactionConcept no se re-imputa después).
+  // `monthlyRecord.balance` (amountPaid − totalDue, recalculado con los datos
+  // ACTUALES del mes) es la fuente autoritativa — es exactamente lo que usa
+  // Control Mensual (getControlMensualData, campo `saldo`), por eso siempre está
+  // correcto. Si el saldoAFavor derivado de conceptos no coincide, el
+  // excedente/faltante es fantasma: se reconcilia contra paidAlquiler (el único
+  // concepto que esta clase de bug corrompe — nunca servicios/punitorios, porque
+  // la cascada de pagos solo mezcla mal alquiler↔sobrepago cuando servicesTotal
+  // estaba mal en el momento del pago, nunca la imputación de servicios/punitorios
+  // ya cubiertos en efectivo).
+  const trueSaldoAFavor = monthlyRecord.balance > 0 ? round2(monthlyRecord.balance) : 0;
+  const saldoDiff = round2(saldoAFavor - trueSaldoAFavor);
+  if (Math.abs(saldoDiff) > 0.01) {
+    paidAlquiler = round2(Math.max(0, paidAlquiler + saldoDiff));
+    saldoAFavor = trueSaldoAFavor;
+  }
+
   // ================================================================
   // 4-STATE PAYMENT CLASSIFICATION
   // ================================================================
