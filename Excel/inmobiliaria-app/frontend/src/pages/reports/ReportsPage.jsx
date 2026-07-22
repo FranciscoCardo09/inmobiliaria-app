@@ -155,12 +155,15 @@ function computeHonorariosLocal(data, gastosState, honPct, descuentosAlquilerSta
     gastosItems.push({ concepto: ex.concepto || 'Extra', importe: parseFloat(ex.importe) || 0, isExtra: true })
   }
 
-  // Honorarios: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados,
-  // que ya incluye el alquiler + punitorios de deudas viejas saldadas en el período).
+  // Honorarios: pct% of (subtotalAlquileresCobrado - descuento manual), misma base que usa
+  // el backend al generar el documento (same base as Total Alquileres Cobrados, que ya incluye
+  // el alquiler + punitorios de deudas viejas saldadas en el período). El descuento manual
+  // reduce SOLO la base de honorarios, no el "Total Alquileres Cobrados".
   // Si no se cobró nada (ni el mes actual ni deudas anteriores) no se cobran honorarios
   // ni gastos a mi cargo, aunque haya saldo a favor previo.
   const cobroAlgo = (data.amountPaid || 0) > 0 || (data.cobradoOtrosPeriodos?.total || 0) > 0
-  const honorariosBase = data.subtotalAlquileresCobrado || 0
+  const descuentoManual = parseFloat(descuentosAlquilerState?.[data.contractId]) || 0
+  const honorariosBase = Math.max(0, (data.subtotalAlquileresCobrado || 0) - descuentoManual)
   const montoAlquiler = (pct > 0 && cobroAlgo)
     ? Math.max(0, Math.round(honorariosBase * pct / 100 * 100) / 100)
     : 0

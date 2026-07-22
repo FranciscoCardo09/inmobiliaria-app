@@ -283,7 +283,7 @@ const generateLiquidacionAllHTML = (dataArray) => {
     const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
     const totalHonLetras = numeroATexto(totalHon);
     const honPct = firstHon.honorarios.porcentaje;
-    const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
+    const totalAlquiler = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
 
     // Aggregate gastos from paid + partial rows
     const allGastos = dataArray.filter(d => d.paymentStatus !== 'NO COBRADO').flatMap(d => d.honorarios?.gastosAMiCargo || []);

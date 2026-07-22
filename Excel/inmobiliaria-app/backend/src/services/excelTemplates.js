@@ -255,6 +255,26 @@ const generateLiquidacionExcel = async (dataArray) => {
       alqRow.getCell(3).numFmt = CURRENCY_FORMAT;
     }
 
+    // Honorarios
+    if (data.honorarios) {
+      const hon = data.honorarios;
+      sheet.addRow([]);
+      const honTitle = sheet.addRow(['HONORARIOS']);
+      honTitle.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF666666' } };
+
+      if (hon.porcentaje > 0) {
+        const honAlqRow = sheet.addRow([`Honorarios alquiler (${hon.porcentaje}%)`, '', hon.montoAlquiler]);
+        honAlqRow.getCell(3).numFmt = CURRENCY_FORMAT;
+      }
+      (hon.gastosAMiCargo || []).forEach((g) => {
+        const gRow = sheet.addRow([`  ${g.concepto}`, '', g.importe]);
+        gRow.getCell(3).numFmt = CURRENCY_FORMAT;
+      });
+      const honTotalRow = sheet.addRow(['TOTAL HONORARIOS', '', hon.monto]);
+      applyTotalRowStyle(honTotalRow);
+      honTotalRow.getCell(3).numFmt = CURRENCY_FORMAT;
+    }
+
     // Total combinado sin abonar: deudas anteriores + mes actual impago
     if ((data.totalDeuda || 0) > 0 && (data.pendingAmount || 0) > 0) {
       const sinAbonarRow = sheet.addRow(['TOTAL SIN ABONAR (deudas + mes actual)', '', data.totalSinAbonar]);

@@ -224,6 +224,86 @@ const generateLiquidacionDOCX = async (data) => {
     );
   }
 
+  // Honorarios section
+  if (data.honorarios) {
+    const hon = data.honorarios;
+    const gastos = hon.gastosAMiCargo || [];
+
+    children.push(new Paragraph({ spacing: { before: 200 } }));
+    children.push(new Paragraph({
+      border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } },
+      spacing: { after: 80 },
+    }));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: 'HONORARIOS', bold: true, size: 20, font: 'Arial', color: BLACK, characterSpacing: 20 })],
+        spacing: { after: 120 },
+      })
+    );
+
+    const honRows = [];
+    if (hon.porcentaje > 0) {
+      honRows.push(new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: `Honorarios alquiler (${hon.porcentaje}%)`, size: 18, font: 'Arial', color: BLACK })], alignment: AlignmentType.LEFT })],
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(hon.montoAlquiler, data.currency), size: 18, font: 'Arial', color: DARK })], alignment: AlignmentType.RIGHT })],
+            borders: THIN_BORDER,
+          }),
+        ],
+      }));
+    }
+    for (const g of gastos) {
+      honRows.push(new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: `  ${g.concepto}`, size: 16, font: 'Arial', color: MEDIUM })], alignment: AlignmentType.LEFT })],
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(g.importe, data.currency), size: 16, font: 'Arial', color: DARK })], alignment: AlignmentType.RIGHT })],
+            borders: THIN_BORDER,
+          }),
+        ],
+      }));
+    }
+
+    if (honRows.length > 0) {
+      children.push(new Table({ rows: honRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+    }
+
+    children.push(new Table({
+      rows: [new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL HONORARIOS', bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(hon.monto, data.currency), bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.RIGHT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+        ],
+      })],
+      width: { size: 100, type: WidthType.PERCENTAGE },
+    }));
+
+    if (hon.montoEnLetras) {
+      children.push(new Paragraph({ spacing: { before: 80 } }));
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: `Son: ${hon.montoEnLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
+          spacing: { after: 120 },
+        })
+      );
+    }
+  }
+
   // Payments section
   if (data.transacciones && data.transacciones.length > 0) {
     children.push(new Paragraph({ spacing: { after: 120 } }));
@@ -535,6 +615,98 @@ const generateLiquidacionAllDOCX = async (dataArray) => {
     children: [new TextRun({ text: `Son: ${totalLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
     spacing: { before: 60, after: 120 },
   }));
+
+  // Honorarios section (aggregate across contracts)
+  const firstHon = dataArray.find(d => d.honorarios);
+  if (firstHon) {
+    const totalHon = dataArray.reduce((s, d) => s + (d.honorariosCobrado || 0), 0);
+    const totalAlquilerHon = dataArray.reduce((s, d) => s + (d.honorarios?.montoAlquiler || 0), 0);
+    const honPct = firstHon.honorarios.porcentaje;
+    const totalHonLetras = numeroATexto(totalHon);
+
+    // Aggregate gastos from paid + partial rows (same criteria as PDF/HTML "all")
+    const allGastos = dataArray.filter(d => d.paymentStatus !== 'NO COBRADO').flatMap(d => d.honorarios?.gastosAMiCargo || []);
+    const gastosGrouped = [];
+    for (const g of allGastos) {
+      const ex = gastosGrouped.find(x => x.concepto === g.concepto);
+      if (ex) { ex.importe += g.importe; }
+      else gastosGrouped.push({ ...g });
+    }
+
+    children.push(new Paragraph({ spacing: { before: 200 } }));
+    children.push(new Paragraph({
+      border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } },
+      spacing: { after: 80 },
+    }));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: 'HONORARIOS', bold: true, size: 20, font: 'Arial', color: BLACK, characterSpacing: 20 })],
+        spacing: { after: 120 },
+      })
+    );
+
+    const honRows = [];
+    if (honPct > 0) {
+      honRows.push(new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: `Honorarios alquiler (${honPct}%)`, size: 18, font: 'Arial', color: BLACK })], alignment: AlignmentType.LEFT })],
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(totalAlquilerHon, currency), size: 18, font: 'Arial', color: DARK })], alignment: AlignmentType.RIGHT })],
+            borders: THIN_BORDER,
+          }),
+        ],
+      }));
+    }
+    for (const g of gastosGrouped) {
+      honRows.push(new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: `  ${g.concepto}`, size: 16, font: 'Arial', color: MEDIUM })], alignment: AlignmentType.LEFT })],
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(g.importe, currency), size: 16, font: 'Arial', color: DARK })], alignment: AlignmentType.RIGHT })],
+            borders: THIN_BORDER,
+          }),
+        ],
+      }));
+    }
+
+    if (honRows.length > 0) {
+      children.push(new Table({ rows: honRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+    }
+
+    children.push(new Table({
+      rows: [new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL HONORARIOS', bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.LEFT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: fmt(totalHon, currency), bold: true, size: 22, font: 'Arial', color: WHITE })], alignment: AlignmentType.RIGHT })],
+            shading: { type: ShadingType.SOLID, color: BLACK },
+            borders: THIN_BORDER,
+          }),
+        ],
+      })],
+      width: { size: 100, type: WidthType.PERCENTAGE },
+    }));
+
+    if (totalHonLetras) {
+      children.push(new Paragraph({ spacing: { before: 80 } }));
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: `Son: ${totalHonLetras}`, size: 16, font: 'Arial', color: DARK, italics: true })],
+          spacing: { after: 120 },
+        })
+      );
+    }
+  }
 
   // Footer
   children.push(new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 1, color: 'E0E0E0' } }, spacing: { before: 40 } }));

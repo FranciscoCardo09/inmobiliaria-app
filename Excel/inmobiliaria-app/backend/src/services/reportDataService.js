@@ -772,20 +772,27 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     .reduce((s, c) => s + Math.abs(c.importe), 0);
   const subtotalAlquileresCobrado = paidAlquiler + paidPunitorios - descuentosTotal;
 
-  // HONORARIOS: pct% of subtotalAlquileresCobrado (same base as Total Alquileres Cobrados)
+  // HONORARIOS: pct% of (subtotalAlquileresCobrado - descuento manual de honorarios).
+  // El descuento manual (options.descuentosAlquiler, cargado a mano por contrato) reduce
+  // SOLO la base de honorarios, no el "Total Alquileres Cobrados" (el inquilino sí pagó
+  // el alquiler completo; el descuento es una cortesía sobre el honorario, no sobre el cobro).
   // Si no se cobró nada (NO COBRADO) no se cobran honorarios, aunque haya saldo a favor previo.
   const honPct = options.honorariosPercent || 0;
+  const descuentoManualHonorarios = options.descuentosAlquiler || 0;
+  const baseHonorariosCobrado = Math.max(0, subtotalAlquileresCobrado - descuentoManualHonorarios);
   const honorariosAlquilerCobrado = (honPct > 0 && amtPaid > 0)
-    ? Math.max(0, Math.round(subtotalAlquileresCobrado * honPct / 100 * 100) / 100)
+    ? Math.max(0, Math.round(baseHonorariosCobrado * honPct / 100 * 100) / 100)
     : 0;
   const gastosCobrado = amtPaid > 0 ? (honorarios?.totalGastos ?? 0) : 0;
   const honorariosCobrado = honorariosAlquilerCobrado + gastosCobrado;
 
   // Update per-contract honorarios display to reflect collected amounts
   if (honorarios) {
+    honorarios.baseHonorarios = baseHonorariosCobrado;
     honorarios.montoAlquiler = honorariosAlquilerCobrado;
     honorarios.monto = honorariosCobrado;
     honorarios.montoEnLetras = numeroATexto(honorariosCobrado);
+    honorarios.descuentoManual = descuentoManualHonorarios;
   }
 
   // Available services for frontend checkbox rendering (excludes discounts/bonifications)
@@ -1262,7 +1269,10 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
         const honPct = options.honorariosPercent || 0;
         if (honPct > 0 && liq.honorarios) {
           const gastosCobrado = round2((liq.honorariosCobrado || 0) - (liq.honorarios.montoAlquiler || 0));
-          const honAlqNuevo = round2(Math.max(0, liq.subtotalAlquileresCobrado * honPct / 100));
+          const descuentoManual = liq.honorarios.descuentoManual || 0;
+          const baseHonNueva = round2(Math.max(0, liq.subtotalAlquileresCobrado - descuentoManual));
+          const honAlqNuevo = round2(Math.max(0, baseHonNueva * honPct / 100));
+          liq.honorarios.baseHonorarios = baseHonNueva;
           liq.honorarios.montoAlquiler = honAlqNuevo;
           liq.honorarios.monto = round2(honAlqNuevo + gastosCobrado);
           liq.honorarios.montoEnLetras = numeroATexto(liq.honorarios.monto);
@@ -1287,11 +1297,15 @@ const getLiquidacionesAllContracts = async (groupId, month, year, propertyIds = 
     // honorarios deben salir enteramente de lo cobrado de deudas viejas.
     const debtAlqPun = round2(entry.alquiler + entry.punitorios);
     const honPct = options.honorariosPercent || 0;
+    const descuentoManual = (options.descuentosAlquiler && typeof options.descuentosAlquiler === 'object')
+      ? (options.descuentosAlquiler[cid] || 0)
+      : 0;
     let honorarios = null;
     let honorariosCobrado = 0;
     if (honPct > 0 && debtAlqPun > 0) {
-      const montoAlquiler = round2(Math.max(0, debtAlqPun * honPct / 100));
-      honorarios = { porcentaje: honPct, baseHonorarios: debtAlqPun, montoAlquiler, gastosAMiCargo: [], totalGastos: 0, monto: montoAlquiler, montoEnLetras: numeroATexto(montoAlquiler) };
+      const baseHon = round2(Math.max(0, debtAlqPun - descuentoManual));
+      const montoAlquiler = round2(Math.max(0, baseHon * honPct / 100));
+      honorarios = { porcentaje: honPct, baseHonorarios: baseHon, montoAlquiler, gastosAMiCargo: [], totalGastos: 0, monto: montoAlquiler, montoEnLetras: numeroATexto(montoAlquiler), descuentoManual };
       honorariosCobrado = montoAlquiler;
     }
 
