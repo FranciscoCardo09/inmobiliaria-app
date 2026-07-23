@@ -233,10 +233,28 @@ const getContractsWithAdjustmentInCalendar = async (groupId, calendarMonth, cale
       },
       orderBy: [{ effectiveFromMonth: 'desc' }, { createdAt: 'desc' }],
     });
-    
-    // El alquiler ANTES del ajuste de este mes
-    const rentBeforeAdjustment = lastHistoryBefore ? lastHistoryBefore.rentAmount : contract.baseRent;
-    
+
+    // El alquiler ANTES del ajuste de este mes. Nunca caer directo en baseRent si el
+    // contrato tiene historial: baseRent muta con cada ajuste y reescribiría meses
+    // pasados (mismo bug que calculateRentForMonth ya evita en monthlyRecordService).
+    let rentBeforeAdjustment;
+    if (lastHistoryBefore) {
+      rentBeforeAdjustment = lastHistoryBefore.rentAmount;
+    } else if (rentHistoryRecords[0]?.adjustmentPercent) {
+      // No hay fila anterior, pero el propio mes tiene un AJUSTE_AUTOMATICO con %:
+      // derivar el valor previo a partir del porcentaje (no baseRent).
+      const aj = rentHistoryRecords[0];
+      rentBeforeAdjustment = Math.round(aj.rentAmount / (1 + aj.adjustmentPercent / 100));
+    } else {
+      // Sin fila anterior ni % derivable: usar la fila más antigua del historial
+      // conocida (alquiler más viejo). baseRent solo si no hay historial en absoluto.
+      const oldestHistory = await prisma.rentHistory.findFirst({
+        where: { contractId: contract.id },
+        orderBy: [{ effectiveFromMonth: 'asc' }, { createdAt: 'asc' }],
+      });
+      rentBeforeAdjustment = oldestHistory ? oldestHistory.rentAmount : contract.baseRent;
+    }
+
     contractsInMonth.push({
       ...contract,
       contractMonth,
