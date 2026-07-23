@@ -125,7 +125,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
       const ivaAmount = monthlyRecord.ivaAmount || 0;
       const unpaidRent = computePunitoryBase({
         rentAmount: monthlyRecord.rentAmount,
-        servicesTotal: Math.max(servicesTotal, 0),
+        servicesTotal,
         ivaAmount,
         amountPaid,
       });
@@ -1677,7 +1677,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
         const ivaAmount = monthlyRecord.ivaAmount || 0;
         const unpaidRentBase = computePunitoryBase({
           rentAmount: monthlyRecord.rentAmount,
-          servicesTotal: Math.max(servicesTotal, 0),
+          servicesTotal,
           ivaAmount,
           amountPaid,
         });

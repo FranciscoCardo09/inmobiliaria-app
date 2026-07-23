@@ -228,7 +228,9 @@ function round2(n) {
  *   - Sin ningún pago real: la base es SOLO el alquiler (los servicios/IVA
  *     impagos no generan punitorios en mes abierto sin ningún pago).
  *   - Con pagos parciales: la base es el SALDO RESTANTE = alquiler + servicios
- *     + IVA impago − pagos reales.
+ *     + IVA impago − pagos reales, y la bonificación/descuento (servicesTotal
+ *     negativo) NO reduce esa base (clamp a >=0): la TASA de mora se calcula
+ *     sobre el alquiler+servicios brutos, sin descontar bonificaciones.
  *   - El saldo a favor del mes anterior (previousBalance) NUNCA entra acá: se
  *     aplica al TOTAL al final, nunca a la base de punitorios.
  * Antes de esta función existían 4 copias de esta misma fórmula (display y
@@ -236,12 +238,28 @@ function round2(n) {
  * cierre en debtService.js) — las dos primeras ya coincidían entre sí; las de
  * cobro y cierre calculaban una base rent-only distinta (bug real, no solo
  * duplicación). Esta es ahora la única implementación.
+ *
+ * Bug (2026-07-23, caso Godoy Fernando Alberto, julio 2026): el clamp de arriba
+ * se aplicaba ANTES de esta función (cada caller pasaba `Math.max(servicesTotal,
+ * 0)`), así que un mes con una bonificación real que cubre parte del alquiler
+ * (ej. "Cocina cuota 2 de 3") nunca podía saldarse del todo: aunque el pago
+ * cubriera el total NETO exacto (alquiler+servicios con el descuento aplicado),
+ * la base seguía comparando contra el alquiler BRUTO sin descuento, dejando un
+ * saldo fantasma que devengaba mora en vivo contra la fecha de HOY (crecía cada
+ * día que el pago tardara en registrarse). Fix: si lo pagado ya cubre el total
+ * NETO (servicesTotal SIN clampear), no hay ninguna base de punitorio — la
+ * bonificación sigue sin bajar la TASA mientras algo quede pendiente, pero deja
+ * de haber pendiente en cuanto se paga el neto completo.
  */
 function computePunitoryBase({ rentAmount = 0, servicesTotal = 0, ivaAmount = 0, amountPaid = 0 }) {
   const totalCredits = amountPaid || 0;
-  const baseNonPunitory = (rentAmount || 0) + (servicesTotal || 0) + (ivaAmount || 0);
-  const remainingBalance = Math.max(baseNonPunitory - totalCredits, 0);
-  return totalCredits <= 0 ? (rentAmount || 0) : remainingBalance;
+  if (totalCredits <= 0) return (rentAmount || 0);
+
+  const netTotalOwed = (rentAmount || 0) + (servicesTotal || 0) + (ivaAmount || 0);
+  if (totalCredits >= netTotalOwed - 0.01) return 0;
+
+  const baseNonPunitory = (rentAmount || 0) + Math.max(servicesTotal || 0, 0) + (ivaAmount || 0);
+  return Math.max(baseNonPunitory - totalCredits, 0);
 }
 
 /**
@@ -321,7 +339,7 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     // El crédito (previousBalance) NUNCA entra acá — se aplica al total al final.
     const punitoryBase = computePunitoryBase({
       rentAmount: record.rentAmount || 0,
-      servicesTotal: Math.max(servicesTotal, 0),
+      servicesTotal,
       ivaAmount: ivaForPunitory,
       amountPaid,
     });

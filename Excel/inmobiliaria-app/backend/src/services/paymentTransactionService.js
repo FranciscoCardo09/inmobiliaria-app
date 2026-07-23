@@ -171,7 +171,7 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const unpaidRentForPunitory = computePunitoryBase({
     rentAmount: record.rentAmount,
-    servicesTotal: Math.max(servicesTotal, 0),
+    servicesTotal,
     ivaAmount: ivaForPunitory,
     amountPaid: amountPaidSoFar,
   });
@@ -476,7 +476,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const unpaidRentForPunitory = computePunitoryBase({
     rentAmount: record.rentAmount,
-    servicesTotal: Math.max(servicesTotal, 0),
+    servicesTotal,
     ivaAmount: ivaForPunitory,
     amountPaid,
   });
