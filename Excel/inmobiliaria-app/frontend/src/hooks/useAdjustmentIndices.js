@@ -22,7 +22,7 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Índice de ajuste creado')
     },
     onError: (error) => {
@@ -36,7 +36,7 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Índice actualizado')
     },
     onError: (error) => {
@@ -49,7 +49,7 @@ export const useAdjustmentIndices = (groupId) => {
       await api.delete(`/groups/${groupId}/adjustment-indices/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Índice eliminado')
     },
     onError: (error) => {
@@ -78,11 +78,11 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al aplicar ajuste')
@@ -98,11 +98,11 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al aplicar ajustes')
@@ -127,11 +127,11 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al aplicar ajuste')
@@ -148,11 +148,11 @@ export const useAdjustmentIndices = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['adjustmentIndices', groupId])
-      queryClient.invalidateQueries(['contractAdjustments', groupId])
-      queryClient.invalidateQueries(['contracts', groupId])
-      queryClient.invalidateQueries(['dashboard', 'summary', groupId])
-      queryClient.invalidateQueries(['monthlyRecords', groupId])
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Ajuste revertido correctamente')
     },
     onError: (error) => {

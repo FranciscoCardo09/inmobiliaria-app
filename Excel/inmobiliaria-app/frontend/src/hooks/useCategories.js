@@ -24,7 +24,7 @@ export const useCategories = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['categories', groupId])
+      queryClient.invalidateQueries({ queryKey: ['categories', groupId] })
       toast.success('Categoría creada')
     },
     onError: (error) => {
@@ -40,7 +40,7 @@ export const useCategories = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['categories', groupId])
+      queryClient.invalidateQueries({ queryKey: ['categories', groupId] })
       toast.success('Categoría actualizada')
     },
     onError: (error) => {
@@ -55,7 +55,7 @@ export const useCategories = (groupId) => {
       await api.delete(`/groups/${groupId}/categories/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['categories', groupId])
+      queryClient.invalidateQueries({ queryKey: ['categories', groupId] })
       toast.success('Categoría eliminada')
     },
     onError: (error) => {

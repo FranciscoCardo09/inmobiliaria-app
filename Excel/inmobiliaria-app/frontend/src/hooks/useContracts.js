@@ -67,13 +67,17 @@ export const useContracts = (groupId, filters = {}) => {
       const response = await api.put(`/groups/${groupId}/contracts/${id}`, data)
       return response.data.data
     },
-    onSuccess: (_, { id }) => {
+    onSuccess: (updated, { id }) => {
       queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contract', groupId, id] })
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
       toast.success('Contrato actualizado')
+      // Avisos no bloqueantes del backend (meses con pagos fuera de rango, ajustes
+      // ya aplicados con el índice anterior): nunca mueven plata solos, hay que
+      // revisarlos a mano.
+      updated?.warnings?.forEach((w) => toast(w.message, { icon: '⚠️', duration: 8000 }))
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al actualizar contrato')

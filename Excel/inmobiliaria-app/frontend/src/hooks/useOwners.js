@@ -37,7 +37,7 @@ export const useOwners = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['owners', groupId])
+      queryClient.invalidateQueries({ queryKey: ['owners', groupId] })
       toast.success('Dueño creado')
     },
     onError: (error) => {
@@ -51,7 +51,7 @@ export const useOwners = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['owners', groupId])
+      queryClient.invalidateQueries({ queryKey: ['owners', groupId] })
       toast.success('Dueño actualizado')
     },
     onError: (error) => {
@@ -64,7 +64,7 @@ export const useOwners = (groupId, filters = {}) => {
       await api.delete(`/groups/${groupId}/owners/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['owners', groupId])
+      queryClient.invalidateQueries({ queryKey: ['owners', groupId] })
       toast.success('Dueño eliminado')
     },
     onError: (error) => {

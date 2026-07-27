@@ -43,7 +43,7 @@ export const useProperties = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['properties', groupId])
+      queryClient.invalidateQueries({ queryKey: ['properties', groupId] })
       toast.success('Propiedad creada')
     },
     onError: (error) => {
@@ -59,7 +59,7 @@ export const useProperties = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['properties', groupId])
+      queryClient.invalidateQueries({ queryKey: ['properties', groupId] })
       toast.success('Propiedad actualizada')
     },
     onError: (error) => {
@@ -74,7 +74,7 @@ export const useProperties = (groupId, filters = {}) => {
       await api.delete(`/groups/${groupId}/properties/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['properties', groupId])
+      queryClient.invalidateQueries({ queryKey: ['properties', groupId] })
       toast.success('Propiedad eliminada')
     },
     onError: (error) => {

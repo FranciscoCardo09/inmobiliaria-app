@@ -32,7 +32,7 @@ export const useGroups = () => {
         slug: group.slug,
         role: 'ADMIN',
       })
-      queryClient.invalidateQueries(['groups'])
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
       toast.success('Grupo creado exitosamente')
     },
     onError: (error) => {
@@ -47,7 +47,7 @@ export const useGroups = () => {
     onSuccess: (response) => {
       const invite = response.data.data
       toast.success(`Invitacion enviada a ${invite.email}`)
-      queryClient.invalidateQueries(['group-invites'])
+      queryClient.invalidateQueries({ queryKey: ['group-invites'] })
     },
     onError: (error) => {
       const message = error.response?.data?.message || 'Error al enviar invitacion'
@@ -71,8 +71,8 @@ export const useGroups = () => {
       if (acceptedInvite) {
         removeInvite(acceptedInvite.id)
       }
-      queryClient.invalidateQueries(['groups'])
-      queryClient.invalidateQueries(['me'])
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['me'] })
       toast.success(`Te uniste a ${data.groupName}`)
     },
     onError: (error) => {

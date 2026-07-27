@@ -55,7 +55,7 @@ export const useTenants = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['tenants', groupId])
+      queryClient.invalidateQueries({ queryKey: ['tenants', groupId] })
       toast.success('Inquilino creado')
     },
     onError: (error) => {
@@ -71,7 +71,7 @@ export const useTenants = (groupId, filters = {}) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['tenants', groupId])
+      queryClient.invalidateQueries({ queryKey: ['tenants', groupId] })
       toast.success('Inquilino actualizado')
     },
     onError: (error) => {
@@ -86,7 +86,7 @@ export const useTenants = (groupId, filters = {}) => {
       await api.delete(`/groups/${groupId}/tenants/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['tenants', groupId])
+      queryClient.invalidateQueries({ queryKey: ['tenants', groupId] })
       toast.success('Inquilino eliminado')
     },
     onError: (error) => {

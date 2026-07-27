@@ -82,12 +82,18 @@ export const ContractForm = () => {
         punitoryStartDay: contract.punitoryStartDay?.toString() || '10',
         punitoryPercent: contract.punitoryPercent ? (contract.punitoryPercent * 100).toString() : '0.6',
         pagaIva: contract.pagaIva ?? false,
-        active: true,
+        active: contract.active ?? true,
         observations: contract.observations || '',
         comprobantes: Array.isArray(contract.comprobantes) ? contract.comprobantes.map(c => c.id) : [],
       })
     }
-  }, [contract])
+    // Solo re-hidratar cuando cambia DE CONTRATO (id), no en cada refetch/invalidación
+    // con el mismo id: si dependiera del objeto `contract` completo, cualquier
+    // invalidateQueries de una mutación no relacionada (p.ej. crear un índice de
+    // ajuste mientras este formulario está abierto) pisaba silenciosamente lo que el
+    // usuario venía editando y sin guardar (incluido un índice recién elegido).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contract?.id])
 
   // Auto-check pagaIva when property category is LOCAL or LOCAL COMERCIAL
   useEffect(() => {

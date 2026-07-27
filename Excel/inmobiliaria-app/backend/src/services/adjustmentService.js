@@ -878,6 +878,7 @@ const applyAllNextMonthAdjustments = async (groupId) => {
 };
 
 module.exports = {
+  computeCurrentMonth,
   calculateNextAdjustmentMonth,
   isAdjustmentMonth,
   calculateContractMonthFromCalendar,

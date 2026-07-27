@@ -2,7 +2,7 @@
 // Handles: CRUD contracts with adjustment info, punitory fields, currentMonth
 
 const ApiResponse = require('../utils/apiResponse');
-const { calculateNextAdjustmentMonth, isAdjustmentMonth } = require('../services/adjustmentService');
+const { calculateNextAdjustmentMonth, isAdjustmentMonth, computeCurrentMonth } = require('../services/adjustmentService');
 
 const prisma = require('../lib/prisma');
 
@@ -337,208 +337,267 @@ const updateContract = async (req, res, next) => {
     // NOTE: contractType is intentionally not mutable after creation
     const data = {};
     if (startDate) data.startDate = parseLocalDate(startDate);
-    if (durationMonths) data.durationMonths = parseInt(durationMonths, 10);
+    if (durationMonths !== undefined) data.durationMonths = parseInt(durationMonths, 10);
 
     // Recalculate startMonth when relevant fields change.
-    if (startDate || durationMonths || currentMonth) {
+    if (startDate || durationMonths !== undefined || currentMonth !== undefined) {
       const effectiveStartDate = new Date(data.startDate || contract.startDate);
       const nowForStart = new Date();
       const elapsedMonths =
         (nowForStart.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
         (nowForStart.getMonth() - effectiveStartDate.getMonth());
-      const userCurrentMonth = currentMonth ? parseInt(currentMonth, 10) : (contract.currentMonth || 1);
-      
+      const userCurrentMonth = currentMonth !== undefined ? parseInt(currentMonth, 10) : (contract.currentMonth || 1);
+
       data.startMonth = Math.max(1, userCurrentMonth - elapsedMonths);
-      if (currentMonth) {
+      if (currentMonth !== undefined) {
         data.currentMonth = parseInt(currentMonth, 10);
       }
     }
 
-    if (baseRent) data.baseRent = parseFloat(baseRent);
-    if (punitoryStartDay) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
+    if (baseRent !== undefined) data.baseRent = parseFloat(baseRent);
+    if (punitoryStartDay !== undefined) data.punitoryStartDay = parseInt(punitoryStartDay, 10);
     if (punitoryPercent !== undefined) data.punitoryPercent = parseFloat(punitoryPercent);
     if (pagaIva !== undefined) data.pagaIva = !!pagaIva;
     if (active !== undefined) data.active = active;
     if (observations !== undefined) data.observations = observations;
     if (comprobantes !== undefined) data.comprobantes = comprobantes;
 
-    // Handle tenantIds update
-    if (tenantIds !== undefined) {
-      // Verify all tenants belong to group (batch query instead of N+1)
-      if (tenantIds.length > 0) {
-        const validTenants = await prisma.tenant.findMany({ where: { id: { in: tenantIds }, groupId } });
-        if (validTenants.length !== tenantIds.length) {
-          return ApiResponse.badRequest(res, 'Inquilino invalido');
-        }
-      }
-      // Update primary tenantId for backward compat
-      data.tenantId = tenantIds.length > 0 ? tenantIds[0] : null;
-      // Replace contractTenants
-      await prisma.contractTenant.deleteMany({ where: { contractId: id } });
-      if (tenantIds.length > 0) {
-        await prisma.contractTenant.createMany({
-          data: tenantIds.map((tid, i) => ({
-            contractId: id,
-            tenantId: tid,
-            isPrimary: i === 0,
-          })),
-        });
+    // Verify all tenants belong to group (batch query instead of N+1). Read-only
+    // validation, kept outside the transaction below.
+    if (tenantIds !== undefined && tenantIds.length > 0) {
+      const validTenants = await prisma.tenant.findMany({ where: { id: { in: tenantIds }, groupId } });
+      if (validTenants.length !== tenantIds.length) {
+        return ApiResponse.badRequest(res, 'Inquilino invalido');
       }
     }
 
+    // Detecta si el cronograma (fecha de inicio / duración / mes actual) REALMENTE
+    // cambió, comparando contra el valor efectivo actual en vez de la mera presencia
+    // del campo en el body. El formulario manda `currentMonth` en TODA edición
+    // (incluso al tocar solo el índice de ajuste), así que usar presencia disparaba
+    // el remapeo de RentHistory y repairContractRecordMonthNumbers (que borra meses
+    // fantasma) en cada guardado, aunque el cronograma no se haya tocado.
+    const scheduleChanged =
+      (!!startDate && parseLocalDate(startDate).getTime() !== new Date(contract.startDate).getTime()) ||
+      (durationMonths !== undefined && parseInt(durationMonths, 10) !== contract.durationMonths) ||
+      (currentMonth !== undefined && parseInt(currentMonth, 10) !== computeCurrentMonth(contract));
+
     // Recalculate nextAdjustmentMonth when adjustment index changes OR when
-    // startDate/durationMonths change (which shift the adjustment schedule)
+    // startDate/durationMonths/currentMonth actually change (which shift the
+    // adjustment schedule).
     const adjIndexChanged = adjustmentIndexId !== undefined;
-    const scheduleChanged = startDate || durationMonths || currentMonth;
     const effectiveAdjIndexId = adjIndexChanged ? adjustmentIndexId : contract.adjustmentIndexId;
 
+    if (adjIndexChanged) data.adjustmentIndexId = adjustmentIndexId || null;
+
+    let adjIndex = null;
     if ((adjIndexChanged || scheduleChanged) && effectiveAdjIndexId) {
-      if (adjIndexChanged) data.adjustmentIndexId = adjustmentIndexId || null;
-      const adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: effectiveAdjIndexId } });
-      if (adjIndex && adjIndex.groupId === groupId) {
-        const startM = data.startMonth || contract.startMonth;
-        const dur = data.durationMonths || contract.durationMonths;
-        const contractStart = new Date(data.startDate || contract.startDate);
-        const nowUpdate = new Date();
-        const mDiff =
-          (nowUpdate.getFullYear() - contractStart.getFullYear()) * 12 +
-          (nowUpdate.getMonth() - contractStart.getMonth());
-        const realCurrentM = Math.max(startM, Math.min(startM + mDiff, startM + dur - 1));
+      // Validar el índice ANTES de escribir nada: a diferencia de createContract, esta
+      // rama no rechazaba un adjustmentIndexId de otro grupo o inexistente (quedaba
+      // asignado igual, o Prisma explotaba con FK violation a mitad del update dejando
+      // el contrato a medio escribir). Falla rápido con 400, como en createContract.
+      adjIndex = await prisma.adjustmentIndex.findUnique({ where: { id: effectiveAdjIndexId } });
+      if (!adjIndex || adjIndex.groupId !== groupId) {
+        return ApiResponse.badRequest(res, 'Índice de ajuste invalido');
+      }
+
+      const startM = data.startMonth || contract.startMonth;
+      const dur = data.durationMonths || contract.durationMonths;
+      const contractStart = new Date(data.startDate || contract.startDate);
+      const nowUpdate = new Date();
+      const mDiff =
+        (nowUpdate.getFullYear() - contractStart.getFullYear()) * 12 +
+        (nowUpdate.getMonth() - contractStart.getMonth());
+      const realCurrentM = Math.max(startM, Math.min(startM + mDiff, startM + dur - 1));
+
+      // Si el mes actual YA es mes de ajuste bajo el índice (nuevo o vigente) y todavía
+      // no se aplicó un AJUSTE_AUTOMATICO para ese mes, el próximo ajuste es ESE mes,
+      // no el siguiente. calculateNextAdjustmentMonth por diseño salta al período
+      // siguiente cuando currentMonth ya es un múltiplo (asume que ya fue aplicado),
+      // lo cual está mal recién editado el índice: la pantalla de Ajustes usa
+      // nextAdjustmentMonth como fuente de verdad (getContractsWithAdjustmentThisMonth)
+      // y el contrato desaparecía de "este mes" hasta el período siguiente.
+      if (isAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths)) {
+        const alreadyApplied = await prisma.rentHistory.findFirst({
+          where: { contractId: id, effectiveFromMonth: realCurrentM, reason: 'AJUSTE_AUTOMATICO' },
+          select: { id: true },
+        });
+        if (!alreadyApplied) {
+          data.nextAdjustmentMonth = realCurrentM;
+        } else {
+          data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths, dur);
+        }
+      } else {
         data.nextAdjustmentMonth = calculateNextAdjustmentMonth(startM, realCurrentM, adjIndex.frequencyMonths, dur);
-      } else if (adjIndexChanged && !adjustmentIndexId) {
-        data.adjustmentIndexId = null;
-        data.nextAdjustmentMonth = null;
       }
     } else if (adjIndexChanged && !adjustmentIndexId) {
-      data.adjustmentIndexId = null;
       data.nextAdjustmentMonth = null;
     }
 
-    // Si cambió el cronograma (startMonth se resetea a 1), REMAPEAR el historial de
-    // alquileres a la numeración nueva. Sin esto, las filas quedan huérfanas (p.ej.
-    // effectiveFromMonth=36 con startMonth nuevo=1) y los meses del contrato caen en
-    // el fallback de baseRent → un ajuste posterior reescribe el alquiler de meses
-    // pasados (caso Rezzonico).
-    if ((startDate || durationMonths || currentMonth) && data.startMonth !== undefined) {
-      const oldSm = contract.startMonth || 1;
-      const newSm = data.startMonth;
-      const oldStart = new Date(contract.startDate);
-      const newStart = new Date(data.startDate || contract.startDate);
-      const histories = await prisma.rentHistory.findMany({ where: { contractId: id } });
-      for (const h of histories) {
-        // Mes calendario que representaba la fila con la numeración vieja
-        const cal = new Date(oldStart.getFullYear(), oldStart.getMonth() + (h.effectiveFromMonth - oldSm), 1);
-        const diff = (cal.getFullYear() - newStart.getFullYear()) * 12 + (cal.getMonth() - newStart.getMonth());
-        // Antes del inicio nuevo → rige desde el inicio (alquiler más viejo conocido)
-        const newEff = Math.max(newSm, newSm + diff);
-        if (newEff !== h.effectiveFromMonth) {
-          await prisma.rentHistory.update({ where: { id: h.id }, data: { effectiveFromMonth: newEff } });
-        }
+    // Si el usuario cambió el índice de ajuste (a otro, o lo quitó), avisar si el
+    // índice ANTERIOR ya había aplicado ajustes automáticos: esos montos quedan
+    // calculados con la frecuencia/valor viejos y no se revierten solos (misma
+    // política que repairWarning más abajo: nunca mover plata sin avisar).
+    let previousIndexWarning = null;
+    if (adjIndexChanged && (adjustmentIndexId || null) !== contract.adjustmentIndexId && contract.adjustmentIndexId) {
+      const priorAdjustments = await prisma.rentHistory.findMany({
+        where: { contractId: id, reason: 'AJUSTE_AUTOMATICO' },
+        select: { id: true, effectiveFromMonth: true, rentAmount: true, adjustmentPercent: true },
+        orderBy: { effectiveFromMonth: 'asc' },
+      });
+      if (priorAdjustments.length > 0) {
+        previousIndexWarning = {
+          code: 'ADJUSTMENTS_FROM_PREVIOUS_INDEX',
+          message: `Este contrato ya tenía ${priorAdjustments.length} ajuste(s) automático(s) aplicado(s) con el índice anterior. No se revirtieron: si corresponden a un error, deshacelos manualmente desde Ajustes.`,
+          records: priorAdjustments,
+        };
       }
     }
 
-    // If baseRent changed, create/update a RentHistory entry for the current contract month
-    // so that getBatchedRentForMonth() picks up the new value instead of stale history
-    if (baseRent && parseFloat(baseRent) !== contract.baseRent) {
-      const effectiveStartDate = new Date(data.startDate || contract.startDate);
-      const now = new Date();
-      const monthsDiff = (now.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
-        (now.getMonth() - effectiveStartDate.getMonth());
-      const sm = data.startMonth || contract.startMonth || 1;
-      const dur = data.durationMonths || contract.durationMonths;
-      const endMonth = sm + dur - 1;
-      const currentMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+    const result = await prisma.$transaction(async (tx) => {
+      // Handle tenantIds update
+      if (tenantIds !== undefined) {
+        data.tenantId = tenantIds.length > 0 ? tenantIds[0] : null;
+        await tx.contractTenant.deleteMany({ where: { contractId: id } });
+        if (tenantIds.length > 0) {
+          await tx.contractTenant.createMany({
+            data: tenantIds.map((tid, i) => ({
+              contractId: id,
+              tenantId: tid,
+              isPrimary: i === 0,
+            })),
+          });
+        }
+      }
 
-      // Baseline: si ningún historial cubre los meses ANTERIORES al cambio, crear la
-      // fila INICIAL con el alquiler VIEJO para que esos meses no hereden el nuevo.
-      if (currentMonthNumber > sm) {
-        const coversBefore = await prisma.rentHistory.findFirst({
-          where: { contractId: id, effectiveFromMonth: { lt: currentMonthNumber } },
-          select: { id: true },
+      // Si cambió el cronograma (startMonth se resetea a 1), REMAPEAR el historial de
+      // alquileres a la numeración nueva. Sin esto, las filas quedan huérfanas (p.ej.
+      // effectiveFromMonth=36 con startMonth nuevo=1) y los meses del contrato caen en
+      // el fallback de baseRent → un ajuste posterior reescribe el alquiler de meses
+      // pasados (caso Rezzonico).
+      if (scheduleChanged && data.startMonth !== undefined) {
+        const oldSm = contract.startMonth || 1;
+        const newSm = data.startMonth;
+        const oldStart = new Date(contract.startDate);
+        const newStart = new Date(data.startDate || contract.startDate);
+        const histories = await tx.rentHistory.findMany({ where: { contractId: id } });
+        for (const h of histories) {
+          // Mes calendario que representaba la fila con la numeración vieja
+          const cal = new Date(oldStart.getFullYear(), oldStart.getMonth() + (h.effectiveFromMonth - oldSm), 1);
+          const diff = (cal.getFullYear() - newStart.getFullYear()) * 12 + (cal.getMonth() - newStart.getMonth());
+          // Antes del inicio nuevo → rige desde el inicio (alquiler más viejo conocido)
+          const newEff = Math.max(newSm, newSm + diff);
+          if (newEff !== h.effectiveFromMonth) {
+            await tx.rentHistory.update({ where: { id: h.id }, data: { effectiveFromMonth: newEff } });
+          }
+        }
+      }
+
+      // If baseRent changed, create/update a RentHistory entry for the current contract month
+      // so that getBatchedRentForMonth() picks up the new value instead of stale history
+      if (baseRent && parseFloat(baseRent) !== contract.baseRent) {
+        const effectiveStartDate = new Date(data.startDate || contract.startDate);
+        const now = new Date();
+        const monthsDiff = (now.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
+          (now.getMonth() - effectiveStartDate.getMonth());
+        const sm = data.startMonth || contract.startMonth || 1;
+        const dur = data.durationMonths || contract.durationMonths;
+        const endMonth = sm + dur - 1;
+        const currentMonthNumber = Math.max(sm, Math.min(sm + monthsDiff, endMonth));
+
+        // Baseline: si ningún historial cubre los meses ANTERIORES al cambio, crear la
+        // fila INICIAL con el alquiler VIEJO para que esos meses no hereden el nuevo.
+        if (currentMonthNumber > sm) {
+          const coversBefore = await tx.rentHistory.findFirst({
+            where: { contractId: id, effectiveFromMonth: { lt: currentMonthNumber } },
+            select: { id: true },
+          });
+          if (!coversBefore) {
+            await tx.rentHistory.create({
+              data: {
+                contractId: id,
+                effectiveFromMonth: sm,
+                rentAmount: contract.baseRent,
+                reason: 'INICIAL',
+              },
+            });
+          }
+        }
+
+        const existingHistory = await tx.rentHistory.findFirst({
+          where: { contractId: id, effectiveFromMonth: currentMonthNumber },
         });
-        if (!coversBefore) {
-          await prisma.rentHistory.create({
+
+        if (existingHistory) {
+          await tx.rentHistory.update({
+            where: { id: existingHistory.id },
+            data: { rentAmount: parseFloat(baseRent), reason: 'AJUSTE_MANUAL' },
+          });
+        } else {
+          await tx.rentHistory.create({
             data: {
               contractId: id,
-              effectiveFromMonth: sm,
-              rentAmount: contract.baseRent,
-              reason: 'INICIAL',
+              effectiveFromMonth: currentMonthNumber,
+              rentAmount: parseFloat(baseRent),
+              reason: 'AJUSTE_MANUAL',
             },
           });
         }
       }
 
-      const existingHistory = await prisma.rentHistory.findFirst({
-        where: { contractId: id, effectiveFromMonth: currentMonthNumber },
+      const updatedContract = await tx.contract.update({
+        where: { id },
+        data,
+        include: {
+          tenant: { select: { id: true, name: true, dni: true } },
+          contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
+          property: { select: { id: true, address: true } },
+          adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
+        },
       });
 
-      if (existingHistory) {
-        await prisma.rentHistory.update({
-          where: { id: existingHistory.id },
-          data: { rentAmount: parseFloat(baseRent), reason: 'AJUSTE_MANUAL' },
+      // Sincronizar comprobantes con los MonthlyRecords existentes
+      if (comprobantes !== undefined) {
+        const records = await tx.monthlyRecord.findMany({
+          where: { contractId: id },
+          select: { id: true, comprobantesStatus: true },
         });
-      } else {
-        await prisma.rentHistory.create({
-          data: {
-            contractId: id,
-            effectiveFromMonth: currentMonthNumber,
-            rentAmount: parseFloat(baseRent),
-            reason: 'AJUSTE_MANUAL',
-          },
-        });
+        for (const record of records) {
+          const currentStatus = Array.isArray(record.comprobantesStatus) ? record.comprobantesStatus : [];
+          const statusMap = new Map(currentStatus.map(c => [c.id, c.presented]));
+          const newStatus = comprobantes.map(c => ({
+            ...c,
+            presented: statusMap.has(c.id) ? statusMap.get(c.id) : false,
+          }));
+          await tx.monthlyRecord.update({
+            where: { id: record.id },
+            data: { comprobantesStatus: newStatus },
+          });
+        }
       }
-    }
 
-    const updated = await prisma.contract.update({
-      where: { id },
-      data,
-      include: {
-        tenant: { select: { id: true, name: true, dni: true } },
-        contractTenants: { include: { tenant: { select: { id: true, name: true, dni: true } } }, orderBy: { isPrimary: 'desc' } },
-        property: { select: { id: true, address: true } },
-        adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true } },
-      },
+      // Si cambió el cronograma (fecha de inicio / duración / mes actual), reparar los
+      // monthNumber de los records existentes para que sigan dentro del rango nuevo,
+      // DENTRO de la misma transacción: si esto falla, no debe quedar el contrato ya
+      // actualizado con records huérfanos a mitad de reparar.
+      // Esto evita los "meses fantasma" (Problema A/B): corrige numeraciones desfasadas,
+      // borra meses fuera de rango sin plata y preserva los que tienen pagos (avisando).
+      let repair = { paidOrphans: [] };
+      if (scheduleChanged) {
+        repair = await repairContractRecordMonthNumbers(updatedContract, { deletePhantoms: true, client: tx });
+      }
+
+      return { updatedContract, repair };
     });
+    const { updatedContract: updated, repair } = result;
 
-    // Sincronizar comprobantes con los MonthlyRecords existentes
-    // Use parallel transaction instead of sequential per-record updates
-    if (comprobantes !== undefined) {
-      const records = await prisma.monthlyRecord.findMany({
-        where: { contractId: id },
-        select: { id: true, comprobantesStatus: true },
-      });
-      if (records.length > 0) {
-        await prisma.$transaction(
-          records.map((record) => {
-            const currentStatus = Array.isArray(record.comprobantesStatus) ? record.comprobantesStatus : [];
-            const statusMap = new Map(currentStatus.map(c => [c.id, c.presented]));
-            const newStatus = comprobantes.map(c => ({
-              ...c,
-              presented: statusMap.has(c.id) ? statusMap.get(c.id) : false,
-            }));
-            return prisma.monthlyRecord.update({
-              where: { id: record.id },
-              data: { comprobantesStatus: newStatus },
-            });
-          })
-        );
-      }
-    }
-
-    // Si cambió el cronograma (fecha de inicio / duración / mes actual), reparar los
-    // monthNumber de los records existentes para que sigan dentro del rango nuevo.
-    // Esto evita los "meses fantasma" (Problema A/B): corrige numeraciones desfasadas,
-    // borra meses fuera de rango sin plata y preserva los que tienen pagos (avisando).
     let repairWarning = null;
-    if (startDate || durationMonths || currentMonth) {
-      const repair = await repairContractRecordMonthNumbers(updated, { deletePhantoms: true });
-      if (repair.paidOrphans.length > 0) {
-        repairWarning = {
-          code: 'PAID_RECORDS_OUT_OF_RANGE',
-          message: `Quedaron ${repair.paidOrphans.length} mes(es) con pagos fuera del rango del contrato tras editar la fecha/duración. Revisalos para reconciliarlos (no se movió dinero automáticamente).`,
-          records: repair.paidOrphans,
-        };
-      }
+    if (repair.paidOrphans.length > 0) {
+      repairWarning = {
+        code: 'PAID_RECORDS_OUT_OF_RANGE',
+        message: `Quedaron ${repair.paidOrphans.length} mes(es) con pagos fuera del rango del contrato tras editar la fecha/duración. Revisalos para reconciliarlos (no se movió dinero automáticamente).`,
+        records: repair.paidOrphans,
+      };
     }
 
     const tenants = updated.contractTenants.length > 0
@@ -546,7 +605,8 @@ const updateContract = async (req, res, next) => {
       : updated.tenant ? [updated.tenant] : [];
 
     const payload = { ...enrichContract(updated), tenants };
-    if (repairWarning) payload.warning = repairWarning;
+    const warnings = [repairWarning, previousIndexWarning].filter(Boolean);
+    if (warnings.length > 0) payload.warnings = warnings;
     return ApiResponse.success(res, payload, 'Contrato actualizado');
   } catch (error) {
     next(error);

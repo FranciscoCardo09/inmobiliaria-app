@@ -54,8 +54,8 @@ export const useCreateRentExpenseReceipt = (groupId) => {
       return response.data.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['rent-expense-receipts', groupId])
-      queryClient.invalidateQueries(['rent-expense-concepts', groupId])
+      queryClient.invalidateQueries({ queryKey: ['rent-expense-receipts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['rent-expense-concepts', groupId] })
       toast.success('Recibo generado')
     },
     onError: (error) => {
@@ -77,7 +77,7 @@ export const useDeleteRentExpenseReceipt = (groupId) => {
       await api.delete(`/groups/${groupId}/rent-expenses/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['rent-expense-receipts', groupId])
+      queryClient.invalidateQueries({ queryKey: ['rent-expense-receipts', groupId] })
       toast.success('Recibo eliminado')
     },
     onError: (error) => {
