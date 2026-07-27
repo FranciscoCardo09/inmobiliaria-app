@@ -180,8 +180,10 @@ const refresh = async (req, res, next) => {
     }
 
     if (storedToken.expiresAt < new Date()) {
-      // Delete expired token
-      await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+      // Expired token: deleteMany (not delete) porque otra request concurrente
+      // pudo haberlo borrado ya en esta misma carrera; delete() explota con
+      // P2025 ("Record to delete does not exist") si la fila ya no está.
+      await prisma.refreshToken.deleteMany({ where: { id: storedToken.id } });
       return ApiResponse.unauthorized(res, 'Refresh token expirado');
     }
 
@@ -189,8 +191,17 @@ const refresh = async (req, res, next) => {
       return ApiResponse.unauthorized(res, 'Usuario inactivo');
     }
 
-    // Delete old refresh token
-    await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    // "Reclamar" el token de forma atómica: si dos requests concurrentes (misma
+    // pestaña con varios calls en simultáneo, o dos pestañas) llegan hasta acá con
+    // el mismo refresh token, ambas pasaron el findUnique de arriba porque ninguna
+    // lo había borrado todavía. Con delete() la segunda explotaba (P2025 -> el
+    // errorHandler global lo mapea a un 404 sin sentido) en vez de fallar con un
+    // 401 prolijo. deleteMany() nunca lanza si no matchea nada; count===0 significa
+    // que otra request ya se lo llevó primero.
+    const { count } = await prisma.refreshToken.deleteMany({ where: { id: storedToken.id } });
+    if (count === 0) {
+      return ApiResponse.unauthorized(res, 'Refresh token no encontrado');
+    }
 
     // Generate new tokens
     const tokens = generateTokenPair(storedToken.user);

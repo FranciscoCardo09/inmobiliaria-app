@@ -23,6 +23,24 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
+// El backend rota el refresh token en cada uso (lo borra y emite uno nuevo,
+// de un solo uso). Si el access token expira mientras hay varios requests en
+// vuelo (típico: dashboard/contratos/etc. pidiendo datos en paralelo), cada
+// 401 disparaba antes su PROPIO POST /auth/refresh con el mismo refresh
+// token: el primero lo consumía, y el resto llegaba con un token ya borrado
+// -> "Refresh token no encontrado" -> logout + redirect a /login de golpe,
+// aunque la sesión seguía siendo válida. Esta promesa compartida hace que
+// todos los 401 concurrentes esperen el ÚNICO refresh en curso en vez de
+// competir por el mismo token de un solo uso.
+let refreshPromise = null
+
+const refreshAccessToken = async (refreshToken) => {
+  const response = await axios.post(`${API_URL}/auth/refresh`, { refreshToken })
+  const { accessToken, refreshToken: newRefreshToken } = response.data.data
+  useAuthStore.getState().setTokens(accessToken, newRefreshToken)
+  return accessToken
+}
+
 // Response interceptor - handle token refresh
 api.interceptors.response.use(
   (response) => response,
@@ -37,13 +55,12 @@ api.interceptors.response.use(
 
       if (refreshToken) {
         try {
-          const response = await axios.post(`${API_URL}/auth/refresh`, {
-            refreshToken,
-          })
-
-          const { accessToken, refreshToken: newRefreshToken } = response.data.data
-
-          useAuthStore.getState().setTokens(accessToken, newRefreshToken)
+          if (!refreshPromise) {
+            refreshPromise = refreshAccessToken(refreshToken).finally(() => {
+              refreshPromise = null
+            })
+          }
+          const accessToken = await refreshPromise
 
           originalRequest.headers.Authorization = `Bearer ${accessToken}`
           return api(originalRequest)
