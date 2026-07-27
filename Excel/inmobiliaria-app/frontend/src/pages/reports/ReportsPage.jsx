@@ -27,6 +27,7 @@ import EmptyState from '../../components/ui/EmptyState'
 import { useNotifications } from '../../hooks/useNotifications'
 import { computeGrandTotals } from '../../utils/reportTotals'
 import SendNotificationModal from '../../components/notifications/SendNotificationModal'
+import GastosAlquilerTab from './GastosAlquilerTab'
 import {
   DocumentTextIcon,
   ArrowDownTrayIcon,
@@ -46,6 +47,7 @@ import {
   CodeBracketIcon,
   BellIcon,
   PhoneIcon,
+  ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -76,6 +78,7 @@ const StatusBadge = ({ status, isPaid }) => {
 
 const TABS = [
   { id: 'pago-efectivo', label: 'Pago Efectivo', icon: BanknotesIcon },
+  { id: 'gastos-alquiler', label: 'Gastos Alquiler', icon: ClipboardDocumentListIcon },
   { id: 'liquidacion', label: 'Liquidación', icon: DocumentTextIcon },
   { id: 'ajustes', label: 'Ajustes', icon: AdjustmentsHorizontalIcon },
   { id: 'control-mensual', label: 'Control Mensual', icon: CalendarDaysIcon },
@@ -120,6 +123,7 @@ export default function ReportsPage() {
 
       {/* Tab Content */}
       {activeTab === 'pago-efectivo' && <PagoEfectivoTab groupId={currentGroupId} />}
+      {activeTab === 'gastos-alquiler' && <GastosAlquilerTab groupId={currentGroupId} />}
       {activeTab === 'liquidacion' && <LiquidacionTab groupId={currentGroupId} />}
       {activeTab === 'ajustes' && <AjustesTab groupId={currentGroupId} />}
       {activeTab === 'control-mensual' && <ControlMensualTab groupId={currentGroupId} />}

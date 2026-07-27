@@ -100,6 +100,8 @@ model Group {
   debts                 Debt[]
   notifications         NotificationLog[]
   propertyGroups        PropertyGroup[]
+  rentExpenseConcepts   RentExpenseConcept[]
+  rentExpenseReceipts   RentExpenseReceipt[]
 
   @@map("groups")
 }
@@ -843,4 +845,83 @@ model PropertyGroupItem {
 
   @@unique([propertyGroupId, contractId])
   @@map("property_group_items")
+}
+
+// ============================================
+// Gastos Alquiler (recibo de gastos de ingreso: informes, apto eléctrico,
+// honorarios inmobiliarios, etc. cobrados al inquilino nuevo, con descuento
+// de reserva)
+// ============================================
+
+// Catálogo de nombres de concepto reutilizables, propio de Gastos Alquiler
+// (separado de ConceptType para no mezclarse con los servicios mensuales de
+// contratos ni con Control Mensual).
+model RentExpenseConcept {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, name])
+  @@index([groupId])
+  @@map("rent_expense_concepts")
+}
+
+// Contador monotónico de números de recibo de Gastos Alquiler por grupo,
+// serie propia "GA-######" (no comparte numeración con ReceiptSequence).
+model RentExpenseSequence {
+  groupId    String   @id @map("group_id")
+  lastNumber Int      @default(0) @map("last_number")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("rent_expense_sequences")
+}
+
+// Cabecera del recibo de Gastos Alquiler
+model RentExpenseReceipt {
+  id                String   @id @default(uuid())
+  groupId           String   @map("group_id")
+  receiptNumber     String   @map("receipt_number") // GA-000001
+
+  fecha             DateTime
+  tenantName        String   @map("tenant_name")
+  address           String
+  ivaCondicion      String?  @map("iva_condicion")        // ej: "consumidor final"
+  porCuentaYOrdenDe String?  @map("por_cuenta_y_orden_de")
+
+  total             Float
+  reserva           Float    @default(0)
+  saldo             Float
+
+  observations      String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  group Group                    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  items RentExpenseReceiptItem[]
+
+  @@unique([groupId, receiptNumber])
+  @@index([groupId])
+  @@index([groupId, fecha])
+  @@map("rent_expense_receipts")
+}
+
+// Líneas de concepto del recibo
+model RentExpenseReceiptItem {
+  id          String  @id @default(uuid())
+  receiptId   String  @map("receipt_id")
+  concepto    String
+  importe     Float
+  cuotaNumber Int?    @map("cuota_number")
+  cuotaTotal  Int?    @map("cuota_total")
+  order       Int     @default(0)
+
+  receipt RentExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@map("rent_expense_receipt_items")
 }

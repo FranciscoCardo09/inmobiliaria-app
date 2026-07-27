@@ -1669,8 +1669,183 @@ const generateLiquidacionAllPDF = (dataArray) => {
   });
 };
 
+// ============================================
+// GASTOS ALQUILER (recibo de gastos de ingreso cobrados al inquilino nuevo:
+// informes, apto eléctrico, honorarios inmobiliarios, etc. con descuento de
+// reserva). Comparte el layout compacto de generatePagoEfectivoPDF pero sin
+// línea de Período, con Total/Reserva/Saldo en vez de un TOTAL único, y con
+// "Son:" calculado sobre el saldo.
+// ============================================
+const generateGastosAlquilerPDF = (data) => {
+  const { numeroATexto } = require('../utils/helpers');
+
+  return new Promise((resolve, reject) => {
+    const rW = 420;
+    const rMargin = 20;
+    const rContent = rW - rMargin * 2;
+    const estimatedH = 300 + data.conceptos.length * 15;
+    const rH = Math.max(340, Math.min(estimatedH, 620));
+    const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
+    const buf = [];
+    doc.on('data', (c) => buf.push(c));
+    doc.on('end', () => resolve(Buffer.concat(buf)));
+    doc.on('error', reject);
+
+    const emp = data.empresa;
+    const currency = emp.currency || 'ARS';
+    let y = rMargin;
+
+    // ── TOP ROW: Left (logo + company info) | Right (receipt box) ──
+    const leftW = rContent * 0.58;
+    const rightW = rContent * 0.38;
+    const rightX = rMargin + leftW + rContent * 0.04;
+
+    let lx = rMargin + 4;
+    if (emp.logo && emp.logo.startsWith('data:image')) {
+      try {
+        const buf2 = Buffer.from(emp.logo.split(',')[1], 'base64');
+        doc.image(buf2, lx, y, { height: 32 });
+        lx += 38;
+      } catch (e) { /* skip */ }
+    }
+
+    doc.font(F.b).fontSize(9).fillColor(C.black)
+      .text(emp.nombre || 'Inmobiliaria', lx, y, { width: leftW - 40 });
+    y += 12;
+    doc.font(F.r).fontSize(7).fillColor(C.dark);
+    if (emp.direccion) { doc.text(emp.direccion, lx, y, { width: leftW - 40 }); y += 9; }
+    if (emp.telefono) {
+      const phones = emp.telefono.split(';').map(p => p.trim()).filter(Boolean);
+      for (const p of phones) { doc.text(p, lx, y, { width: leftW - 40 }); y += 9; }
+    }
+    if (emp.email) {
+      const emails = emp.email.split(';').map(e => e.trim()).filter(Boolean);
+      for (const e of emails) { doc.text(e, lx, y, { width: leftW - 40 }); y += 9; }
+    }
+
+    // Right: Receipt number box
+    const boxY = rMargin;
+    const boxH = 48;
+    doc.roundedRect(rightX, boxY, rightW, boxH, 4)
+      .strokeColor(C.black).lineWidth(0.8).stroke();
+
+    doc.font(F.r).fontSize(7).fillColor(C.dark)
+      .text(`N° ${data.receiptNumber}`, rightX, boxY + 6, { width: rightW, align: 'center' });
+    doc.font(F.b).fontSize(11).fillColor(C.black)
+      .text('RECIBO', rightX, boxY + 17, { width: rightW, align: 'center' });
+    // fecha es un date-only (sin hora) guardado en UTC medianoche: forzar
+    // timeZone 'UTC' al formatear, si no el servidor (America/Cordoba) lo
+    // muestra un día antes.
+    const fechaStr = new Date(data.fecha).toLocaleDateString('es-AR', {
+      timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+    doc.font(F.r).fontSize(7.5).fillColor(C.dark)
+      .text(fechaStr, rightX, boxY + 33, { width: rightW, align: 'center' });
+
+    y = Math.max(y, boxY + boxH + 6);
+
+    // ── Fiscal line: CUIT, ING. BRUTOS, Fecha Inicio Act ──
+    y += 4;
+    doc.font(F.r).fontSize(6.5).fillColor(C.medium);
+    const fiscalParts = [];
+    if (emp.cuit) fiscalParts.push(`CUIT: ${emp.cuit}`);
+    if (emp.ingBrutos) fiscalParts.push(`ING. BRUTOS: ${emp.ingBrutos}`);
+    if (emp.fechaInicioAct) fiscalParts.push(`Inicio Act.: ${emp.fechaInicioAct}`);
+    if (fiscalParts.length > 0) {
+      doc.text(fiscalParts.join('    '), rMargin + 4, y, { width: rContent });
+      y += 10;
+    }
+
+    // ── Condición IVA centrada (del recibo, no de la empresa) ──
+    if (data.ivaCondicion) {
+      y += 2;
+      doc.strokeColor(C.black).lineWidth(0.5)
+        .moveTo(rMargin, y).lineTo(rMargin + rContent, y).stroke();
+      y += 5;
+      doc.font(F.b).fontSize(8).fillColor(C.black)
+        .text(data.ivaCondicion, rMargin, y, { width: rContent, align: 'center' });
+      y += 12;
+      doc.strokeColor(C.black).lineWidth(0.5)
+        .moveTo(rMargin, y).lineTo(rMargin + rContent, y).stroke();
+      y += 8;
+    }
+
+    // ── Client data ──
+    doc.font(F.r).fontSize(8).fillColor(C.dark);
+    doc.text('Señor/es:', rMargin + 4, y, { continued: true });
+    doc.font(F.b).text(` ${data.tenantName}`);
+    y += 13;
+    doc.font(F.r).fontSize(8).fillColor(C.dark);
+    doc.text('Domicilio:', rMargin + 4, y, { continued: true });
+    doc.font(F.b).text(` ${data.address}`);
+    y += 15;
+
+    // "Este recibo se emite por Cuenta y Orden de:" — rótulo fijo, valor editable
+    doc.font(F.r).fontSize(8).fillColor(C.dark)
+      .text('Este recibo se emite por Cuenta y Orden de:', rMargin + 4, y, { width: rContent - 8 });
+    y += 11;
+    if (data.porCuentaYOrdenDe) {
+      doc.font(F.b).fontSize(8).fillColor(C.black)
+        .text(data.porCuentaYOrdenDe, rMargin + 4, y, { width: rContent - 8 });
+      y += 13;
+    }
+    y += 6;
+
+    doc.font(F.r).fontSize(8).fillColor(C.dark)
+      .text('En concepto de:', rMargin + 4, y);
+    y += 14;
+
+    // ── Detail table ──
+    const tblX = rMargin + 4;
+    const tblW = rContent - 8;
+    const col1W = tblW * 0.65;
+    const col2W = tblW * 0.35;
+
+    for (const c of data.conceptos) {
+      const label = c.cuotaNumber && c.cuotaTotal
+        ? `${c.concepto} (cuota ${c.cuotaNumber} de ${c.cuotaTotal})`
+        : c.concepto;
+      doc.font(F.r).fontSize(8).fillColor(C.dark);
+      doc.text(label, tblX, y, { width: col1W });
+      doc.text(fmt(c.importe, currency), tblX, y, { width: tblW, align: 'right' });
+      y += 14;
+    }
+
+    // Línea sobre el último importe (como en el recibo manuscrito de referencia)
+    doc.moveTo(tblX + col1W, y).lineTo(tblX + tblW, y).strokeColor(C.black).lineWidth(0.5).stroke();
+    y += 6;
+
+    // ── Total / Reserva / Saldo ──
+    doc.font(F.b).fontSize(8.5).fillColor(C.black);
+    doc.text('Total', tblX, y, { width: col1W });
+    doc.text(fmt(data.total, currency), tblX, y, { width: tblW, align: 'right' });
+    y += 13;
+    doc.text('Reserva', tblX, y, { width: col1W });
+    doc.text(fmt(data.reserva, currency), tblX, y, { width: tblW, align: 'right' });
+    y += 15;
+
+    doc.font(F.b).fontSize(9.5).fillColor(C.black);
+    doc.text('Saldo', tblX, y, { width: col1W });
+    doc.text(fmt(data.saldo, currency), tblX, y, { width: tblW, align: 'right' });
+    y += 20;
+
+    // ── Amount in words (sobre el saldo) — numeroATexto ya devuelve "... PESOS" ──
+    doc.font(F.b).fontSize(8).fillColor(C.black)
+      .text(`Son: ${numeroATexto(data.saldo)}.-`, rMargin + 4, y, { width: rContent - 8 });
+    y += 18;
+
+    // ── Outer border ──
+    const borderBottom = y + 4;
+    doc.roundedRect(rMargin - 4, rMargin - 4, rContent + 8, borderBottom - rMargin + 8, 6)
+      .strokeColor(C.black).lineWidth(1.2).stroke();
+
+    doc.end();
+  });
+};
+
 module.exports = {
   generateLiquidacionPDF, generateLiquidacionAllPDF, generateEstadoCuentasPDF, generateResumenEjecutivoPDF,
   generateCartaDocumentoPDF, generatePagoEfectivoPDF, generateMultiPagoEfectivoPDF,
-  generateImpuestosPDF, generateVencimientosPDF, formatCurrency: fmt, formatDate: fmtDate, COLORS: C,
+  generateImpuestosPDF, generateVencimientosPDF, generateGastosAlquilerPDF,
+  formatCurrency: fmt, formatDate: fmtDate, COLORS: C,
 };

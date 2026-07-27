@@ -27,6 +27,7 @@ const settingsRoutes = require('./settings.routes');
 const notificationsRoutes = require('./notifications.routes');
 const cronRoutes = require('./cron.routes');
 const propertyGroupsRoutes = require('./propertyGroups.routes');
+const rentExpensesRoutes = require('./rentExpenses.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -94,6 +95,9 @@ router.use('/groups/:groupId', debtsRoutes);
 
 // Reports (Phase 6)
 router.use('/groups/:groupId/reports', reportsRoutes);
+
+// Gastos Alquiler (recibo de gastos de ingreso)
+router.use('/groups/:groupId/rent-expenses', rentExpensesRoutes);
 
 // Settings (Phase 6+)
 router.use('/groups/:groupId/settings', settingsRoutes);
