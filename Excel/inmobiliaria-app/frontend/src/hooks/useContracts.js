@@ -55,6 +55,10 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      // El contrato nuevo queda asignado a un índice de ajuste: sin esto, el
+      // contador "Contratos totales" por índice en Índices de Ajuste queda
+      // desactualizado (usa una caché propia, no la de 'contracts').
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Contrato creado')
     },
     onError: (error) => {
@@ -73,6 +77,10 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
       queryClient.invalidateQueries({ queryKey: ['contract', groupId, id] })
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      // Editar puede cambiar a qué índice apunta el contrato (o sacarlo/ponerlo):
+      // el contador "Contratos totales" por índice en Índices de Ajuste vive en su
+      // propia query y quedaba con el valor viejo hasta que algo más la invalidara.
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Contrato actualizado')
       // Avisos no bloqueantes del backend (meses con pagos fuera de rango, ajustes
       // ya aplicados con el índice anterior): nunca mueven plata solos, hay que
@@ -95,6 +103,7 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success(data.message || 'Contrato eliminado')
     },
     onError: (error) => {
@@ -152,6 +161,7 @@ export const useContracts = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['debts', groupId] })
       queryClient.invalidateQueries({ queryKey: ['debts', 'open', groupId] })
       queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
       toast.success('Contrato renovado exitosamente')
     },
     onError: (error) => {
