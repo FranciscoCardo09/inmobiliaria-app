@@ -51,6 +51,9 @@ module.exports = {
   // Rate limiting
   rateLimit: {
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: process.env.NODE_ENV === 'production' ? 100 : 1000, // más permisivo en desarrollo
+    max: process.env.NODE_ENV === 'production' ? 300 : 1000, // más permisivo en desarrollo
+    // Límite específico para /auth/login: mismo windowMs, mucho más estricto
+    // para frenar fuerza bruta sin depender del límite general de la API.
+    authMax: process.env.NODE_ENV === 'production' ? 10 : 100,
   },
 };

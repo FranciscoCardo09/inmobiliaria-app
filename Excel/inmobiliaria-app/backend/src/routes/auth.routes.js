@@ -1,6 +1,7 @@
 // Auth Routes
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const passport = require('passport');
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
@@ -12,9 +13,20 @@ const { getExpiryDate } = require('../utils/helpers');
 
 const prisma = require('../lib/prisma');
 
+// Límite estricto propio de /login para frenar fuerza bruta, independiente
+// del límite general de la API (que es mucho más permisivo).
+const loginLimiter = rateLimit({
+  windowMs: config.rateLimit.windowMs,
+  max: config.rateLimit.authMax,
+  message: {
+    success: false,
+    message: 'Demasiados intentos de inicio de sesión, intenta mas tarde',
+  },
+});
+
 // Public routes - Email/Password
 router.post('/register', validate(registerSchema), authController.register);
-router.post('/login', validate(loginSchema), authController.login);
+router.post('/login', loginLimiter, validate(loginSchema), authController.login);
 router.post('/refresh', validate(refreshTokenSchema), authController.refresh);
 
 // Email verification routes (public)
