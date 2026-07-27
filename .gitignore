@@ -1,0 +1,8 @@
+# Este repo git vive en el home por un accidente histórico de inicialización,
+# pero el proyecto real es solo Excel/ (inmobiliaria-app). Todo lo demás en
+# este directorio (dotfiles, descargas, otras carpetas, etc.) es ajeno y no
+# debe trackearse ni aparecer en git status.
+/*
+!/Excel/
+!/.gitignore
+!/vercel.json
