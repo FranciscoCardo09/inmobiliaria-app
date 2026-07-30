@@ -11,6 +11,7 @@ import {
   NoSymbolIcon,
   ArrowUturnLeftIcon,
   ArrowPathIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import DateInput, { getLocalToday } from '../../components/ui/DateInput'
 import { useAuthStore } from '../../stores/authStore'
@@ -30,6 +31,7 @@ export const ContractList = () => {
     status: '',
   })
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmUndoRenewal, setConfirmUndoRenewal] = useState(null)
   const [rescindModal, setRescindModal] = useState(null) // contract to rescind
   const [rescissionDate, setRescissionDate] = useState('')
   const [penaltyType, setPenaltyType] = useState('PORCENTAJE')
@@ -37,7 +39,16 @@ export const ContractList = () => {
   const {
     contracts, isLoading, deleteContract, isDeleting,
     rescindContract, isRescinding, undoRescission, isUndoingRescission,
+    undoRenewal, isUndoingRenewal,
   } = useContracts(currentGroup?.id, filters)
+
+  const handleUndoRenewal = async () => {
+    if (!confirmUndoRenewal) return
+    try {
+      await undoRenewal(confirmUndoRenewal.id)
+    } catch { /* toast handles error */ }
+    setConfirmUndoRenewal(null)
+  }
 
   const handleDelete = async () => {
     if (!confirmDelete) return
@@ -92,6 +103,17 @@ export const ContractList = () => {
   }
 
   const getStatusBadge = (contract) => {
+    // Renovación anticipada: el viejo sigue operando pero ya tiene sucesor...
+    if (contract.hasScheduledRenewal) {
+      return <span className="badge badge-info badge-sm gap-1" title="Sigue vigente hasta su vencimiento; el contrato nuevo ya está creado">
+        <ClockIcon className="w-3 h-3" />
+        Renovación programada
+      </span>
+    }
+    // ...y el nuevo todavía no arrancó.
+    if (contract.isScheduled) {
+      return <span className="badge badge-info badge-sm badge-outline" title="Empieza en su fecha de inicio">Programado</span>
+    }
     if (contract.status === 'ACTIVE' && contract.isExpiringSoon) {
       return <span className="badge badge-warning badge-sm gap-1">
         <ExclamationTriangleIcon className="w-3 h-3" />
@@ -259,8 +281,10 @@ export const ContractList = () => {
                       >
                         <PencilIcon className="w-4 h-4" />
                       </button>
-                      {/* Rescind button - only for active INQUILINO contracts that are not already rescinded */}
-                      {!isProp && contract.active && !isRescinded && (
+                      {/* Rescind button - only for active INQUILINO contracts that are not already
+                          rescinded. Con una renovación programada hay que cancelarla primero: el
+                          mes de multa chocaría con el mes 1 del contrato nuevo. */}
+                      {!isProp && contract.active && !isRescinded && !contract.hasScheduledRenewal && (
                         <button
                           onClick={() => openRescindModal(contract)}
                           className="btn btn-sm btn-ghost text-warning"
@@ -269,14 +293,29 @@ export const ContractList = () => {
                           <NoSymbolIcon className="w-4 h-4" />
                         </button>
                       )}
-                      {/* Renew button - only for expired INQUILINO contracts */}
-                      {!isProp && contract.status === 'EXPIRED' && (
+                      {/* Renew button - contratos vencidos y también los que están por vencer
+                          (renovación anticipada: el nuevo queda programado y el viejo sigue
+                          operando hasta su vencimiento) */}
+                      {!isProp && contract.canRenew && (
                         <button
                           onClick={() => navigate(`/contracts/${contract.id}?mode=renew`)}
                           className="btn btn-sm btn-ghost text-success"
-                          title="Renovar contrato"
+                          title={contract.status === 'EXPIRED' ? 'Renovar contrato' : 'Renovar anticipadamente'}
                         >
                           <ArrowPathIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/* Cancelar una renovación ya programada */}
+                      {!isProp && contract.hasScheduledRenewal && (
+                        <button
+                          onClick={() => setConfirmUndoRenewal(contract)}
+                          className="btn btn-sm btn-ghost text-error"
+                          title="Cancelar renovación programada"
+                          disabled={isUndoingRenewal}
+                        >
+                          {isUndoingRenewal
+                            ? <span className="loading loading-spinner loading-xs" />
+                            : <XMarkIcon className="w-4 h-4" />}
                         </button>
                       )}
                       {/* Undo rescission button */}
@@ -318,7 +357,9 @@ export const ContractList = () => {
         <div className="stat">
           <div className="stat-title">Activos</div>
           <div className="stat-value text-success">
-            {contracts.filter((c) => c.status === 'ACTIVE').length}
+            {/* Durante una renovación anticipada conviven el viejo y el nuevo:
+                se cuenta solo el que está operando, para no duplicar la unidad. */}
+            {contracts.filter((c) => c.status === 'ACTIVE' && !c.isScheduled).length}
           </div>
         </div>
         <div className="stat">
@@ -334,6 +375,47 @@ export const ContractList = () => {
           </div>
         </div>
       </div>
+
+      {/* Undo scheduled renewal confirmation modal */}
+      {confirmUndoRenewal && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg text-error">Cancelar renovación programada</h3>
+            <p className="py-4">
+              ¿Cancelar la renovación de{' '}
+              <span className="font-semibold">
+                {confirmUndoRenewal.tenants?.length > 0
+                  ? confirmUndoRenewal.tenants.map((t) => t.name).join(' / ')
+                  : confirmUndoRenewal.tenant?.name || 'Sin inquilino'}
+              </span>{' '}
+              en <span className="font-semibold">{confirmUndoRenewal.property?.address}</span>?
+            </p>
+            <p className="text-sm text-base-content/60">
+              Se elimina el contrato nuevo (todavía no arrancó) y este contrato vuelve a quedar
+              pendiente de renovación. Si el contrato nuevo ya tiene pagos o deudas registradas,
+              no se puede cancelar.
+            </p>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmUndoRenewal(null)}
+                disabled={isUndoingRenewal}
+              >
+                Volver
+              </button>
+              <button
+                className="btn btn-error btn-sm"
+                onClick={handleUndoRenewal}
+                disabled={isUndoingRenewal}
+              >
+                {isUndoingRenewal ? <span className="loading loading-spinner loading-xs" /> : <XMarkIcon className="w-4 h-4" />}
+                Cancelar renovación
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => !isUndoingRenewal && setConfirmUndoRenewal(null)} />
+        </div>
+      )}
 
       {/* Delete confirmation modal */}
       {confirmDelete && (

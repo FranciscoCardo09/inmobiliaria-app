@@ -33,7 +33,7 @@ const getIndexById = async (req, res, next) => {
       where: { id },
       include: {
         contracts: {
-          where: { active: true },
+          where: { active: true, renewedAt: null },
           select: {
             id: true,
             currentMonth: true,

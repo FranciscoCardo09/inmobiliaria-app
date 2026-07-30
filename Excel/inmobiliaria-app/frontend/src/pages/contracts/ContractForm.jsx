@@ -16,6 +16,19 @@ import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 import CreatableMultiSelect from '../../components/ui/CreatableMultiSelect'
 import { useConceptTypes } from '../../hooks/usePayments'
 
+// Día siguiente al vencimiento del contrato que se renueva, en formato yyyy-mm-dd.
+// Se calcula en hora local (mediodía) para no correrse de día por zona horaria.
+const renewalDefaultStart = (contract) => {
+  if (!contract?.startDate || !contract?.durationMonths) return ''
+  const start = new Date(contract.startDate.split('T')[0] + 'T12:00:00')
+  const next = new Date(start)
+  next.setMonth(next.getMonth() + contract.durationMonths)
+  const yyyy = next.getFullYear()
+  const mm = String(next.getMonth() + 1).padStart(2, '0')
+  const dd = String(next.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 export const ContractForm = () => {
   const navigate = useNavigate()
   const { id } = useParams()
@@ -73,7 +86,12 @@ export const ContractForm = () => {
           ? contract.contractTenants.map((ct) => ct.tenantId || ct.tenant?.id).filter(Boolean)
           : contract.tenantId ? [contract.tenantId] : [],
         propertyId: contract.propertyId || '',
-        startDate: isRenewing ? '' : (contract.startDate ? contract.startDate.split('T')[0] : ''),
+        // Al renovar, la fecha por defecto es el día siguiente al vencimiento del
+        // contrato actual: así no queda un hueco (ni un solapamiento, que el
+        // backend rechaza). Es editable.
+        startDate: isRenewing
+          ? renewalDefaultStart(contract)
+          : (contract.startDate ? contract.startDate.split('T')[0] : ''),
         durationMonths: contract.durationMonths?.toString() || '24',
         currentMonth: contract.currentMonth?.toString() || '1',
         baseRent: contract.baseRent?.toString() || '',
@@ -221,8 +239,20 @@ export const ContractForm = () => {
             <div className="alert alert-info">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
               <div>
-                <div className="font-medium">Renovación de contrato</div>
+                <div className="font-medium">
+                  {contract?.status === 'EXPIRED' ? 'Renovación de contrato' : 'Renovación anticipada'}
+                </div>
                 <div className="text-sm">Los inquilinos y la propiedad se mantienen. Completá los nuevos datos del período.</div>
+                {contract?.status !== 'EXPIRED' && contract?.endDate && (
+                  <div className="text-sm mt-1">
+                    El contrato actual sigue vigente hasta el{' '}
+                    <span className="font-medium">
+                      {new Date(contract.endDate).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
+                    </span>{' '}
+                    y funciona con normalidad hasta esa fecha. El contrato nuevo aparecerá en
+                    Control Mensual recién a partir de su mes de inicio.
+                  </div>
+                )}
               </div>
             </div>
           )}

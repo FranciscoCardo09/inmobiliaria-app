@@ -8,6 +8,7 @@ const { sumPunitoryConcepts } = require('../utils/helpers');
 // corre sin TZ configurada (= UTC); usar `new Date()` crudo como "hoy" en un
 // cálculo de punitorios cuenta un día de más entre las 21:00 y las 23:59 ART.
 const { getTodayLocalString, getTodayLocalDate } = require('../utils/dateUtils');
+const { sweepSupersededContracts } = require('./contractSweepService');
 
 const prisma = require('../lib/prisma');
 
@@ -272,6 +273,11 @@ async function copyLastMonthServices(contract, postExpiryRecordId) {
 const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
   const month = parseInt(periodMonth);
   const year = parseInt(periodYear);
+
+  // Cierra las renovaciones anticipadas cuyo contrato viejo ya terminó su rango:
+  // pasa a active=false (estado RENEWED) para que deje de contar como vigente.
+  // Idempotente; en régimen no escribe nada.
+  await sweepSupersededContracts(groupId);
 
   // Get contracts relevant for any period: active ones (can create new records)
   // and renewed ones (active=false + renewedAt, only read their existing records).

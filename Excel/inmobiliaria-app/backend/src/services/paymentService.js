@@ -106,7 +106,7 @@ const calculatePaymentConcepts = async (contract, paymentDate) => {
  */
 const getCurrentMonthPayments = async (groupId) => {
   const contracts = await prisma.contract.findMany({
-    where: { groupId, active: true },
+    where: { groupId, active: true, renewedAt: null },
     include: {
       tenant: { select: { id: true, name: true, dni: true } },
       property: { select: { id: true, address: true } },
@@ -178,7 +178,7 @@ const getCurrentMonthPayments = async (groupId) => {
  */
 const getNextMonthPayments = async (groupId) => {
   const contracts = await prisma.contract.findMany({
-    where: { groupId, active: true },
+    where: { groupId, active: true, renewedAt: null },
     include: {
       tenant: { select: { id: true, name: true, dni: true } },
       property: { select: { id: true, address: true } },

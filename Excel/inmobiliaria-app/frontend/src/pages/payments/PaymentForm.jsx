@@ -151,9 +151,11 @@ export const PaymentForm = () => {
     paymentDate
   )
 
-  // Active contracts
+  // Active contracts. Durante una renovación anticipada conviven el contrato
+  // viejo (operando) y el nuevo (todavía sin arrancar): se ofrece solo el que
+  // está en curso.
   const activeContracts = useMemo(() => {
-    return (contracts || []).filter((c) => c.active)
+    return (contracts || []).filter((c) => c.active && !c.isScheduled)
   }, [contracts])
 
   // Selected contract

@@ -1514,7 +1514,9 @@ const getResumenEjecutivoData = async (groupId, month, year) => {
     statusGroups,
     debtsAgg,
   ] = await Promise.all([
-    prisma.contract.count({ where: { groupId, active: true } }),
+    // renewedAt: null => en una renovación anticipada el viejo y el nuevo están
+    // activos a la vez; solo cuenta el vigente sin sucesor.
+    prisma.contract.count({ where: { groupId, active: true, renewedAt: null } }),
     prisma.property.count({ where: { groupId, isActive: true } }),
     prisma.contract.findMany({
       where: { groupId, active: true },
@@ -2337,7 +2339,8 @@ const getVencimientosData = async (groupId) => {
   const empresa = await getEmpresaData(groupId);
 
   const contracts = await prisma.contract.findMany({
-    where: { groupId, active: true },
+    // Un contrato ya renovado no es un vencimiento a atender: su sucesión está resuelta.
+    where: { groupId, active: true, renewedAt: null },
     include: {
       tenant: true,
       contractTenants: { include: { tenant: true }, orderBy: { isPrimary: 'desc' } },

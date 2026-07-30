@@ -47,6 +47,12 @@ router.post(
   contractsController.renewContract
 );
 
+router.post(
+  '/:id/undo-renew',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  contractsController.undoRenewal
+);
+
 router.delete(
   '/:id',
   requireGroupAccess(['ADMIN']),

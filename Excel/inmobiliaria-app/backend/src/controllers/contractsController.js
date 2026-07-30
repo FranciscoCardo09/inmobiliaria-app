@@ -10,13 +10,19 @@ const asyncHandler = require('../utils/asyncHandler');
 const { parseLocalDate } = require('../utils/dateUtils');
 const contractService = require('../services/contractService');
 const enrichContract = contractService.enrichContract;
+const { validateRenewalStartDate } = contractService;
 const { repairContractRecordMonthNumbers } = require('../services/monthlyRecordService');
+const { sweepSupersededContracts } = require('../services/contractSweepService');
 
 // GET /api/groups/:groupId/contracts
 const getContracts = async (req, res, next) => {
   try {
     const { groupId } = req.params;
     const { status, propertyId, tenantId, contractType, search, limit, offset } = req.query;
+
+    // Cierra las renovaciones anticipadas ya vencidas antes de listar, para que
+    // los estados/badges de la grilla estén al día.
+    await sweepSupersededContracts(groupId);
 
     const where = { groupId };
 
@@ -879,6 +885,16 @@ const rescindContract = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'El contrato ya está rescindido');
     }
 
+    // El mes de multa cae en rescissionMonth + 1, que en una renovación
+    // anticipada choca con el mes 1 del contrato nuevo (dos filas para la misma
+    // propiedad en un período). Hay que cancelar la renovación primero.
+    if (contract.renewedAt) {
+      return ApiResponse.badRequest(
+        res,
+        'Este contrato tiene una renovación programada. Cancelá la renovación antes de rescindirlo.'
+      );
+    }
+
     const rescDate = parseLocalDate(rescissionDate);
     const start = new Date(contract.startDate);
     const monthsDiff =
@@ -947,12 +963,20 @@ const renewContract = async (req, res, next) => {
     }
 
     const enriched = enrichContract(oldContract);
-    if (enriched.status !== 'EXPIRED') {
-      return ApiResponse.badRequest(res, 'Solo se pueden renovar contratos vencidos');
-    }
 
     if (oldContract.renewedAt) {
       return ApiResponse.badRequest(res, 'Este contrato ya fue renovado');
+    }
+
+    // Renovación anticipada: el contrato sigue vigente pero está "por vencer"
+    // (2 meses o menos). El nuevo queda programado y el viejo sigue operando
+    // sus meses restantes.
+    const isEarly = enriched.status === 'ACTIVE' && enriched.isExpiringSoon;
+    if (enriched.status !== 'EXPIRED' && !isEarly) {
+      return ApiResponse.badRequest(
+        res,
+        'Solo se pueden renovar contratos vencidos o próximos a vencer (2 meses o menos)'
+      );
     }
 
     // Check no other active contract of the same type on the same property
@@ -964,6 +988,9 @@ const renewContract = async (req, res, next) => {
         contractType: oldContract.contractType,
         active: true,
         rescindedAt: null,
+        // Un contrato con renewedAt ya tiene sucesor: es el viejo de otra
+        // renovación anticipada, no una ocupación en disputa.
+        renewedAt: null,
         id: { not: id },
       },
     });
@@ -982,17 +1009,33 @@ const renewContract = async (req, res, next) => {
     }
 
     const newStartDate = parseLocalDate(startDate);
+
+    // El nuevo contrato NO puede solaparse con el viejo: si se solaparan,
+    // Control Mensual mostraría dos filas de la misma propiedad en el mismo
+    // período. En la renovación anticipada además exigimos que arranque en el
+    // mes siguiente al vencimiento, para no dejar meses en blanco.
+    const dateCheck = validateRenewalStartDate(oldContract, newStartDate, { strictAdjacency: isEarly });
+    if (!dateCheck.ok) {
+      return ApiResponse.badRequest(res, dateCheck.message);
+    }
+
     const newBaseRent = parseFloat(baseRent);
     const newDurationMonths = parseInt(durationMonths, 10);
     const renewedAt = new Date();
 
     const newContract = await prisma.$transaction(async (tx) => {
-      // 1. Marcar el contrato viejo como renovado (inactivo). Conserva intactos
+      // 1. Marcar el contrato viejo como renovado. Conserva intactos
       //    startDate/startMonth/durationMonths para que sus MonthlyRecord sigan
       //    siendo válidos dentro de su propio rango.
+      //
+      //    Renovación anticipada (isEarly): NO se desactiva. El contrato viejo
+      //    sigue operativo hasta su vencimiento (Control Mensual, servicios,
+      //    cobros, cierre de mes, ajuste por índice, punitorios); `renewedAt`
+      //    solo lo marca como ya sucedido. contractSweepService lo desactiva
+      //    cuando su rango termina.
       await tx.contract.update({
         where: { id },
-        data: { active: false, renewedAt },
+        data: isEarly ? { renewedAt } : { active: false, renewedAt },
       });
 
       // 2. Crear el contrato nuevo
@@ -1115,6 +1158,89 @@ const undoRescission = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/contracts/:id/undo-renew
+// Cancela una renovación PROGRAMADA: borra el contrato nuevo y le saca la marca
+// de renovado al viejo. `:id` es el contrato VIEJO (el que tiene renewedAt).
+//
+// Existe porque la renovación anticipada se hace con meses de anticipación (más
+// margen para un error de fecha o monto) y deleteContract bloquea el borrado de
+// cualquier eslabón de una cadena de renovaciones: sin esto no habría salida.
+const undoRenewal = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+
+    const oldContract = await prisma.contract.findUnique({ where: { id } });
+
+    if (!oldContract || oldContract.groupId !== groupId) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const newContract = await prisma.contract.findFirst({
+      where: { renewedFromContractId: id },
+    });
+
+    if (!oldContract.renewedAt || !newContract) {
+      return ApiResponse.badRequest(res, 'Este contrato no tiene una renovación para cancelar');
+    }
+
+    // Mismos resguardos que deleteContract: no se borra nada con historial
+    // financiero.
+    const debts = await prisma.debt.count({ where: { contractId: newContract.id } });
+    if (debts > 0) {
+      return ApiResponse.badRequest(
+        res,
+        'No se puede cancelar la renovación: el contrato nuevo ya tiene deudas registradas'
+      );
+    }
+
+    const records = await prisma.monthlyRecord.findMany({
+      where: { contractId: newContract.id },
+      select: { id: true, amountPaid: true },
+    });
+
+    const paidRecords = records.filter((r) => (r.amountPaid || 0) > 0);
+    if (paidRecords.length > 0) {
+      return ApiResponse.badRequest(
+        res,
+        `No se puede cancelar la renovación: el contrato nuevo ya tiene ${paidRecords.length} mes(es) con pagos registrados`
+      );
+    }
+
+    if (records.length > 0) {
+      const transactions = await prisma.paymentTransaction.count({
+        where: { monthlyRecordId: { in: records.map((r) => r.id) } },
+      });
+      if (transactions > 0) {
+        return ApiResponse.badRequest(
+          res,
+          'No se puede cancelar la renovación: el contrato nuevo ya tiene pagos registrados'
+        );
+      }
+    }
+
+    const restored = await prisma.$transaction(async (tx) => {
+      // El cascade borra RentHistory, ContractTenant y los MonthlyRecord vacíos.
+      await tx.contract.delete({ where: { id: newContract.id } });
+      return tx.contract.update({
+        where: { id },
+        // active: true porque si el sweep ya lo había desactivado (o fue una
+        // renovación post-vencimiento) tiene que volver a quedar operativo.
+        data: { renewedAt: null, active: true },
+        include: {
+          tenant: { select: { id: true, name: true } },
+          contractTenants: { include: { tenant: { select: { id: true, name: true } } }, orderBy: { isPrimary: 'desc' } },
+          property: { select: { id: true, address: true, owner: { select: { id: true, name: true } } } },
+          adjustmentIndex: { select: { id: true, name: true, frequencyMonths: true, currentValue: true } },
+        },
+      });
+    });
+
+    return ApiResponse.success(res, enrichContract(restored), 'Renovación cancelada');
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getContracts: asyncHandler(getContracts),
   getExpiringContracts: asyncHandler(getExpiringContracts),
@@ -1129,4 +1255,5 @@ module.exports = {
   rescindContract: asyncHandler(rescindContract),
   undoRescission: asyncHandler(undoRescission),
   renewContract: asyncHandler(renewContract),
+  undoRenewal: asyncHandler(undoRenewal),
 };

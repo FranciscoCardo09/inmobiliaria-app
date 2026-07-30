@@ -33,7 +33,7 @@ const getTenants = async (req, res, next) => {
           orderBy: { order: 'asc' },
         },
         contracts: {
-          where: { active: true },
+          where: { active: true, renewedAt: null },
           include: {
             property: {
               select: { id: true, address: true },
@@ -159,7 +159,7 @@ const createTenant = async (req, res, next) => {
       include: {
         guarantors: { orderBy: { order: 'asc' } },
         contracts: {
-          where: { active: true },
+          where: { active: true, renewedAt: null },
           include: {
             property: { select: { id: true, address: true } },
           },
@@ -236,7 +236,7 @@ const updateTenant = async (req, res, next) => {
         include: {
           guarantors: { orderBy: { order: 'asc' } },
           contracts: {
-            where: { active: true },
+            where: { active: true, renewedAt: null },
             include: {
               property: { select: { id: true, address: true } },
             },

@@ -169,6 +169,30 @@ export const useContracts = (groupId, filters = {}) => {
     },
   })
 
+  // Cancela una renovación PROGRAMADA (renovación anticipada): borra el
+  // contrato nuevo y devuelve el viejo a su estado previo. `id` es el contrato
+  // VIEJO, el que muestra "Renovación programada".
+  const undoRenewMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/undo-renew`)
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contracts', 'expiring', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debts', 'open', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['debtsSummary', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      toast.success('Renovación cancelada')
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al cancelar la renovación')
+    },
+  })
+
   return {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
@@ -181,11 +205,13 @@ export const useContracts = (groupId, filters = {}) => {
     rescindContract: rescindMutation.mutateAsync,
     undoRescission: undoRescindMutation.mutateAsync,
     renewContract: renewMutation.mutate,
+    undoRenewal: undoRenewMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
     isRescinding: rescindMutation.isPending,
     isUndoingRescission: undoRescindMutation.isPending,
     isRenewing: renewMutation.isPending,
+    isUndoingRenewal: undoRenewMutation.isPending,
   }
 }

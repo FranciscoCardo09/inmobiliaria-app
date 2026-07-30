@@ -29,7 +29,10 @@ const getSummary = async (req, res, next) => {
       prisma.property.count({ where: { groupId, isActive: true } }),
       prisma.tenant.count({ where: { groupId, isActive: true } }),
       prisma.contract.findMany({
-        where: { groupId, active: true },
+        // renewedAt: null => durante una renovación anticipada el contrato viejo
+        // y el nuevo conviven activos; solo se cuenta el que todavía no tiene
+        // sucesor, para no duplicar la unidad ni avisar de un vencimiento ya resuelto.
+        where: { groupId, active: true, renewedAt: null },
         select: { id: true, currentMonth: true, durationMonths: true },
       }),
       getContractsWithAdjustmentThisMonth(groupId),
