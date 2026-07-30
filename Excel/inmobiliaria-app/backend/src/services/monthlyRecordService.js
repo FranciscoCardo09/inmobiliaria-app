@@ -805,7 +805,16 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         // punitorios, ya que ese registro nunca tuvo una transacción propia antes de
         // la deuda).
         const openDebtForRefresh = record.debt && record.debt.status !== 'PAID' ? record.debt : null;
-        const recordForLivePunitory = { ...record, rentAmount: effectiveRent, includeIva: effectiveIva };
+        // `previousBalance: latestPrevBalance` (2026-07-30, caso Biassi): este bloque
+        // ya usaba el saldo a favor FRESCO para `newTotalDue` pero le pasaba el viejo
+        // al cálculo de punitorios, que ahora lo cuenta como plata cobrada. Sin esto,
+        // el refresh volvería a introducir la mora fantasma en cada carga de pantalla.
+        const recordForLivePunitory = {
+          ...record,
+          rentAmount: effectiveRent,
+          includeIva: effectiveIva,
+          previousBalance: latestPrevBalance,
+        };
         let livePunitory = openDebtForRefresh
           ? (openDebtForRefresh.accumulatedPunitory || 0)
           : computeLiveRecordPunitory(recordForLivePunitory, contract, holidays, { isFullyPaid: false }).amount;
@@ -1323,15 +1332,38 @@ const _recalculateCore = async (recordIds, tx) => {
     // mismo bruto congelado que ya usa `debt.currentTotal`, así que Control Mensual y
     // Deudas quedan consistentes en el mismo instante congelado.)
     const holidaysForRecord = holidaysByYear.get(record.periodYear) || [];
+
+    // Bug (2026-07-30, caso Biassi Gonzalo Amir, julio 2026): este loop recomputa
+    // `servicesTotal`, `amountPaid` y el `previousBalance` en cadena y los escribe
+    // más abajo, pero antes le pasaba a `computeLiveRecordPunitory` el `record`
+    // CRUDO de la DB — y esa función lee `record.amountPaid`/`record.servicesTotal`/
+    // `record.previousBalance` directamente. O sea: el registro se guardaba con un
+    // `totalDue` calculado contra un estado que ya no existía.
+    //
+    // No es teórico, los dos callers principales llegan acá desincronizados a
+    // propósito: `registerPaymentCore` crea la PaymentTransaction y recalcula ANTES
+    // de persistir `amountPaid` (sólo escribe los campos de punitorios), y
+    // `updateService` escribe la fila de monthly_services y recién después
+    // recalcula. En Biassi, tras borrar y volver a cargar el pago, `amountPaid`
+    // valía 0 con la transacción ya creada → la base de punitorios tomó la rama
+    // "sin ningún pago" (alquiler completo) y devengó $648.823 × 0,6% × 23 días =
+    // $89.537,57 de mora inventada sobre un mes que cancelaba justo.
+    const recordForLivePunitory = {
+      ...record,
+      servicesTotal,                          // recomputado desde services[] arriba
+      amountPaid,                             // recomputado desde transactions[] arriba
+      previousBalance: activePreviousBalance, // el rolling, no el persistido
+    };
+
     let totalPunitory;
     if (openDebt) {
       totalPunitory = openDebt.accumulatedPunitory || 0;
     } else {
-      totalPunitory = computeLiveRecordPunitory(record, record.contract, holidaysForRecord, { isFullyPaid: false }).amount;
+      totalPunitory = computeLiveRecordPunitory(recordForLivePunitory, record.contract, holidaysForRecord, { isFullyPaid: false }).amount;
     }
     let totals = computeTotals(totalPunitory);
     if (!openDebt && totals.status === 'COMPLETE') {
-      totalPunitory = computeLiveRecordPunitory(record, record.contract, holidaysForRecord, { isFullyPaid: true }).amount;
+      totalPunitory = computeLiveRecordPunitory(recordForLivePunitory, record.contract, holidaysForRecord, { isFullyPaid: true }).amount;
       totals = computeTotals(totalPunitory);
     }
     const { totalDue, balance, effectiveBalance, status } = totals;

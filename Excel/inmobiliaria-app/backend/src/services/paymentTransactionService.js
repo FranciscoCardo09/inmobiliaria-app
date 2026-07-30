@@ -165,15 +165,19 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   // - Con pago parcial: el saldo restante (alquiler + servicios + IVA impago − pagos
   //   reales). La bonificación (servicesTotal negativo) NO reduce la base (clamp a
   //   >=0), igual que antes.
-  // IMPORTANTE: la base de punitorios usa SOLO los pagos reales (amountPaidSoFar),
-  // NUNCA el saldo a favor del mes anterior. El crédito se aplica al total al final,
-  // no a la base (restarlo antes bajaría indebidamente los punitorios).
+  // El saldo a favor del mes anterior entra como plata del PRIMER pago
+  // (`appliedCredit`, caso Biassi 2026-07-30 — ver el docblock de
+  // computePunitoryBase). Tiene que pasarse acá también, y no sólo en
+  // computeLiveRecordPunitory: si el cobro usara una base distinta de la que
+  // después muestra Control Mensual, el mes quedaría con un pendiente que el
+  // recibo no explica.
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const unpaidRentForPunitory = computePunitoryBase({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
     amountPaid: amountPaidSoFar,
+    appliedCredit: prevBalance,
   });
 
   // Get last payment date for this record (if partial payment was made)
@@ -469,16 +473,18 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
   const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
 
-  // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase): SOLO los
-  // pagos reales (amountPaid), NUNCA el saldo a favor del mes anterior. El crédito se
-  // resta del total al final, no de la base de punitorios (si se restara antes, los
-  // punitorios saldrían más bajos). La bonificación no reduce la base (clamp a >=0).
+  // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase). El saldo
+  // a favor del mes anterior cuenta como plata del primer pago (`appliedCredit`); la
+  // bonificación no reduce la base (clamp a >=0). Mismos argumentos que el cobro real
+  // en registerPaymentCore: el preview del formulario tiene que anticipar exactamente
+  // el punitorio que se va a cobrar.
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
   const unpaidRentForPunitory = computePunitoryBase({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
     amountPaid,
+    appliedCredit: prevBalance,
   });
 
   // FUENTE ÚNICA: computeLiveRecordPunitory espera transactions ordenadas asc (último al final).

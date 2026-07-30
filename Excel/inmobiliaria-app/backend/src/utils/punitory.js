@@ -231,8 +231,8 @@ function round2(n) {
  *     + IVA impago − pagos reales, y la bonificación/descuento (servicesTotal
  *     negativo) NO reduce esa base (clamp a >=0): la TASA de mora se calcula
  *     sobre el alquiler+servicios brutos, sin descontar bonificaciones.
- *   - El saldo a favor del mes anterior (previousBalance) NUNCA entra acá: se
- *     aplica al TOTAL al final, nunca a la base de punitorios.
+ *   - El saldo a favor del mes anterior (previousBalance) entra como
+ *     `appliedCredit`: cuenta como plata cobrada del PRIMER pago (ver abajo).
  * Antes de esta función existían 4 copias de esta misma fórmula (display y
  * _recalculateCore en monthlyRecordService.js, cobro en paymentTransactionService.js,
  * cierre en debtService.js) — las dos primeras ya coincidían entre sí; las de
@@ -250,13 +250,47 @@ function round2(n) {
  * NETO (servicesTotal SIN clampear), no hay ninguna base de punitorio — la
  * bonificación sigue sin bajar la TASA mientras algo quede pendiente, pero deja
  * de haber pendiente en cuanto se paga el neto completo.
+ *
+ * Bug (2026-07-30, caso Biassi Gonzalo Amir, julio 2026): `appliedCredit`. Un
+ * mes cuyos cargos se cubren con efectivo MÁS el saldo a favor del mes anterior
+ * quedaba con la porción del crédito como base impaga, devengando mora todos los
+ * días — y como el mes nunca llegaba a COMPLETE, tampoco entraba en la segunda
+ * pasada de `_recalculateCore` que congela el punitorio a lo realmente cobrado,
+ * así que el error crecía solo. Biassi pagó $767.918 en efectivo y usó $560 de
+ * saldo a favor contra cargos de $768.478: cancelaba justo, pero el sistema veía
+ * $560 impagos.
+ *
+ * REGLA (definida por el usuario 2026-07-30, REEMPLAZA a "el saldo a favor nunca
+ * entra acá"): el saldo a favor se computa como si fuera un monto del PRIMER
+ * pago. Se suma UNA sola vez al total cobrado — nunca por cada pago posterior —
+ * y es puramente interno a este cálculo: NO se escribe en `amountPaid` ni en los
+ * `TransactionConcept`, porque el recibo tiene que seguir mostrando el efectivo
+ * real que entregó el inquilino ($767.918, no $768.478). El crédito sigue sin
+ * cancelar mora cuando el mes queda genuinamente impago: descuenta como plata
+ * cobrada, pero el resto del saldo sigue devengando (alquiler 100.000 + crédito
+ * 10.000 + cero efectivo → base 90.000, no 0).
+ *
+ * `appliedCredit` es 0 por defecto: los callers del motor de DEUDAS
+ * (debtService.js) no lo pasan, porque ahí el crédito se resta al final sobre
+ * `remainingDebt` y no debe activar la base ampliada.
  */
-function computePunitoryBase({ rentAmount = 0, servicesTotal = 0, ivaAmount = 0, amountPaid = 0 }) {
-  const totalCredits = amountPaid || 0;
+function computePunitoryBase({ rentAmount = 0, servicesTotal = 0, ivaAmount = 0, amountPaid = 0, appliedCredit = 0 }) {
+  const credit = Math.max(appliedCredit || 0, 0);
+  const cash = amountPaid || 0;
+  const totalCredits = cash + credit;
+
+  // Nada cobrado (ni efectivo ni crédito): la base es SOLO el alquiler.
   if (totalCredits <= 0) return (rentAmount || 0);
 
+  // Mes saldado: efectivo + crédito cubren el neto → no queda base.
   const netTotalOwed = (rentAmount || 0) + (servicesTotal || 0) + (ivaAmount || 0);
   if (totalCredits >= netTotalOwed - 0.01) return 0;
+
+  // Sin efectivo real, el crédito descuenta pero NO activa la base AMPLIADA: los
+  // servicios impagos siguen sin generar mora mientras el inquilino no haya
+  // pagado nada (regla confirmada 2026-07-11, "el saldo a favor nunca activa la
+  // base ampliada"). Sólo un pago real cambia de rama.
+  if (cash <= 0) return Math.max((rentAmount || 0) - credit, 0);
 
   const baseNonPunitory = (rentAmount || 0) + Math.max(servicesTotal || 0, 0) + (ivaAmount || 0);
   return Math.max(baseNonPunitory - totalCredits, 0);
@@ -335,13 +369,15 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     const frozenPunitory = record.punitoryAmount || 0;
     const ivaForPunitory = record.includeIva ? (record.rentAmount || 0) * 0.21 : 0;
 
-    // Base ÚNICA de punitorios (A-03/A-04, computePunitoryBase).
-    // El crédito (previousBalance) NUNCA entra acá — se aplica al total al final.
+    // Base ÚNICA de punitorios (A-03/A-04, computePunitoryBase). El saldo a favor
+    // del mes anterior entra como plata del primer pago (caso Biassi, ver el
+    // docblock de computePunitoryBase).
     const punitoryBase = computePunitoryBase({
       rentAmount: record.rentAmount || 0,
       servicesTotal,
       ivaAmount: ivaForPunitory,
       amountPaid,
+      appliedCredit: record.previousBalance || 0,
     });
 
     // Punitorios congelados IMPAGOS: lo que queda del congelado del último pago
