@@ -1683,7 +1683,7 @@ const generateGastosAlquilerPDF = (data) => {
     const rW = 420;
     const rMargin = 20;
     const rContent = rW - rMargin * 2;
-    const estimatedH = 300 + data.conceptos.length * 15;
+    const estimatedH = 300 + data.conceptos.length * 15 + (data.payment ? 16 : 0);
     const rH = Math.max(340, Math.min(estimatedH, 620));
     const doc = new PDFDocument({ size: [rW, rH], margin: rMargin });
     const buf = [];
@@ -1833,6 +1833,18 @@ const generateGastosAlquilerPDF = (data) => {
     doc.font(F.b).fontSize(8).fillColor(C.black)
       .text(`Son: ${numeroATexto(data.saldo)}.-`, rMargin + 4, y, { width: rContent - 8 });
     y += 18;
+
+    // ── Pago del saldo (opcional) ──
+    if (data.payment) {
+      const metodoLabel = data.payment.metodo === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo';
+      const pagoFechaStr = new Date(data.payment.fecha).toLocaleDateString('es-AR', {
+        timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+      });
+      const parcialSuffix = data.payment.estado === 'PARCIAL' ? ' (pago parcial)' : '';
+      doc.font(F.r).fontSize(7.5).fillColor(C.dark)
+        .text(`Pagado: ${fmt(data.payment.monto, currency)} por ${metodoLabel} el ${pagoFechaStr}${parcialSuffix}`, rMargin + 4, y, { width: rContent - 8 });
+      y += 14;
+    }
 
     // ── Outer border ──
     const borderBottom = y + 4;

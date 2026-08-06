@@ -883,23 +883,29 @@ model RentExpenseSequence {
 
 // Cabecera del recibo de Gastos Alquiler
 model RentExpenseReceipt {
-  id                String   @id @default(uuid())
-  groupId           String   @map("group_id")
-  receiptNumber     String   @map("receipt_number") // GA-000001
+  id                String    @id @default(uuid())
+  groupId           String    @map("group_id")
+  receiptNumber     String    @map("receipt_number") // GA-000001
 
   fecha             DateTime
-  tenantName        String   @map("tenant_name")
+  tenantName        String    @map("tenant_name")
   address           String
-  ivaCondicion      String?  @map("iva_condicion")        // ej: "consumidor final"
-  porCuentaYOrdenDe String?  @map("por_cuenta_y_orden_de")
+  ivaCondicion      String?   @map("iva_condicion")        // ej: "consumidor final"
+  porCuentaYOrdenDe String?   @map("por_cuenta_y_orden_de")
 
   total             Float
-  reserva           Float    @default(0)
+  reserva           Float     @default(0)
   saldo             Float
 
+  // Pago del saldo (opcional, un único pago por recibo)
+  paymentDate       DateTime? @map("payment_date")
+  paymentAmount     Float?    @map("payment_amount")
+  paymentMethod     String?   @map("payment_method") // EFECTIVO, TRANSFERENCIA
+  paymentStatus     String?   @map("payment_status") // COMPLETO, PARCIAL
+
   observations      String?
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   group Group                    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   items RentExpenseReceiptItem[]

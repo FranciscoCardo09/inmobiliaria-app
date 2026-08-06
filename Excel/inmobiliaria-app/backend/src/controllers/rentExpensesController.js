@@ -110,6 +110,14 @@ const downloadReceiptPDF = async (req, res, next) => {
       total: receipt.total,
       reserva: receipt.reserva,
       saldo: receipt.saldo,
+      payment: receipt.paymentDate
+        ? {
+            fecha: receipt.paymentDate,
+            monto: receipt.paymentAmount,
+            metodo: receipt.paymentMethod,
+            estado: receipt.paymentStatus,
+          }
+        : null,
     };
 
     const pdfBuffer = await generateGastosAlquilerPDF(data);

@@ -46,6 +46,14 @@ function conceptoLabel(item) {
   return item.concepto
 }
 
+const metodoLabel = (metodo) => (metodo === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo')
+
+function PaymentStatusBadge({ receipt }) {
+  if (!receipt.paymentDate) return <span className="badge badge-ghost badge-sm">Sin pago</span>
+  if (receipt.paymentStatus === 'PARCIAL') return <span className="badge badge-warning badge-sm">Parcial</span>
+  return <span className="badge badge-success badge-sm">Completo</span>
+}
+
 function GastosAlquilerTab({ groupId }) {
   const [fecha, setFecha] = useState(todayISO())
   const [ivaCondicion, setIvaCondicion] = useState('consumidor final')
@@ -55,6 +63,12 @@ function GastosAlquilerTab({ groupId }) {
   const [porCuentaYOrdenDe, setPorCuentaYOrdenDe] = useState('')
   const [reserva, setReserva] = useState('')
   const [items, setItems] = useState([emptyItem()])
+
+  const [registrarPago, setRegistrarPago] = useState(false)
+  const [paymentDate, setPaymentDate] = useState(todayISO())
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('EFECTIVO')
+  const [paymentStatus, setPaymentStatus] = useState('COMPLETO')
 
   const { tenants } = useTenants(groupId)
   const { properties } = useProperties(groupId)
@@ -81,7 +95,9 @@ function GastosAlquilerTab({ groupId }) {
   const validItems = items.filter(
     (it) => it.concepto.trim() && it.importe !== '' && !Number.isNaN(parseFloat(it.importe))
   )
-  const canSubmit = tenantName.trim() && address.trim() && validItems.length > 0 && !isCreating
+  const paymentAmountNum = parseFloat(paymentAmount)
+  const paymentValid = !registrarPago || (!!paymentDate && paymentAmount !== '' && !Number.isNaN(paymentAmountNum) && paymentAmountNum > 0)
+  const canSubmit = tenantName.trim() && address.trim() && validItems.length > 0 && paymentValid && !isCreating
 
   const resetForm = () => {
     setFecha(todayISO())
@@ -92,6 +108,20 @@ function GastosAlquilerTab({ groupId }) {
     setPorCuentaYOrdenDe('')
     setReserva('')
     setItems([emptyItem()])
+    setRegistrarPago(false)
+    setPaymentDate(todayISO())
+    setPaymentAmount('')
+    setPaymentMethod('EFECTIVO')
+    setPaymentStatus('COMPLETO')
+  }
+
+  // Al tildar "Registrar pago" se precarga con valores sensatos (hoy, el
+  // saldo actual, efectivo, completo) para no tener que tocar todo.
+  const handleToggleRegistrarPago = (checked) => {
+    setRegistrarPago(checked)
+    if (checked && paymentAmount === '') {
+      setPaymentAmount(String(Math.max(saldo, 0)))
+    }
   }
 
   // Al elegir un inquilino con contrato activo, sugerir la dirección de su
@@ -121,6 +151,14 @@ function GastosAlquilerTab({ groupId }) {
         cuotaNumber: it.enCuotas && it.cuotaNumber ? parseInt(it.cuotaNumber, 10) : null,
         cuotaTotal: it.enCuotas && it.cuotaTotal ? parseInt(it.cuotaTotal, 10) : null,
       })),
+      payment: registrarPago
+        ? {
+            fecha: paymentDate,
+            monto: paymentAmountNum,
+            metodo: paymentMethod,
+            estado: paymentStatus,
+          }
+        : null,
     }
 
     try {
@@ -313,6 +351,66 @@ function GastosAlquilerTab({ groupId }) {
             </p>
           </div>
 
+          <div className="rounded-lg border border-base-300 p-3 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer w-fit">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-sm"
+                checked={registrarPago}
+                onChange={(e) => handleToggleRegistrarPago(e.target.checked)}
+              />
+              <span className="font-medium text-sm">Registrar pago</span>
+              <span className="text-xs opacity-50">(opcional)</span>
+            </label>
+
+            {registrarPago && (
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="label"><span className="label-text text-xs">Fecha de pago</span></label>
+                  <input
+                    type="date"
+                    className="input input-bordered input-sm w-full"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label"><span className="label-text text-xs">Monto pagado</span></label>
+                  <input
+                    type="number"
+                    className="input input-bordered input-sm w-full"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+                <div>
+                  <label className="label"><span className="label-text text-xs">Medio de pago</span></label>
+                  <select
+                    className="select select-bordered select-sm w-full"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TRANSFERENCIA">Transferencia</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label"><span className="label-text text-xs">Estado</span></label>
+                  <select
+                    className="select select-bordered select-sm w-full"
+                    value={paymentStatus}
+                    onChange={(e) => setPaymentStatus(e.target.value)}
+                  >
+                    <option value="COMPLETO">Completo</option>
+                    <option value="PARCIAL">Parcial</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-2 pt-1">
             <Button
               onClick={handleSubmit}
@@ -365,6 +463,12 @@ function GastosAlquilerTab({ groupId }) {
               <div className="flex justify-between font-bold"><span>Saldo</span><span>{formatCurrency(saldo)}</span></div>
             </div>
             <p className="text-xs italic pt-1">Son: {numeroATexto(Math.max(saldo, 0))}.-</p>
+            {registrarPago && paymentValid && (
+              <p className="text-xs pt-1">
+                Pagado: {formatCurrency(paymentAmountNum)} por {metodoLabel(paymentMethod)} el {formatDate(paymentDate)}
+                {paymentStatus === 'PARCIAL' && ' (pago parcial)'}
+              </p>
+            )}
           </div>
         </Card>
 
@@ -382,6 +486,7 @@ function GastosAlquilerTab({ groupId }) {
                     <th>Fecha</th>
                     <th>Inquilino</th>
                     <th className="text-right">Saldo</th>
+                    <th>Pago</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -392,6 +497,7 @@ function GastosAlquilerTab({ groupId }) {
                       <td>{formatDate(r.fecha)}</td>
                       <td>{r.tenantName}</td>
                       <td className="text-right font-medium">{formatCurrency(r.saldo)}</td>
+                      <td><PaymentStatusBadge receipt={r} /></td>
                       <td className="text-right">
                         <div className="flex justify-end gap-1">
                           <button

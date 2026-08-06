@@ -1,5 +1,16 @@
 const { z } = require('zod');
 
+// Pago del saldo, opcional: si se manda, fecha/monto/metodo/estado van todos juntos.
+const paymentSchema = z.object({
+  fecha: z.coerce.date({ invalid_type_error: 'fecha de pago inválida' }),
+  monto: z.number({
+    required_error: 'El monto pagado es requerido',
+    invalid_type_error: 'El monto pagado debe ser un número',
+  }).positive('El monto pagado debe ser mayor a 0').finite(),
+  metodo: z.enum(['EFECTIVO', 'TRANSFERENCIA'], { invalid_type_error: 'Medio de pago inválido' }),
+  estado: z.enum(['COMPLETO', 'PARCIAL'], { invalid_type_error: 'Estado de pago inválido' }),
+});
+
 const createReceiptSchema = z.object({
   fecha: z.coerce.date({ invalid_type_error: 'fecha inválida' }),
   tenantName: z.string().min(1, 'El nombre del inquilino es requerido').max(200),
@@ -8,6 +19,7 @@ const createReceiptSchema = z.object({
   porCuentaYOrdenDe: z.string().max(200).nullish(),
   reserva: z.number().min(0, 'La reserva no puede ser negativa').finite().default(0),
   observations: z.string().max(500).nullish(),
+  payment: paymentSchema.nullish(),
   items: z
     .array(
       z.object({

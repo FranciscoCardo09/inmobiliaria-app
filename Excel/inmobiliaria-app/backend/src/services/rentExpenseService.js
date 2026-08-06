@@ -26,7 +26,7 @@ const nextReceiptNumber = async (tx, groupId) => {
  * ítems recibidos: no se confía en lo que mande el front.
  */
 const createReceipt = async (groupId, payload) => {
-  const { fecha, tenantName, address, ivaCondicion, porCuentaYOrdenDe, reserva, observations, items } = payload;
+  const { fecha, tenantName, address, ivaCondicion, porCuentaYOrdenDe, reserva, observations, items, payment } = payload;
 
   return prisma.$transaction(async (tx) => {
     const receiptNumber = await nextReceiptNumber(tx, groupId);
@@ -46,6 +46,10 @@ const createReceipt = async (groupId, payload) => {
         total,
         reserva: reserva || 0,
         saldo,
+        paymentDate: payment?.fecha || null,
+        paymentAmount: payment?.monto ?? null,
+        paymentMethod: payment?.metodo || null,
+        paymentStatus: payment?.estado || null,
         observations: observations || null,
         items: {
           create: items.map((item, index) => ({
