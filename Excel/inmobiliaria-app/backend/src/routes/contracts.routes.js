@@ -53,6 +53,12 @@ router.post(
   contractsController.undoRenewal
 );
 
+router.post(
+  '/:id/cleanup-adjustments',
+  requireGroupAccess(['ADMIN', 'OPERATOR']),
+  contractsController.cleanupContractAdjustments
+);
+
 router.delete(
   '/:id',
   requireGroupAccess(['ADMIN']),

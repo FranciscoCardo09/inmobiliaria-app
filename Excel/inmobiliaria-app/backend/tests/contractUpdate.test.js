@@ -222,6 +222,56 @@ test('cambiar de índice con un AJUSTE_AUTOMATICO previo devuelve warning, sin r
   assert.strictEqual(history.reason, 'AJUSTE_AUTOMATICO');
 });
 
+// Caso Ciuro (2026-08-10, ver tests/adjustmentIndexCleanup.test.js): el aviso D5
+// decía "deshacelos manualmente desde Ajustes", pero esa pantalla filtra por
+// `isAdjustmentMonth` — un ajuste que quedó FUERA del cronograma nuevo no aparece
+// ahí ni lo alcanza el botón Deshacer. El aviso ahora separa ese subconjunto y lo
+// marca como limpiable, para que el front pueda ofrecer la limpieza.
+test('cambiar a un índice de otra frecuencia marca los ajustes que quedan fuera de cronograma como limpiables', async () => {
+  const { prisma, ctrl } = buildEnv();
+  await seedContract(prisma);
+  await prisma.rentHistory.create({ data: { id: 'rh1', contractId: 'c1', effectiveFromMonth: 1, rentAmount: 90000, reason: 'INICIAL' } });
+  // Mes 4: válido con el índice viejo (freq=3 -> 4, 7, 10), inválido con el nuevo (freq=6 -> 7, 13).
+  await prisma.rentHistory.create({ data: { id: 'rh2', contractId: 'c1', effectiveFromMonth: 4, rentAmount: 100000, reason: 'AJUSTE_AUTOMATICO', adjustmentPercent: 11.1 } });
+
+  const res = mkRes();
+  await ctrl.updateContract(
+    { params: { groupId: 'g1', id: 'c1' }, body: baseBody({ overrides: { adjustmentIndexId: 'idx-icl' } }) },
+    res, (e) => { throw e; },
+  );
+
+  assert.strictEqual(res.statusCode, 200);
+  const w = (res.body.data.warnings || []).find((x) => x.code === 'ADJUSTMENTS_FROM_PREVIOUS_INDEX');
+  assert.ok(w);
+  assert.strictEqual(w.canCleanup, true, 'hay algo que se puede limpiar');
+  assert.strictEqual(w.outOfSchedule.length, 1);
+  assert.strictEqual(w.outOfSchedule[0].effectiveFromMonth, 4);
+  assert.ok(w.outOfSchedule[0].calendarMonth >= 1 && w.outOfSchedule[0].calendarMonth <= 12,
+    'el front necesita el período calendario para mostrarlo');
+  assert.ok(w.outOfSchedule[0].calendarYear > 2000);
+});
+
+test('si los ajustes del índice anterior siguen encajando en el cronograma nuevo, no se ofrece limpiar nada', async () => {
+  const { prisma, ctrl } = buildEnv();
+  // Arranca en el semestral (freq=6) y pasa al trimestral (freq=3): el mes 7 es mes
+  // de ajuste en AMBOS cronogramas, así que la fila no quedó huérfana.
+  await seedContract(prisma, { adjustmentIndexId: 'idx-icl' });
+  await prisma.rentHistory.create({ data: { id: 'rh1', contractId: 'c1', effectiveFromMonth: 1, rentAmount: 90000, reason: 'INICIAL' } });
+  await prisma.rentHistory.create({ data: { id: 'rh2', contractId: 'c1', effectiveFromMonth: 7, rentAmount: 100000, reason: 'AJUSTE_AUTOMATICO', adjustmentPercent: 11.1 } });
+
+  const res = mkRes();
+  await ctrl.updateContract(
+    { params: { groupId: 'g1', id: 'c1' }, body: baseBody({ overrides: { adjustmentIndexId: 'idx-ipc' } }) },
+    res, (e) => { throw e; },
+  );
+
+  assert.strictEqual(res.statusCode, 200);
+  const w = (res.body.data.warnings || []).find((x) => x.code === 'ADJUSTMENTS_FROM_PREVIOUS_INDEX');
+  assert.ok(w, 'se sigue informando que el índice anterior había ajustado');
+  assert.strictEqual(w.canCleanup, false);
+  assert.deepStrictEqual(w.outOfSchedule, []);
+});
+
 test('sin ajustes automáticos previos, cambiar de índice NO agrega warning', async () => {
   const { prisma, ctrl } = buildEnv();
   await seedContract(prisma);

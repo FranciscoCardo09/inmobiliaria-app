@@ -2,7 +2,7 @@
 // Handles: CRUD contracts with adjustment info, punitory fields, currentMonth
 
 const ApiResponse = require('../utils/apiResponse');
-const { calculateNextAdjustmentMonth, isAdjustmentMonth, computeCurrentMonth } = require('../services/adjustmentService');
+const { calculateNextAdjustmentMonth, isAdjustmentMonth, computeCurrentMonth, findOutOfScheduleAdjustments } = require('../services/adjustmentService');
 
 const prisma = require('../lib/prisma');
 
@@ -452,10 +452,34 @@ const updateContract = async (req, res, next) => {
         orderBy: { effectiveFromMonth: 'asc' },
       });
       if (priorAdjustments.length > 0) {
+        // Caso Ciuro (2026-08-10): de esos ajustes, los que ya NO encajan en el
+        // cronograma del índice nuevo son los peligrosos — inflan el alquiler desde
+        // su mes en adelante y contaminan la base del próximo ajuste. Y no se pueden
+        // deshacer desde Ajustes, que filtra por `isAdjustmentMonth`. Se ofrecen para
+        // limpiar (nunca se borran solos: ver POST /:id/cleanup-adjustments).
+        const outOfSchedule = adjIndex
+          ? await findOutOfScheduleAdjustments({
+              id,
+              startDate: data.startDate || contract.startDate,
+              startMonth: data.startMonth || contract.startMonth,
+              adjustmentIndex: { frequencyMonths: adjIndex.frequencyMonths },
+            })
+          : [];
         previousIndexWarning = {
           code: 'ADJUSTMENTS_FROM_PREVIOUS_INDEX',
-          message: `Este contrato ya tenía ${priorAdjustments.length} ajuste(s) automático(s) aplicado(s) con el índice anterior. No se revirtieron: si corresponden a un error, deshacelos manualmente desde Ajustes.`,
+          message: outOfSchedule.length > 0
+            ? `Este contrato tenía ${outOfSchedule.length} ajuste(s) del índice anterior que no encajan en el cronograma del índice nuevo. Mientras sigan ahí, inflan el alquiler desde ese mes en adelante y el próximo ajuste parte de ese valor.`
+            : `Este contrato ya tenía ${priorAdjustments.length} ajuste(s) automático(s) aplicado(s) con el índice anterior. No se revirtieron: los montos quedan calculados con el valor viejo.`,
           records: priorAdjustments,
+          outOfSchedule: outOfSchedule.map((h) => ({
+            id: h.id,
+            effectiveFromMonth: h.effectiveFromMonth,
+            calendarMonth: h.calendarMonth,
+            calendarYear: h.calendarYear,
+            rentAmount: h.rentAmount,
+            adjustmentPercent: h.adjustmentPercent,
+          })),
+          canCleanup: outOfSchedule.length > 0,
         };
       }
     }
@@ -1241,6 +1265,31 @@ const undoRenewal = async (req, res, next) => {
   }
 };
 
+// POST /api/groups/:groupId/contracts/:id/cleanup-adjustments
+// Limpia los AJUSTE_AUTOMATICO que quedaron fuera del cronograma vigente (los que
+// dejó un índice anterior de otra frecuencia). Se dispara SOLO cuando el usuario
+// confirma el aviso ADJUSTMENTS_FROM_PREVIOUS_INDEX de updateContract — nunca solo.
+const cleanupContractAdjustments = async (req, res, next) => {
+  try {
+    const { groupId, id } = req.params;
+    const contract = await prisma.contract.findFirst({ where: { id, groupId }, select: { id: true } });
+    if (!contract) {
+      return ApiResponse.notFound(res, 'Contrato no encontrado');
+    }
+
+    const result = await contractService.cleanupOutOfScheduleAdjustments(groupId, id);
+
+    const message = result.deleted.length > 0
+      ? `Se limpiaron ${result.deleted.length} ajuste(s) fuera de cronograma`
+      : result.skipped.length > 0
+        ? result.skipped[0].reason
+        : 'No había ajustes fuera de cronograma';
+    return ApiResponse.success(res, result, message);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getContracts: asyncHandler(getContracts),
   getExpiringContracts: asyncHandler(getExpiringContracts),
@@ -1256,4 +1305,5 @@ module.exports = {
   undoRescission: asyncHandler(undoRescission),
   renewContract: asyncHandler(renewContract),
   undoRenewal: asyncHandler(undoRenewal),
+  cleanupContractAdjustments: asyncHandler(cleanupContractAdjustments),
 };

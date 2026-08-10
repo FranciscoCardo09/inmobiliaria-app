@@ -97,6 +97,56 @@ const isMonthLocked = async (contractId, monthNumber) => {
 };
 
 /**
+ * Filas AJUSTE_AUTOMATICO que quedaron FUERA del cronograma vigente del contrato.
+ *
+ * Caso Ciuro (2026-08-10): cambiar el índice de ajuste a otro de distinta
+ * frecuencia deja vivos los ajustes que aplicó el índice anterior. La fila
+ * sobreviviente cae en un mes que ya no es mes de ajuste, y como el alquiler se
+ * resuelve como "última fila con effectiveFromMonth <= mes", infla el alquiler
+ * desde ahí en adelante y contamina la base del próximo ajuste
+ * (`getRentBeforeMonth`). Además es invisible desde la pantalla de Ajustes, que
+ * filtra justamente con `isAdjustmentMonth`.
+ *
+ * Solo mira AJUSTE_AUTOMATICO: un AJUSTE_MANUAL fuera de cronograma es legítimo
+ * (el operador fijó el alquiler de un mes puntual a mano).
+ *
+ * @param {object} contract - contrato (idealmente con `adjustmentIndex` incluido)
+ * @returns {Promise<Array>} filas de rentHistory fuera de cronograma, con el
+ *   período calendario al que corresponden
+ */
+const findOutOfScheduleAdjustments = async (contract) => {
+  let freq = contract.adjustmentIndex?.frequencyMonths;
+  if (!freq && contract.adjustmentIndexId) {
+    const idx = await prisma.adjustmentIndex.findUnique({
+      where: { id: contract.adjustmentIndexId },
+      select: { frequencyMonths: true },
+    });
+    freq = idx?.frequencyMonths;
+  }
+  if (!freq) return [];
+
+  const startMonth = contract.startMonth || 1;
+  const rows = await prisma.rentHistory.findMany({
+    where: { contractId: contract.id, reason: 'AJUSTE_AUTOMATICO' },
+    orderBy: { effectiveFromMonth: 'asc' },
+  });
+
+  return rows
+    .filter((h) => !isAdjustmentMonth(startMonth, h.effectiveFromMonth, freq))
+    .map((h) => ({ ...h, ...monthNumberToCalendar(contract, h.effectiveFromMonth) }));
+};
+
+/**
+ * Mes calendario (1-12) y año al que corresponde un mes de contrato.
+ * Inversa de `calculateContractMonthFromCalendar`.
+ */
+const monthNumberToCalendar = (contract, monthNumber) => {
+  const start = new Date(contract.startDate);
+  const d = new Date(start.getFullYear(), start.getMonth() + (monthNumber - (contract.startMonth || 1)), 1);
+  return { calendarMonth: d.getMonth() + 1, calendarYear: d.getFullYear() };
+};
+
+/**
  * Calculate the next adjustment month based on start month and frequency
  * LÓGICA CORREGIDA:
  * - Los ajustes ocurren en: startMonth, startMonth+freq, startMonth+2*freq, etc.
@@ -881,6 +931,9 @@ module.exports = {
   computeCurrentMonth,
   calculateNextAdjustmentMonth,
   isAdjustmentMonth,
+  isMonthLocked,
+  findOutOfScheduleAdjustments,
+  monthNumberToCalendar,
   calculateContractMonthFromCalendar,
   getContractsWithAdjustmentThisMonth,
   getContractsWithAdjustmentNextMonth,

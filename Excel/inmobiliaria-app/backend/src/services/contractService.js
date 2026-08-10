@@ -1,5 +1,11 @@
 const prisma = require('../lib/prisma');
-const { calculateNextAdjustmentMonth } = require('./adjustmentService');
+const {
+  calculateNextAdjustmentMonth,
+  computeCurrentMonth,
+  findOutOfScheduleAdjustments,
+  isMonthLocked,
+} = require('./adjustmentService');
+const { calculateRentForMonth, recalculateMultipleRecords } = require('./monthlyRecordService');
 const { getPeriodLabel, calculateCurrentContractMonth } = require('../utils/dateUtils');
 
 /**
@@ -205,10 +211,104 @@ const validateRenewalStartDate = (oldContract, newStartDate, { strictAdjacency =
   return { ok: true };
 };
 
+/**
+ * Borra los AJUSTE_AUTOMATICO que quedaron fuera del cronograma vigente (típicamente
+ * los que aplicó un índice anterior de otra frecuencia) y devuelve los meses abiertos
+ * al alquiler que realmente corresponde.
+ *
+ * Caso Ciuro (2026-08-10) — ver `findOutOfScheduleAdjustments` y
+ * `tests/adjustmentIndexCleanup.test.js`. NO se dispara solo al cambiar el índice:
+ * `updateContract` avisa (ADJUSTMENTS_FROM_PREVIOUS_INDEX) y esto corre únicamente si
+ * el usuario confirma, misma política que el resto del código de no mover plata sin
+ * avisar. Decisión del usuario, 2026-08-10.
+ *
+ * Es todo-o-nada: si CUALQUIER mes desde el primer ajuste huérfano ya está cobrado o
+ * cerrado, no borra nada (borrarlo le bajaría el alquiler a un mes ya cobrado, misma
+ * guarda A-09 que usan las tres funciones de ajuste).
+ *
+ * No toca `nextAdjustmentMonth`: por definición las filas borradas están FUERA del
+ * cronograma, así que no pueden afectar cuál es el próximo mes de ajuste.
+ *
+ * @returns {Promise<{deleted: Array, skipped: Array, recordsUpdated: number}>}
+ */
+const cleanupOutOfScheduleAdjustments = async (groupId, contractId) => {
+  const empty = { deleted: [], skipped: [], recordsUpdated: 0 };
+
+  const contract = await prisma.contract.findFirst({
+    where: { id: contractId, groupId },
+    include: { adjustmentIndex: { select: { frequencyMonths: true } } },
+  });
+  if (!contract) return empty;
+
+  const orphans = await findOutOfScheduleAdjustments(contract);
+  if (orphans.length === 0) return empty;
+
+  const fromMonth = Math.min(...orphans.map((h) => h.effectiveFromMonth));
+  const affected = await prisma.monthlyRecord.findMany({
+    where: { contractId, monthNumber: { gte: fromMonth } },
+    orderBy: { monthNumber: 'asc' },
+  });
+
+  const lockedMonths = [];
+  for (const record of affected) {
+    if (await isMonthLocked(contractId, record.monthNumber)) lockedMonths.push(record.monthNumber);
+  }
+  if (lockedMonths.length > 0) {
+    const reason =
+      `Hay mes(es) ya cobrado(s) o cerrado(s) desde el mes ${fromMonth} del contrato ` +
+      `(${lockedMonths.join(', ')}). No se limpió ningún ajuste para no reabrir un mes ya cobrado.`;
+    return {
+      deleted: [],
+      recordsUpdated: 0,
+      skipped: orphans.map((h) => ({ effectiveFromMonth: h.effectiveFromMonth, reason })),
+    };
+  }
+
+  const deleted = [];
+  for (const h of orphans) {
+    await prisma.rentHistory.delete({ where: { id: h.id } });
+    deleted.push({
+      id: h.id,
+      effectiveFromMonth: h.effectiveFromMonth,
+      calendarMonth: h.calendarMonth,
+      calendarYear: h.calendarYear,
+      rentAmount: h.rentAmount,
+      adjustmentPercent: h.adjustmentPercent,
+    });
+  }
+
+  // Resincronizar el alquiler con la MISMA función que usa la app para mostrarlo,
+  // en vez de escribir montos a mano.
+  let recordsUpdated = 0;
+  for (const record of affected) {
+    const rent = await calculateRentForMonth(contract, record.monthNumber);
+    if (rent === record.rentAmount) continue;
+    await prisma.monthlyRecord.update({
+      where: { id: record.id },
+      data: { rentAmount: rent, ivaAmount: record.includeIva ? rent * 0.21 : 0 },
+    });
+    recordsUpdated++;
+  }
+
+  // baseRent debe quedar con el alquiler realmente vigente hoy: si la fila borrada
+  // era el último ajuste aplicado, seguiría inflado (mismo criterio que el undo).
+  const liveRent = await calculateRentForMonth(contract, computeCurrentMonth(contract));
+  if (liveRent !== contract.baseRent) {
+    await prisma.contract.update({ where: { id: contractId }, data: { baseRent: liveRent } });
+  }
+
+  if (affected.length > 0) {
+    await recalculateMultipleRecords([affected[0].id], null, true);
+  }
+
+  return { deleted, skipped: [], recordsUpdated };
+};
+
 module.exports = {
   enrichContract,
   computeEndDate,
   validateRenewalStartDate,
   getExpiringContractsOptimized,
   getContractChain,
+  cleanupOutOfScheduleAdjustments,
 };

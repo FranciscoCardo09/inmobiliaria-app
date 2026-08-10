@@ -1,7 +1,7 @@
 // Contract Form Page - Create/Edit contract with Phase 3 fields + contractType
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useContracts, useContract } from '../../hooks/useContracts'
 import { useTenants } from '../../hooks/useTenants'
@@ -15,6 +15,11 @@ import SearchableSelect from '../../components/ui/SearchableSelect'
 import MultiSearchableSelect from '../../components/ui/MultiSearchableSelect'
 import CreatableMultiSelect from '../../components/ui/CreatableMultiSelect'
 import { useConceptTypes } from '../../hooks/usePayments'
+
+const monthNames = [
+  '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
 
 // Día siguiente al vencimiento del contrato que se renueva, en formato yyyy-mm-dd.
 // Se calcula en hora local (mediodía) para no correrse de día por zona horaria.
@@ -39,7 +44,10 @@ export const ContractForm = () => {
   const { groups, currentGroupId } = useAuthStore()
   const currentGroup = groups.find(g => g.id === currentGroupId) || groups[0]
 
-  const { createContract, updateContract, renewContract, isCreating, isUpdating, isRenewing: isRenewingPending } = useContracts(currentGroup?.id)
+  const {
+    createContract, updateContract, renewContract, cleanupAdjustments,
+    isCreating, isUpdating, isRenewing: isRenewingPending, isCleaningAdjustments,
+  } = useContracts(currentGroup?.id)
   const { tenants } = useTenants(currentGroup?.id, { isActive: true })
   const { properties } = useProperties(currentGroup?.id, { isActive: true })
   const { indices } = useAdjustmentIndices(currentGroup?.id)
@@ -63,6 +71,8 @@ export const ContractForm = () => {
     comprobantes: [],
   })
   const [errors, setErrors] = useState({})
+  // Aviso ADJUSTMENTS_FROM_PREVIOUS_INDEX con ajustes limpiables (caso Ciuro).
+  const [orphanWarning, setOrphanWarning] = useState(null)
 
   const isPropietario = formData.contractType === 'PROPIETARIO'
 
@@ -196,7 +206,17 @@ export const ContractForm = () => {
     } else if (isEditing) {
       updateContract(
         { id, ...data },
-        { onSuccess: () => navigate('/contracts') }
+        {
+          onSuccess: (updated) => {
+            // Caso Ciuro (2026-08-10): si el índice nuevo dejó ajustes del anterior
+            // fuera de cronograma, no se navega — hay que decidir qué hacer con
+            // ellos antes de irse (inflan el alquiler y no se pueden deshacer desde
+            // la pantalla de Ajustes).
+            const w = updated?.warnings?.find((x) => x.canCleanup)
+            if (w) { setOrphanWarning(w); return }
+            navigate('/contracts')
+          },
+        }
       )
     } else {
       createContract(data, {
@@ -653,6 +673,80 @@ export const ContractForm = () => {
           </div>
         </form>
       </Card>
+
+      {orphanWarning && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg text-warning">
+              <ExclamationTriangleIcon className="w-5 h-5 inline mr-2" />
+              Ajustes del índice anterior
+            </h3>
+            <div className="py-4 space-y-4">
+              <p className="text-sm">{orphanWarning.message}</p>
+
+              <div className="overflow-x-auto">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Período</th>
+                      <th className="text-right">Alquiler que fijó</th>
+                      <th className="text-right">Ajuste</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orphanWarning.outOfSchedule.map((a) => (
+                      <tr key={a.id}>
+                        <td>
+                          {monthNames[a.calendarMonth]} {a.calendarYear}
+                          <span className="text-xs opacity-60"> (mes {a.effectiveFromMonth})</span>
+                        </td>
+                        <td className="text-right">${a.rentAmount?.toLocaleString()}</td>
+                        <td className="text-right">
+                          {a.adjustmentPercent != null ? `+${a.adjustmentPercent}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-xs opacity-70">
+                No aparecen en la pantalla de Ajustes (que solo muestra los meses del cronograma
+                nuevo), así que desde ahí no se pueden deshacer. Si los limpiás, los meses todavía
+                abiertos vuelven al alquiler que corresponde. Los meses ya cobrados o cerrados no
+                se tocan.
+              </p>
+            </div>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setOrphanWarning(null); navigate('/contracts') }}
+                disabled={isCleaningAdjustments}
+              >
+                Dejar como está
+              </button>
+              <button
+                className="btn btn-warning btn-sm"
+                disabled={isCleaningAdjustments}
+                onClick={async () => {
+                  try {
+                    await cleanupAdjustments(id)
+                    setOrphanWarning(null)
+                    navigate('/contracts')
+                  } catch {
+                    // El hook ya muestra el toast de error; el modal queda abierto
+                    // para reintentar o salir sin limpiar.
+                  }
+                }}
+              >
+                {isCleaningAdjustments && <span className="loading loading-spinner loading-xs" />}
+                Limpiar {orphanWarning.outOfSchedule.length > 1 ? 'ajustes' : 'ajuste'}
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" />
+        </div>
+      )}
     </div>
   )
 }

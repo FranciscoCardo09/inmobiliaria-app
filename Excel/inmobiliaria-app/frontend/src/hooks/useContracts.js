@@ -84,8 +84,11 @@ export const useContracts = (groupId, filters = {}) => {
       toast.success('Contrato actualizado')
       // Avisos no bloqueantes del backend (meses con pagos fuera de rango, ajustes
       // ya aplicados con el índice anterior): nunca mueven plata solos, hay que
-      // revisarlos a mano.
-      updated?.warnings?.forEach((w) => toast(w.message, { icon: '⚠️', duration: 8000 }))
+      // revisarlos a mano. Los que traen `canCleanup` los muestra el formulario en
+      // un modal con la acción de limpiar, así que acá no se duplican como toast.
+      updated?.warnings
+        ?.filter((w) => !w.canCleanup)
+        .forEach((w) => toast(w.message, { icon: '⚠️', duration: 8000 }))
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al actualizar contrato')
@@ -193,6 +196,31 @@ export const useContracts = (groupId, filters = {}) => {
     },
   })
 
+  // Limpieza confirmada de los ajustes que quedaron fuera del cronograma tras
+  // cambiar el índice (caso Ciuro, 2026-08-10). Solo corre si el usuario confirma
+  // el aviso ADJUSTMENTS_FROM_PREVIOUS_INDEX: el backend nunca los borra solo.
+  const cleanupAdjustmentsMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await api.post(`/groups/${groupId}/contracts/${id}/cleanup-adjustments`)
+      return response.data
+    },
+    onSuccess: (response) => {
+      queryClient.invalidateQueries({ queryKey: ['contracts', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['contractAdjustments', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
+      queryClient.invalidateQueries({ queryKey: ['adjustmentIndices', groupId] })
+      if (response?.data?.deleted?.length > 0) {
+        toast.success(response.message)
+      } else {
+        // Nada borrado: casi siempre porque algún mes afectado ya está cobrado.
+        toast(response.message, { icon: '⚠️', duration: 10000 })
+      }
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al limpiar los ajustes')
+    },
+  })
+
   return {
     contracts: contractsQuery.data || [],
     isLoading: contractsQuery.isLoading,
@@ -206,6 +234,8 @@ export const useContracts = (groupId, filters = {}) => {
     undoRescission: undoRescindMutation.mutateAsync,
     renewContract: renewMutation.mutate,
     undoRenewal: undoRenewMutation.mutateAsync,
+    cleanupAdjustments: cleanupAdjustmentsMutation.mutateAsync,
+    isCleaningAdjustments: cleanupAdjustmentsMutation.isPending,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
