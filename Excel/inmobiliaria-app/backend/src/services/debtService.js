@@ -110,16 +110,37 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
   // continue to accumulate. We need to calculate the LIVE punitorios now.
   let currentPunitoryAmount = monthlyRecord.punitoryAmount || 0;
 
-  if (monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
+  // INVARIANTE del motor de deudas: `accumulatedPunitory` es el punitorio bruto devengado
+  // HASTA EL ANCLA (`lastPaymentDate ?? punitoryStartDate`), y `calculateDebtPunitory` suma
+  // el tramo vivo DESDE el ancla hasta la fecha de pago. `payDebt` lo respeta (guarda
+  // `grossPunitoryToDate` y mueve `lastPaymentDate` al día del pago).
+  //
+  // Por eso el catch-up de abajo (punitorio devengado entre el último pago y el cierre) SOLO
+  // puede aplicarse cuando el ancla es el día 1 del período, o sea cuando el mes no tuvo
+  // ningún pago (ver `punitoryStartDate` más abajo). Con ancla = fecha del pago parcial,
+  // sumarlo acá cobra ese tramo DOS VECES: una congelada en `accumulatedPunitory` y otra en
+  // el tramo vivo — que además lo compone, porque `accumulatedPunitory` impago entra al
+  // `compoundBase` de `calculateDebtPunitory`.
+  //
+  // Bug real (2026-08-14, caso Brunello Ana Carolina julio 2026): pago parcial el 23/07,
+  // cierre el 31/07 → los 9 días 23→31 se cobraban duplicados y compuestos. Control Mensual,
+  // el modal de pago de deuda y Liquidación mostraban $111.094 (Acumulados $43.605 +
+  // Actuales 23d $67.490) en vez de los $83.721 reales (Acumulados $19.551 + Actuales 23d
+  // $64.170). El bug quedó latente hasta el gate A-01, que empezó a sumar
+  // `accumulatedPunitory` cuando `previousRecordPayment > 0` sin advertir que ese campo ya
+  // traía el tramo solapado adentro.
+  const anchorIsPayment = !!(monthlyRecord.transactions && monthlyRecord.transactions.length > 0);
+
+  if (!anchorIsPayment && monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
     try {
       // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase): SOLO
       // los pagos reales (amountPaid); el saldo a favor del mes anterior NUNCA reduce
       // la base (se aplica al total al final). La bonificación (servicesTotal
       // negativo) tampoco la reduce (clamp a >=0), mismo criterio que
-      // paymentTransactionService. Antes este catch-up (punitorios devengados desde
-      // el último pago hasta el cierre) usaba una base rent-only; con pagos parciales
-      // debía ser el saldo restante total (alquiler+servicios+IVA impago), como ya
-      // hace calculateDebtPunitory una vez creada la deuda (LOGICA.md §6).
+      // paymentTransactionService. En esta rama no hay transacciones, así que
+      // amountPaid es 0 y la base queda en rent-only; el escenario "con pago parcial"
+      // (base = saldo restante total, LOGICA.md §6) ya lo cubre calculateDebtPunitory
+      // sobre el tramo vivo desde el ancla, sin duplicar.
       const amountPaid = monthlyRecord.amountPaid || 0;
       const servicesTotal = monthlyRecord.servicesTotal || 0;
       const ivaAmount = monthlyRecord.ivaAmount || 0;
@@ -130,12 +151,9 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
         amountPaid,
       });
 
-      // Get last payment date (if partial payment was made)
-      let lastPaymentDate = null;
-      if (monthlyRecord.transactions && monthlyRecord.transactions.length > 0) {
-        const lastTx = monthlyRecord.transactions[monthlyRecord.transactions.length - 1];
-        lastPaymentDate = new Date(lastTx.paymentDate);
-      }
+      // Sin transacciones el tramo se cuenta desde el día 1 del período (mismo ancla que
+      // `punitoryStartDate` más abajo y que `calculateDebtPunitory`).
+      const lastPaymentDate = null;
 
       // Calculate until NOW (when closing the month).
       // A-25: usar el día ART correcto (string, TZ-inmune para calculatePunitoryV2),
@@ -155,7 +173,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
         lastPaymentDate
       );
 
-      // ADD new punitorios accrued since last payment to the ALREADY accumulated ones
+      // ADD new punitorios accrued since day 1 of the period to the ALREADY accumulated ones
       currentPunitoryAmount = (monthlyRecord.punitoryAmount || 0) + liveResult.amount;
     } catch (error) {
       console.error('Error calculating live punitorios:', error);
@@ -182,12 +200,14 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
     return null;
   }
 
-  // Fecha desde donde cuentan punitorios
+  // Fecha desde donde cuentan punitorios (ANCLA, ver el invariante arriba: el tramo vivo
+  // de calculateDebtPunitory arranca acá, así que `accumulatedPunitory` no puede contener
+  // nada devengado después de esta fecha).
   // Como la deuda se crea sin pagos (amountPaid=0), los punitorios comienzan
   // desde el día 1 del mes o desde el último pago del MonthlyRecord
   let punitoryStartDate;
 
-  if (monthlyRecord.transactions && monthlyRecord.transactions.length > 0) {
+  if (anchorIsPayment) {
     // Si hubo pagos parciales en el MonthlyRecord, punitorios desde el último pago
     const lastTx = monthlyRecord.transactions[monthlyRecord.transactions.length - 1];
     punitoryStartDate = new Date(lastTx.paymentDate);
@@ -1436,6 +1456,14 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
         const punitoryBase = hasPreClosurePayment
           ? round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0))
           : (debt.unpaidRentAmount || 0);
+        // ANCLA: si la deuda nació de un mes con pago parcial, `punitoryStartDate` es la
+        // fecha de ESE pago, no el día 1 del período — pasar `null` acá hacía que
+        // calculatePunitoryV2 recalculara desde el día 1 sobre alquiler+servicios,
+        // sobre-contando el tramo. Mismo criterio que calculateDebtPunitory
+        // (`effectiveLastPaymentDate`).
+        const firstOfMonth = new Date(debt.periodYear, debt.periodMonth - 1, 1);
+        const anchor = new Date(debt.punitoryStartDate);
+        const anchorAsLastPayment = anchor.getTime() !== firstOfMonth.getTime() ? anchor : null;
         const liveResult = calculatePunitoryV2(
           getTodayLocalString(),
           debt.periodMonth,
@@ -1445,7 +1473,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
           contract.punitoryGraceDay,
           contract.punitoryPercent,
           holidays,
-          null // sin pagos: se cuenta desde punitoryStartDate (día 1 del período)
+          anchorAsLastPayment // sin pagos propios: se cuenta desde el ancla de la deuda
         );
         grossPunitoryToDate = liveResult.amount || 0;
       }
@@ -1663,14 +1691,22 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
     const contract = await prisma.contract.findUnique({ where: { id: debt.contractId } });
     let currentPunitoryAmount = monthlyRecord.punitoryAmount || 0;
 
-    if (monthlyRecord.transactions && monthlyRecord.transactions.length > 0) {
+    const anchorIsPayment = !!(monthlyRecord.transactions && monthlyRecord.transactions.length > 0);
+
+    if (anchorIsPayment) {
       const lastTx = monthlyRecord.transactions[monthlyRecord.transactions.length - 1];
       punitoryStartDate = new Date(lastTx.paymentDate);
     } else {
       punitoryStartDate = new Date(monthlyRecord.periodYear, monthlyRecord.periodMonth - 1, 1);
     }
 
-    if (contract && monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
+    // Mismo invariante que createDebtFromMonthlyRecord (ver su comentario, caso Brunello
+    // julio 2026): el catch-up solo puede aplicarse cuando el ancla es el día 1. Con ancla =
+    // fecha del pago parcial, calculateDebtPunitory ya devenga ese tramo en vivo, y sumarlo
+    // acá lo cobraba dos veces — peor todavía en esta función, que corre en CADA edición de
+    // un servicio del mes cerrado con el `getTodayLocalString()` de ese momento, así que el
+    // solapamiento crecía en cada toque.
+    if (!anchorIsPayment && contract && monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
       try {
         const amountPaid = monthlyRecord.amountPaid || 0;
         const servicesTotal = monthlyRecord.servicesTotal || 0;
@@ -1681,9 +1717,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
           ivaAmount,
           amountPaid,
         });
-        const lastPaymentDate = monthlyRecord.transactions.length > 0
-          ? new Date(monthlyRecord.transactions[monthlyRecord.transactions.length - 1].paymentDate)
-          : null;
+        const lastPaymentDate = null; // sin transacciones: se cuenta desde el día 1 del período
         const calculationDate = getTodayLocalString();
         const holidays = await getHolidaysForYear(monthlyRecord.periodYear);
         const liveResult = calculatePunitoryV2(

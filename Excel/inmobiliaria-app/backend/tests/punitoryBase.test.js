@@ -154,39 +154,66 @@ test('2026-07-14: cobro con alquiler ya cubierto pero punitorio pendiente compon
   assert.strictEqual(sobrepago, undefined, 'NO debe generar SOBREPAGO — el pago cubre exactamente lo compuesto, sin saldo a favor falso');
 });
 
-test('A-03 (cierre): el catch-up de punitorios en vivo al cerrar usa el saldo restante total, no solo alquiler', async (t) => {
+// A-03 (cierre) — REESCRITO 2026-08-14 (caso Brunello Ana Carolina julio 2026).
+//
+// Antes este test fijaba que el "catch-up" de `createDebtFromMonthlyRecord` (punitorio
+// devengado entre el último pago y el cierre) usara el saldo restante total ($141.000) en
+// vez de rent-only. El bug de fondo era otro: con un pago parcial, el ancla de la deuda
+// (`punitoryStartDate`) queda en la fecha de ESE pago, así que `calculateDebtPunitory` ya
+// devenga en vivo el mismo tramo — el catch-up lo cobraba una segunda vez, y encima compuesto
+// (entra al `compoundBase`). Ahora el catch-up solo corre cuando el ancla es el día 1 del
+// período (mes sin ningún pago), y la regla "base = saldo restante total" la aplica el tramo
+// vivo. Este test fija las dos mitades: cero catch-up al cerrar, y base $141.000 (+ punitorio
+// congelado impago) en el único cálculo que queda.
+test('A-03 (cierre): con pago parcial no hay catch-up al cerrar; el tramo vivo usa el saldo restante total', async (t) => {
   const prisma = makeFakePrisma();
-  let capturedBase = null;
+  const capturedBases = [];
 
   const debtService = proxyquire('../src/services/debtService', {
     '../lib/prisma': prisma,
     '../utils/punitory': {
       ...realPunitory,
       getHolidaysForYear: async () => [],
-      calculatePunitoryV2: (paymentDate, pm, py, baseRent, ...rest) => {
-        capturedBase = baseRent;
-        return { amount: 0, days: 0, fromDate: null, toDate: null };
+      // Delegar al cálculo REAL, pero registrar cada base con la que se lo invoca.
+      calculatePunitoryV2: (...args) => {
+        capturedBases.push(args[3]);
+        return realPunitory.calculatePunitoryV2(...args);
       },
     },
   });
 
+  const FROZEN = 5400; // punitorio congelado del pago parcial del 15/07, sin imputar
   const monthlyRecord = {
     id: 'mr-2', periodMonth: 7, periodYear: 2026,
     status: 'PARTIAL', punitoryForgiven: false,
     rentAmount: 100000, servicesTotal: 30000, ivaAmount: 21000,
     amountPaid: 10000, // pago parcial ya aplicado antes del cierre
-    previousBalance: 0, punitoryAmount: 0,
+    previousBalance: 0, punitoryAmount: FROZEN,
     transactions: [{ paymentDate: new Date(2026, 6, 15, 12, 0, 0) }],
   };
   const contract = {
     groupId: 'g1', id: 'c1',
     punitoryStartDay: 10, punitoryGraceDay: 10, punitoryPercent: 0.006,
   };
+  await prisma.monthlyRecord.create({ data: { ...monthlyRecord } });
+  await prisma.contract.create({ data: { ...contract } });
 
-  await debtService.createDebtFromMonthlyRecord(monthlyRecord, contract);
+  const debt = await debtService.createDebtFromMonthlyRecord(monthlyRecord, contract);
 
-  // "Saldo restante total" (LOGICA §6): rent + services + iva - amountPaid = 141000
-  assert.strictEqual(capturedBase, 141000, 'el catch-up de cierre debe usar el saldo restante total, no unpaidRent (rent-only)');
+  assert.deepStrictEqual(capturedBases, [], 'cerrar un mes con pago parcial NO debe devengar catch-up (lo hace el tramo vivo desde el ancla)');
+  assert.strictEqual(debt.accumulatedPunitory, FROZEN, 'accumulatedPunitory = punitorio congelado impago, sin sumarle el tramo posterior al ancla');
+  assert.strictEqual(debt.punitoryStartDate.getTime(), new Date(2026, 6, 15, 12, 0, 0).getTime(), 'el ancla es la fecha del pago parcial');
+  assert.strictEqual(debt.currentTotal, 146400, 'currentTotal = 100000 alquiler + 41000 servicios+IVA + 5400 punitorio');
+
+  // El tramo vivo (ancla 15/07 → 14/08, ambas inclusive = 31 días) sí usa el saldo
+  // restante total ($141.000) más el punitorio congelado impago (interés compuesto).
+  const live = await debtService.calculateDebtPunitory(debt, '2026-08-14', null, true);
+
+  assert.deepStrictEqual(capturedBases, [146400], 'un único cálculo, con base = saldo restante total (141000) + punitorio impago (5400)');
+  assert.strictEqual(live.days, 31, 'días del tramo: 15/07 → 14/08 ambas inclusive');
+  assert.strictEqual(live.unpaidAccumulatedPunitory, FROZEN);
+  assert.strictEqual(live.amount, realPunitory.round2(146400 * 0.006 * 31));
+  assert.strictEqual(live.grossPunitoryToDate, realPunitory.round2(FROZEN + 146400 * 0.006 * 31));
 });
 
 test('A-04: el refresh persistido del GET y _recalculateCore ya no divergen (ambos usan el punitorio VIVO)', async (t) => {
