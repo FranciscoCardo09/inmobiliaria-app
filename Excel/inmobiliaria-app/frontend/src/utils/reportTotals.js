@@ -24,7 +24,7 @@ export const computeGrandTotals = (dataArray) => {
     // Allocation breakdown totals — incluyen lo cobrado de otros períodos por concepto
     grandServiciosCobrado: dataArray.reduce((s, d) => s + (d.paidServicios || 0) + (d.cobradoOtrosPeriodos?.servicios || 0), 0),
     grandPunitoriosCobrado: dataArray.reduce((s, d) => s + (d.paidPunitorios || 0) + (d.cobradoOtrosPeriodos?.punitorios || 0), 0),
-    // Unificado con grandSubtotalAlquileres/honorarios (BONIFICACION resta, DESCUENTO no):
+    // Unificado con grandSubtotalAlquileres/honorarios (DESCUENTO resta, BONIFICACION no):
     // usa paidAlquilerHonorarios en vez de paidAlquiler crudo (mismo criterio que el backend).
     grandAlquilerCobrado: dataArray.reduce((s, d) => s + (d.paidAlquilerHonorarios ?? d.paidAlquiler ?? 0) + (d.cobradoOtrosPeriodos?.alquiler || 0), 0),
     grandSaldoAFavor: dataArray.reduce((s, d) => s + (d.saldoAFavor || 0), 0),

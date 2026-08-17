@@ -1,16 +1,20 @@
 'use strict';
 
 /**
- * Regla de negocio (confirmada 2026-07-22, ver plan de la sesión): la base de
- * honorarios se calcula sobre el ALQUILER, con una única distinción entre las
- * dos categorías de ajuste que puede tener un mes:
+ * Regla de negocio (INVERTIDA 2026-08-17 por decisión del usuario; de 2026-07-22
+ * a esa fecha era al revés): la base de honorarios se calcula sobre el ALQUILER,
+ * con una única distinción entre las dos categorías de ajuste que puede tener un mes:
  *
- *   - BONIFICACION → SÍ reduce la base de honorarios (se cobra sobre lo
+ *   - DESCUENTO → SÍ reduce la base de honorarios (se cobra sobre lo
  *     efectivamente cobrado).
- *   - DESCUENTO → NO reduce la base de honorarios (se cobra sobre el alquiler
- *     completo, como si el descuento no existiera). Única excepción: el
+ *   - BONIFICACION → NO reduce la base de honorarios (se cobra sobre el alquiler
+ *     completo, como si la bonificación no existiera). Única excepción: el
  *     descuento MANUAL cargado a mano en la UI (options.descuentosAlquiler)
  *     sigue restando siempre — es un ajuste aparte, no ligado a la categoría.
+ *
+ * La regla vive en UN solo lugar: las constantes CATEGORIA_QUE_RESTA_HONORARIOS /
+ * CATEGORIA_QUE_NO_RESTA_HONORARIOS al tope de reportDataService.js. Para volver
+ * a invertirla alcanza con darlas vuelta ahí (y actualizar estos tests).
  *
  * Bug corregido: el motor de pagos (paymentTransactionService.js) no distingue
  * DESCUENTO de BONIFICACION al armar el concepto ALQUILER de cada pago — ambas
@@ -21,8 +25,9 @@
  * hiciera ningún ajuste.
  *
  * Caso real reportado por el usuario ("Godoy"): alquiler $680.000, un servicio
- * de categoría DESCUENTO de $85.833 → paga $594.167 completo. Los honorarios
- * deben calcularse sobre los $680.000 completos (test 1).
+ * de categoría DESCUENTO de $85.833 → paga $594.167 completo. Con la regla
+ * invertida los honorarios ahora se calculan sobre los $594.167 efectivamente
+ * cobrados, no sobre los $680.000 (test 1).
  *
  * Estos son pure-function tests (sin DB), mismo patrón que reportTotals.test.js.
  * Run: cd inmobiliaria-app/backend && npm test
@@ -95,9 +100,9 @@ const makeAlquilerTx = (amount, extraConcepts = []) => ({
   concepts: [{ type: 'ALQUILER', amount }, ...extraConcepts],
 });
 
-describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22)', () => {
+describe('Honorarios: DESCUENTO resta la base, BONIFICACION no (regla 2026-08-17)', () => {
 
-  test('1. DESCUENTO puro, pago completo (caso real Godoy): base = alquiler BRUTO completo', async () => {
+  test('1. DESCUENTO puro, pago completo (caso real Godoy): base = alquiler NETO cobrado', async () => {
     const record = makeRecord({
       rentAmount: 680000,
       services: [makeAjusteService('DESCUENTO', 85833)],
@@ -112,11 +117,11 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
     assert.strictEqual(result.paymentStatus, 'PAGADO');
-    assert.strictEqual(result.subtotalAlquileresCobrado, 680000, 'DESCUENTO no debe restar: base = alquiler completo');
-    assert.strictEqual(result.honorariosCobrado, 68000, '10% de 680000');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 594167, 'DESCUENTO sí debe restar: base = alquiler neto');
+    assert.strictEqual(result.honorariosCobrado, 59416.7, '10% de 594167');
   });
 
-  test('2. BONIFICACION pura, pago completo: base = alquiler NETO (bonificación resta)', async () => {
+  test('2. BONIFICACION pura, pago completo: base = alquiler BRUTO (bonificación no resta)', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       services: [makeAjusteService('BONIFICACION', 10000)],
@@ -130,11 +135,11 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
 
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
-    assert.strictEqual(result.subtotalAlquileresCobrado, 90000, 'BONIFICACION sí debe restar: base = alquiler neto');
-    assert.strictEqual(result.honorariosCobrado, 9000, '10% de 90000');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 100000, 'BONIFICACION no debe restar: base = alquiler completo');
+    assert.strictEqual(result.honorariosCobrado, 10000, '10% de 100000');
   });
 
-  test('3. Mixto (DESCUENTO + BONIFICACION), pago completo: solo la bonificación reduce la base', async () => {
+  test('3. Mixto (DESCUENTO + BONIFICACION), pago completo: solo el descuento reduce la base', async () => {
     const record = makeRecord({
       rentAmount: 680000,
       services: [
@@ -151,7 +156,7 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
 
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
-    assert.strictEqual(result.subtotalAlquileresCobrado, 594167, '680000 - 85833 (descuento ignorado)');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 660000, '680000 - 20000 (bonificación ignorada)');
   });
 
   test('4. Sin descuentos ni bonificaciones (regresión): base = alquiler completo, sin cambios', async () => {
@@ -171,7 +176,7 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
     assert.strictEqual(result.honorariosCobrado, 10000);
   });
 
-  test('5. Pago PARCIAL, BONIFICACION pura: escala linealmente con el efectivo (ratio=1)', async () => {
+  test('5. Pago PARCIAL, BONIFICACION pura: el gross-up escala proporcionalmente (no de golpe)', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       services: [makeAjusteService('BONIFICACION', 10000)], // neto debido = 90000
@@ -186,10 +191,11 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
     assert.strictEqual(result.paymentStatus, 'PAGO PARCIAL');
-    assert.strictEqual(result.subtotalAlquileresCobrado, 45000, 'bonificación pura: 1:1 con el efectivo cobrado');
+    // 45000 pagado = 50% del neto (90000) → 50% del alquiler bruto (100000) = 50000
+    assert.strictEqual(result.subtotalAlquileresCobrado, 50000, 'bonificación pura: gross-up proporcional al % pagado');
   });
 
-  test('6. Pago PARCIAL, DESCUENTO puro: el gross-up escala proporcionalmente (no de golpe)', async () => {
+  test('6. Pago PARCIAL, DESCUENTO puro: escala linealmente con el efectivo (ratio=1)', async () => {
     const record = makeRecord({
       rentAmount: 100000,
       services: [makeAjusteService('DESCUENTO', 10000)], // neto debido = 90000
@@ -203,8 +209,7 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
 
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
-    // 45000 pagado = 50% del neto (90000) → 50% del alquiler bruto (100000) = 50000
-    assert.strictEqual(result.subtotalAlquileresCobrado, 50000, 'descuento puro: gross-up proporcional al % pagado');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 45000, 'descuento puro: 1:1 con el efectivo cobrado');
   });
 
   test('7. NO COBRADO (amountPaid=0) con bonificación: honorariosCobrado=0 pase lo que pase', async () => {
@@ -244,11 +249,12 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
       holidays: [],
     });
 
-    // subtotalAlquileresCobrado (display) NO se toca por el manual — sigue en 90000
-    assert.strictEqual(result.subtotalAlquileresCobrado, 90000);
-    // pero la BASE de honorarios sí resta el manual: 90000 - 5000 = 85000
-    assert.strictEqual(result.honorarios.baseHonorarios, 85000);
-    assert.strictEqual(result.honorariosCobrado, 8500, '10% de 85000');
+    // subtotalAlquileresCobrado (display) NO se toca por el manual — la bonificación
+    // no resta, así que queda en el alquiler bruto (100000).
+    assert.strictEqual(result.subtotalAlquileresCobrado, 100000);
+    // pero la BASE de honorarios sí resta el manual: 100000 - 5000 = 95000
+    assert.strictEqual(result.honorarios.baseHonorarios, 95000);
+    assert.strictEqual(result.honorariosCobrado, 9500, '10% de 95000');
   });
 
   test('9. Edge case: BONIFICACION cubre exactamente todo el alquiler (netRentDueReal=0) — sin NaN/negativos', async () => {
@@ -285,14 +291,16 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
 
     const result = await buildLiquidacionFromRecord(record, EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
 
-    assert.strictEqual(result.subtotalAlquileresCobrado, 680000, 'rama fallback debe dar el mismo resultado que la rama real (test 1)');
-    assert.strictEqual(result.honorariosCobrado, 68000);
+    assert.strictEqual(result.subtotalAlquileresCobrado, 594167, 'rama fallback debe dar el mismo resultado que la rama real (test 1)');
+    assert.strictEqual(result.honorariosCobrado, 59416.7);
   });
 
   test('11. computeGrandTotals: grandAlquilerCobrado y grandSubtotalAlquileres coinciden (unificación de totales)', async () => {
+    // Fixture con BONIFICACION (la categoría que NO resta) para que el gross-up sea
+    // visible: paidAlquiler crudo = 594167, pero ambos totales deben dar 680000.
     const record = makeRecord({
       rentAmount: 680000,
-      services: [makeAjusteService('DESCUENTO', 85833)],
+      services: [makeAjusteService('BONIFICACION', 85833)],
       amountPaid: 594167,
       balance: 0,
       status: 'COMPLETE',
@@ -306,7 +314,7 @@ describe('Honorarios: BONIFICACION resta la base, DESCUENTO no (regla 2026-07-22
 
     // Sin punitorios en este fixture, ambos totales deben coincidir exactamente.
     assert.strictEqual(grand.grandSubtotalAlquileres, 680000);
-    assert.strictEqual(grand.grandAlquilerCobrado, 680000, 'antes del fix, este total (paidAlquiler crudo) hubiera dado 594167');
+    assert.strictEqual(grand.grandAlquilerCobrado, 680000, 'con paidAlquiler crudo hubiera dado 594167');
     assert.strictEqual(grand.grandSubtotalAlquileres, grand.grandAlquilerCobrado, 'los dos totales de "alquiler cobrado" deben coincidir');
   });
 
