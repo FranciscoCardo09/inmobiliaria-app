@@ -48,6 +48,7 @@ import {
   BellIcon,
   PhoneIcon,
   ClipboardDocumentListIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 
 const monthNames = [
@@ -198,7 +199,7 @@ function LiquidacionTab({ groupId }) {
   const { properties } = useProperties(groupId, { isActive: true })
   const { owners } = useOwners(groupId)
   const { sendOwnerReport } = useNotifications(groupId)
-  const { data: allData, isLoading } = useLiquidacionAll(groupId, {
+  const { data: allData, isLoading, refetch, isFetching, dataUpdatedAt } = useLiquidacionAll(groupId, {
     month: String(month),
     year: String(year),
     contractIds: selectedContractIds.length > 0 ? selectedContractIds : undefined,
@@ -393,6 +394,25 @@ function LiquidacionTab({ groupId }) {
               min="0" max="100" step="0.5"
             />
           </div>
+        </div>
+        {/* Los números de este reporte se recalculan en el backend a partir de
+            servicios/pagos/deudas. Mostrar de cuándo son evita el malentendido
+            de mirar una respuesta cacheada creyendo que es el cálculo nuevo. */}
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs gap-1"
+            onClick={() => refetch()}
+            disabled={isFetching}
+          >
+            <ArrowPathIcon className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+          {dataUpdatedAt > 0 && (
+            <span className="text-xs text-base-content/60">
+              Datos al {new Date(dataUpdatedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           <div>

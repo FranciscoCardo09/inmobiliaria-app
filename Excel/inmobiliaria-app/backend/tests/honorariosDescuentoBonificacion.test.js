@@ -295,6 +295,80 @@ describe('Honorarios: DESCUENTO resta la base, BONIFICACION no (regla 2026-08-17
     assert.strictEqual(result.honorariosCobrado, 59416.7);
   });
 
+  /**
+   * Fixture EXACTO de producción — Godoy Fernando Alberto, Los Pinos 4031 Torre 2 1B,
+   * agosto 2026 (contrato 5025cf6b-2604-4d02-9196-6ec13f69645c). Los tests 1-11 usan
+   * un único concepto ALQUILER limpio; este mes real mezcla un ajuste negativo con
+   * impuestos positivos y DOS transacciones, que es donde el gross-up se puede romper
+   * sin que nadie lo note.
+   *
+   * Datos verificados contra la DB de prod el 2026-08-25:
+   *   rent_amount 680.000 · Cocina cuota 2 de 3 123.333 · Municipal 8.740 · DGR 28.757
+   *   services_total -85.836 · total_due 594.164 · amount_paid 594.164 · COMPLETE
+   *   transaction_concepts: ALQUILER 556.667 + ALQUILER 37.497  (sí, los impuestos
+   *   también salen etiquetados ALQUILER — ver el test 14).
+   */
+  const makeGodoyAgosto = (categoriaAjuste) => makeRecord({
+    monthNumber: 3,
+    rentAmount: 680000,
+    services: [
+      makeAjusteService(categoriaAjuste, 123333, 'svc-cocina'),
+      { id: 'svc-muni', amount: 8740, conceptType: { category: 'IMPUESTO', label: 'Impuesto Municipal', name: 'MUNICIPALIDAD' } },
+      { id: 'svc-dgr', amount: 28757, conceptType: { category: 'IMPUESTO', label: 'Impuesto Provincial DGR', name: 'RENTA' } },
+    ],
+    amountPaid: 594164,
+    balance: 0,
+    status: 'COMPLETE',
+    isPaid: true,
+    isCancelled: true,
+    transactions: [makeAlquilerTx(556667), makeAlquilerTx(37497)],
+  });
+
+  test('12. Caso real Godoy agosto 2026 con DESCUENTO: base = 680.000 - 123.333', async () => {
+    const result = await buildLiquidacionFromRecord(makeGodoyAgosto('DESCUENTO'), EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
+
+    assert.strictEqual(result.paymentStatus, 'PAGADO');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 556667, 'DESCUENTO resta: el tope neto (556.667) capa al paidAlquiler crudo (594.164)');
+    assert.strictEqual(result.honorariosCobrado, 55666.7, '10% de 556.667');
+  });
+
+  test('13. Caso real Godoy agosto 2026 con BONIFICACION: base = alquiler completo (680.000)', async () => {
+    const result = await buildLiquidacionFromRecord(makeGodoyAgosto('BONIFICACION'), EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
+
+    assert.strictEqual(result.paymentStatus, 'PAGADO');
+    assert.strictEqual(result.subtotalAlquileresCobrado, 680000, 'BONIFICACION no resta: gross-up hasta el alquiler completo');
+    assert.strictEqual(result.honorariosCobrado, 68000, '10% de 680.000');
+  });
+
+  test('14. Los mismos datos con las dos categorías NO pueden dar el mismo número', async () => {
+    // Regresión del reporte del usuario (2026-08-25): "tanto con descuento como con
+    // bonificación me lo descuenta". Contra estos mismos datos el backend siempre
+    // diferenció; lo que no se refrescaba era el reporte en pantalla (ver la
+    // invalidación de ['report'] en frontend/src/main.jsx). Este test deja clavada
+    // la diferencia acá, del lado del cálculo, para poder descartarlo de una.
+    const conDescuento = await buildLiquidacionFromRecord(makeGodoyAgosto('DESCUENTO'), EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
+    const conBonificacion = await buildLiquidacionFromRecord(makeGodoyAgosto('BONIFICACION'), EMPRESA, MONTH, YEAR, { honorariosPercent: 10, holidays: [] });
+
+    assert.notStrictEqual(conDescuento.subtotalAlquileresCobrado, conBonificacion.subtotalAlquileresCobrado);
+    assert.strictEqual(
+      conBonificacion.subtotalAlquileresCobrado - conDescuento.subtotalAlquileresCobrado,
+      123333,
+      'la diferencia entre ambas categorías es exactamente el monto del ajuste'
+    );
+
+    // CARACTERIZACIÓN de un bug conocido y NO arreglado (decisión del usuario,
+    // 2026-08-25): cuando el ajuste negativo supera a los servicios reales,
+    // record.servicesTotal queda negativo y paymentTransactionService clampea
+    // remainingServicesOwed a 0 → los $37.497 de impuestos nunca reciben su propio
+    // TransactionConcept y viajan dentro de ALQUILER. Por eso "Servicios cobrados"
+    // muestra $0 aunque el propietario sí los cobró.
+    // Si algún día se arregla la imputación, este assert va a fallar: es la señal
+    // para revisar también la base de honorarios en meses con PAGO PARCIAL, donde
+    // hoy se cobra de más (300.000 en vez de 262.503 sobre este mismo mes).
+    assert.strictEqual(conDescuento.paidServicios, 0, 'bug conocido: los impuestos vienen etiquetados como ALQUILER');
+    assert.strictEqual(conDescuento.paidAlquiler, 594164, 'paidAlquiler incluye los $37.497 de impuestos');
+  });
+
   test('11. computeGrandTotals: grandAlquilerCobrado y grandSubtotalAlquileres coinciden (unificación de totales)', async () => {
     // Fixture con BONIFICACION (la categoría que NO resta) para que el gross-up sea
     // visible: paidAlquiler crudo = 594167, pero ambos totales deben dar 680000.

@@ -66,6 +66,21 @@ if (config.nodeEnv === 'development') {
   });
 }
 
+// Momento de arranque del proceso: junto con el commit permite distinguir
+// "el fix no anda" de "el fix todavia no se deployo" sin adivinar.
+const STARTED_AT = new Date().toISOString();
+
+// Version desplegada. Publico a proposito: no expone datos, y es lo unico que
+// permite verificar desde afuera que commit esta vivo en Render (Render inyecta
+// RENDER_GIT_COMMIT / RENDER_GIT_BRANCH en el entorno del servicio).
+app.get('/api/version', (req, res) => {
+  res.json({
+    commit: process.env.RENDER_GIT_COMMIT || null,
+    branch: process.env.RENDER_GIT_BRANCH || null,
+    startedAt: STARTED_AT,
+  });
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({

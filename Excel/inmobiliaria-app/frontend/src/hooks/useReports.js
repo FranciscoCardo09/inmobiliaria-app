@@ -12,7 +12,10 @@ export const useLiquidacion = (groupId, { month, year, contractId } = {}) => {
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year && !!contractId,
-    staleTime: 10 * 60 * 1000,
+    // staleTime 0: la liquidación es un derivado de records/servicios/pagos y
+    // tiene que reflejar el estado actual, no una foto de hace 10 minutos.
+    // La invalidación global por mutación vive en main.jsx (mutationCache).
+    staleTime: 0,
   })
 
   return {
@@ -59,13 +62,21 @@ export const useLiquidacionAll = (groupId, { month, year, propertyIds, honorario
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
-    staleTime: 30 * 1000,
+    // Ver el comentario de useLiquidacion: sin staleTime 0, cambiar un servicio y
+    // volver al reporte dentro de la ventana servía el resultado cacheado y hacía
+    // parecer que el cálculo no había cambiado (caso Godoy 2026-08-25).
+    staleTime: 0,
   })
 
   return {
     data: query.data,
     isLoading: query.isLoading,
     error: query.error,
+    // Expuestos para que la pantalla pueda forzar el refresco y, sobre todo,
+    // mostrar DE CUÁNDO son los números que está viendo el usuario.
+    refetch: query.refetch,
+    isFetching: query.isFetching,
+    dataUpdatedAt: query.dataUpdatedAt,
   }
 }
 
