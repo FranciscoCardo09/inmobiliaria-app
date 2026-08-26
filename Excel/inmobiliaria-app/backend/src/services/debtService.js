@@ -133,14 +133,19 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
 
   if (!anchorIsPayment && monthlyRecord.status !== 'COMPLETE' && !monthlyRecord.punitoryForgiven) {
     try {
-      // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase): SOLO
-      // los pagos reales (amountPaid); el saldo a favor del mes anterior NUNCA reduce
-      // la base (se aplica al total al final). La bonificación (servicesTotal
-      // negativo) tampoco la reduce (clamp a >=0), mismo criterio que
-      // paymentTransactionService. En esta rama no hay transacciones, así que
+      // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase). La
+      // bonificación (servicesTotal negativo) no la reduce (clamp a >=0), mismo criterio
+      // que paymentTransactionService. En esta rama no hay transacciones, así que
       // amountPaid es 0 y la base queda en rent-only; el escenario "con pago parcial"
       // (base = saldo restante total, LOGICA.md §6) ya lo cubre calculateDebtPunitory
       // sobre el tramo vivo desde el ancla, sin duplicar.
+      //
+      // `appliedCredit` (2026-08-26, regla confirmada por el usuario): si el saldo a favor
+      // arrastrado cubre el alquiler, NO se devengan punitorios. Antes este cálculo NO
+      // pasaba el crédito y Control Mensual SÍ (`computeLiveRecordPunitory`), así que las
+      // dos capas discrepaban: la pantalla mostraba $0 de mora y "le sobran $5.000",
+      // mientras el cierre cobraba mora sobre el alquiler COMPLETO y armaba una deuda de
+      // $8.200 por punitorios sobre plata que el crédito ya había cubierto.
       const amountPaid = monthlyRecord.amountPaid || 0;
       const servicesTotal = monthlyRecord.servicesTotal || 0;
       const ivaAmount = monthlyRecord.ivaAmount || 0;
@@ -149,6 +154,7 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
         servicesTotal,
         ivaAmount,
         amountPaid,
+        appliedCredit: monthlyRecord.previousBalance || 0,
       });
 
       // Sin transacciones el tramo se cuenta desde el día 1 del período (mismo ancla que
@@ -1711,11 +1717,14 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
         const amountPaid = monthlyRecord.amountPaid || 0;
         const servicesTotal = monthlyRecord.servicesTotal || 0;
         const ivaAmount = monthlyRecord.ivaAmount || 0;
+        // `appliedCredit`: misma regla que en createDebtFromMonthlyRecord (2026-08-26) —
+        // si el saldo a favor arrastrado cubre el alquiler, no se devengan punitorios.
         const unpaidRentBase = computePunitoryBase({
           rentAmount: monthlyRecord.rentAmount,
           servicesTotal,
           ivaAmount,
           amountPaid,
+          appliedCredit: monthlyRecord.previousBalance || 0,
         });
         const lastPaymentDate = null; // sin transacciones: se cuenta desde el día 1 del período
         const calculationDate = getTodayLocalString();

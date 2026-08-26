@@ -455,6 +455,74 @@ function computeLiveRecordPunitory(record, contract, holidays, {
   return { amount, days, unpaidFrozenPunitory, newPunitory, graceDate, fromDate, toDate };
 }
 
+/**
+ * FUENTE ÚNICA del punitorio que entra en `totalDue` de un MonthlyRecord.
+ *
+ * Devuelve el punitorio **BRUTO** del período: el que ya se cobró MÁS el que sigue
+ * adeudado. Es la única escala en la que `totalDue` se puede comparar contra
+ * `amountPaid`, porque `amountPaid` es toda la plata que entró — incluida la parte
+ * imputada al concepto PUNITORIOS.
+ *
+ * El bug que esto cierra (2026-08-26): `totalDue` usaba sólo el punitorio ADEUDADO
+ * (`unpaidFrozen + nuevo`, o `debt.accumulatedPunitory` con el mes ya cerrado). Contra
+ * un `amountPaid` bruto, los punitorios ya cobrados contaban dos veces a favor del
+ * inquilino: `balance = 2 × cobrado − total + crédito`. Bastaba pagar más de la mitad
+ * de la mora para que cerrar el mes generara un saldo a favor fantasma y, a la vez, una
+ * deuda por el resto. El reverso también pasaba: si lo cobrado superaba lo adeudado, la
+ * primera pasada de `_recalculateCore` daba COMPLETE y la mora impaga se auto-condonaba.
+ *
+ * `punitoryOutsideConcepts` es, cuando el mes YA tiene una Deuda, la parte del punitorio
+ * del período que NO aparece en los conceptos PUNITORIOS: el impago en vivo MÁS el que
+ * quedó cubierto por el saldo a favor (`appliedCredit` no se imputa a un concepto, pero sí
+ * descuenta punitorios en `calculateDebtPunitory`). Lo arma el llamador, que es quien
+ * conoce la Deuda.
+ *
+ * No se usa `grossPunitoryToDate` de la Deuda: en una deuda recién creada
+ * `accumulatedPunitory` es el punitorio IMPAGO del record, así que ese "bruto" no incluye
+ * lo que el pago pre-cierre ya había cubierto. Y no se usa
+ * `computeLiveRecordPunitory(...).amount` como impago: su rama "base agotada" devuelve el
+ * CONGELADO, que sumado a los conceptos cobrados duplicaría.
+ *
+ * @param {object} record   MonthlyRecord con `transactions[].concepts[]` (ver computeLiveRecordPunitory)
+ * @param {object} contract Contrato con punitoryStartDay/punitoryGraceDay/punitoryPercent
+ * @param {Date[]} holidays Feriados del año del período
+ * @param {object} options
+ *   @param {number} [options.punitoryOutsideConcepts] Punitorio del período que no está en los conceptos (Deuda)
+ *   @param {string|Date} [options.calculationDate] Fecha de cálculo (default: hoy ART)
+ *   @param {Function} [options.sumPunitoryConceptsFn] Inyectable para tests / evitar require circular
+ * @returns {{ amount: number, paid: number, unpaid: number, newPunitory: number, days: number }}
+ */
+function computeGrossRecordPunitory(record, contract, holidays, {
+  punitoryOutsideConcepts,
+  isPostExpiry,
+  calculationDate,
+  sumPunitoryConceptsFn,
+} = {}) {
+  const sumPunitoryConcepts = sumPunitoryConceptsFn || require('../utils/helpers').sumPunitoryConcepts;
+
+  // Lo YA cobrado: suma de los conceptos PUNITORIOS de TODAS las transacciones del mes
+  // (incluidas las que crea `payDebt`, que también viven en el record).
+  const paid = sumPunitoryConcepts(record.transactions || []);
+
+  if (typeof punitoryOutsideConcepts === 'number') {
+    // Caso Deuda: lo que no está en los conceptos lo define la Deuda. El split "devengado
+    // en vivo vs congelado" lo reconstruye el llamador con los campos de
+    // `calculateDebtPunitory`.
+    const unpaid = round2(Math.max(punitoryOutsideConcepts, 0));
+    return { amount: round2(paid + unpaid), paid, unpaid, newPunitory: 0, days: record.punitoryDays || 0 };
+  }
+
+  const live = computeLiveRecordPunitory(record, contract, holidays, {
+    isFullyPaid: false,
+    isPostExpiry,
+    calculationDate,
+    sumPunitoryConceptsFn,
+  });
+  const newPunitory = live.newPunitory || 0;
+  const unpaid = round2((live.unpaidFrozenPunitory || 0) + newPunitory);
+  return { amount: round2(paid + unpaid), paid, unpaid, newPunitory, days: live.days };
+}
+
 // Keep legacy functions for backward compatibility
 function calculatePunitoryDays(paymentDate, punitoryStartDay) {
   const payDay = paymentDate.getDate();
@@ -497,6 +565,7 @@ module.exports = {
   calculatePunitoryV2,
   computePunitoryBase,
   computeLiveRecordPunitory,
+  computeGrossRecordPunitory,
   getEffectiveGraceDate,
   getHolidaysForYear,
   clearHolidayCache,

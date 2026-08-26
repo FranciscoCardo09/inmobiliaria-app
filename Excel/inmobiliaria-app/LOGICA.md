@@ -46,9 +46,19 @@ El alquiler de un mes **NO** sale de `contract.baseRent`. Sale del **historial d
   - `rentAmount` se refresca desde el historial (para TODOS los registros del período,
     incluso pagados — así una corrección de historial se propaga).
   - `previousBalance` (saldo a favor del mes anterior) se refresca solo si el mes no está
-    COMPLETO.
+    COMPLETO. **Ojo:** eso vale para el refresh del GET (`getOrCreateMonthlyRecords`). El
+    recálculo en cascada (`_recalculateCore`) NO tiene ese guard: reescribe el
+    `previousBalance` de todos los meses posteriores del contrato, incluidos los COMPLETOS.
   - Contratos **renovados/inactivos** quedan **congelados**: sus meses históricos no se recalculan.
-- `totalDue = alquiler + servicios + punitorios imputados + IVA − saldo a favor anterior`.
+- `totalDue = alquiler + servicios + punitorios BRUTOS + IVA − saldo a favor anterior`.
+  **Punitorios BRUTOS = los ya cobrados + los que siguen adeudados** (helper único
+  `computeGrossRecordPunitory`). Tiene que ser el bruto porque `balance = amountPaid − totalDue`
+  y `amountPaid` es toda la plata que entró, incluida la imputada al concepto PUNITORIOS.
+  Contar sólo los punitorios adeudados (como se hacía hasta el 2026-08-26) los cobraba dos
+  veces a favor del inquilino: `balance = 2 × cobrado − total + crédito`. Ver §6.
+- Un mes cuyos cargos quedan cubiertos ENTEROS por el saldo a favor arrastrado pasa a
+  COMPLETO aunque no haya entrado un peso nuevo (`amountPaid = 0`). Antes quedaba PENDING
+  para siempre y el cierre lo levantaba todos los meses.
 - El **recálculo en cascada**: cualquier cambio (pago, servicio) recalcula ese mes y todos
   los posteriores **del mismo año calendario**, arrastrando el saldo a favor.
   - **CORREGIDO:** solo se arrastra saldo **a favor** (positivo). Antes, un recálculo podía
@@ -106,7 +116,11 @@ Parámetros por contrato: `punitoryStartDay` (default 10), `punitoryGraceDay`, `
 3. **Base del cálculo:**
    - Sin ningún pago real: solo el **alquiler** (los servicios no generan punitorios en mes abierto).
    - Con pagos parciales: el **saldo restante** (alquiler + servicios + IVA − pagos reales).
-   - El **saldo a favor del mes anterior** NUNCA reduce la base: se descuenta del total al final.
+   - El **saldo a favor del mes anterior** entra como plata cobrada y **sí reduce la base**:
+     si el crédito arrastrado cubre el alquiler, no se devengan punitorios (regla confirmada
+     por el usuario el 2026-08-26). No activa la base ampliada (los servicios impagos siguen
+     sin generar mora si no hubo un pago real). El crédito se descuenta además del total al
+     final, pero eso no lo cuenta dos veces: la base y el total son cosas distintas.
    - Las bonificaciones/descuentos no reducen la base mientras el neto no esté cubierto.
 4. **Pagos múltiples (REGLA CONFIRMADA):** cada pago congela los punitorios cobrados hasta
    ahí; el siguiente tramo cuenta desde la **fecha del último pago hasta hoy, ambas fechas
@@ -164,9 +178,24 @@ siempre. La aritmética es consistente; para eliminar el saldo hay dos opciones:
 
 ## 6. Cierre mensual y deudas
 
-- `Cerrar mes` toma todos los registros PENDING/PARTIAL del período (excepto el mes
-  post-vencimiento) y crea una `Debt` por registro con lo impago + punitorios al cierre.
-- Si lo impago neto es ≤ $1 no crea deuda (tolerancia de redondeo).
+- `Cerrar mes` **decide por la plata, no por el status**. Antes filtraba por
+  `status IN (PENDING, PARTIAL)`, un campo derivado que puede quedar viejo (los recálculos
+  por servicios/IVA/condonación corren fire-and-forget). Ahora: primero salda los recálculos
+  pendientes (`processDirtyRecords`), después evalúa todos los registros del período y deja
+  que el monto decida. Se excluyen sólo por razones estructurales: mes post-vencimiento, mes
+  que ya tiene deuda, mes fuera del rango activo del contrato, y saldo condonado a mano
+  (`balanceForgiven > 0`).
+- Si lo impago neto del crédito es ≤ $1 no crea deuda (tolerancia de redondeo). Un mes
+  cancelado da 0 y no genera nada, sin depender del string de status.
+- Los punitorios del catch-up del cierre usan la MISMA base que Control Mensual, crédito
+  incluido (§4). Antes el cierre los cobraba sobre el alquiler completo aunque el crédito ya
+  lo cubriera, y armaba una deuda que la pantalla no mostraba.
+- El `balance` del mes y el total de su Deuda son el mismo número con signo opuesto:
+  **`record.balance == −(total EN VIVO de la Deuda)`**. Ese es el invariante a chequear si
+  alguna vez Control Mensual y Deudas vuelven a discrepar. Ojo con dos cosas al medirlo:
+  el `balance` persistido es un *snapshot* (se actualiza recién en el próximo recálculo,
+  no todos los días), y `debt.currentTotal` está *congelado* al cierre — hay que comparar
+  contra el total en vivo, calculado en el mismo instante.
 - La deuda guarda su propio `punitoryStartDate`, `appliedCredit` (saldo a favor aplicado al
   total) y `previousRecordPayment` (lo que se había pagado del mes antes del cierre).
 - Cuando la deuda se salda, el `MonthlyRecord` asociado pasa a COMPLETO.

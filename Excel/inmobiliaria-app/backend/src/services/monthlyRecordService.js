@@ -1,5 +1,5 @@
 // Monthly Record Service - Core auto-generation and control logic
-const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeLiveRecordPunitory, debtDelinquencyDays } = require('../utils/punitory');
+const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeGrossRecordPunitory, debtDelinquencyDays } = require('../utils/punitory');
 const { calculateDebtPunitory } = require('./debtService');
 const { calculateNextAdjustmentMonth } = require('./adjustmentService');
 const { MONTH_NAMES } = require('../utils/constants');
@@ -815,19 +815,32 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           includeIva: effectiveIva,
           previousBalance: latestPrevBalance,
         };
-        let livePunitory = openDebtForRefresh
-          ? (openDebtForRefresh.accumulatedPunitory || 0)
-          : computeLiveRecordPunitory(recordForLivePunitory, contract, holidays, { isFullyPaid: false }).amount;
-        let newTotalDue = round2(effectiveRent + record.servicesTotal + livePunitory + recordIva - latestPrevBalance);
-        let newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
-        if (!openDebtForRefresh && newBalance >= -0.01) {
-          // Segunda pasada con el punitorio ya COBRADO (suma de conceptos PUNITORIOS
-          // reales), igual que _recalculateCore: evita reintroducir un saldo a favor
-          // falso cuando los punitorios se pagaron en varias tandas.
-          livePunitory = computeLiveRecordPunitory(recordForLivePunitory, contract, holidays, { isFullyPaid: true }).amount;
-          newTotalDue = round2(effectiveRent + record.servicesTotal + livePunitory + recordIva - latestPrevBalance);
-          newBalance = round2(record.amountPaid - Math.max(newTotalDue, 0));
+        let punitoryOutsideConcepts;
+        if (openDebtForRefresh) {
+          try {
+            const livePun = await calculateDebtPunitory(openDebtForRefresh, getTodayLocalString(), debtPreloaded, true);
+            punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebtForRefresh, livePun);
+          } catch (e) {
+            console.error(`[monthlyRecords] punitorio en vivo de la deuda ${openDebtForRefresh.id} falló: ${e.message}`);
+            punitoryOutsideConcepts = openDebtForRefresh.accumulatedPunitory || 0;
+          }
         }
+        // Punitorio BRUTO (cobrado + adeudado), el mismo helper que `_recalculateCore` y
+        // el display: única escala comparable contra `amountPaid`. Ver el comentario largo
+        // en `_recalculateCore`.
+        const livePunitory = computeGrossRecordPunitory(
+          recordForLivePunitory, contract, holidays, { punitoryOutsideConcepts }
+        ).amount;
+        const grossCharges = round2(effectiveRent + record.servicesTotal + livePunitory + recordIva);
+        const newTotalDue = round2(grossCharges - latestPrevBalance);
+        // C-01: el balance se computa con `newTotalDue` SIN clampear, igual que
+        // `_recalculateCore`. Clampearlo acá (como antes) perdía el excedente del crédito
+        // cuando éste superaba los cargos del mes, y las dos rutas que escriben el mismo
+        // registro devolvían números distintos según cuál corriera última.
+        const newBalance = round2(record.amountPaid - newTotalDue);
+        const isForgivenRefresh = (record.balanceForgiven || 0) > 0;
+        const effBalanceRefresh = round2(newBalance + (record.balanceForgiven || 0));
+        const creditCoversCharges = latestPrevBalance > 0 && latestPrevBalance >= grossCharges - 1;
 
         const updateData = {
           previousBalance: latestPrevBalance,
@@ -850,7 +863,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           updateData.status = record.amountPaid > 0 ? 'PARTIAL' : 'PENDING';
           updateData.isCancelled = false;
           updateData.fullPaymentDate = null;
-        } else if (newBalance >= -0.01) {
+        } else if (effBalanceRefresh >= -1 && (record.amountPaid > 0 || isForgivenRefresh || creditCoversCharges)) {
+          // Mismo árbol que `computeTotals` en `_recalculateCore`, con la MISMA tolerancia
+          // ($1) y las mismas condiciones. Antes este bloque usaba $0,01 y no miraba
+          // `balanceForgiven` ni el crédito arrastrado: para un mismo registro las dos
+          // rutas podían decidir status distinto según cuál corriera última, y `closeMonth`
+          // decide justamente por ese status.
           updateData.isPaid = true;
           updateData.status = 'COMPLETE';
           updateData.isCancelled = true;
@@ -934,27 +952,44 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       };
     }
 
-    // FUENTE ÚNICA: punitorios en vivo del record (reemplaza el bloque inline de ~80 líneas).
-    // computeLiveRecordPunitory centraliza las reglas de: isFullyPaid, isPostExpiry,
-    // punitoryForgiven, unpaidFrozenPunitory, calculatePunitoryV2 y sumPunitoryConcepts.
-    const isFullyPaid = record.status === 'COMPLETE';
-    const livePunResult = computeLiveRecordPunitory(record, contract, holidays, {
-      isFullyPaid,
+    // FUENTE ÚNICA: punitorio BRUTO del período (cobrado + adeudado), el mismo helper que
+    // usan `_recalculateCore` y el refresh de más arriba. Así la columna TOTAL de la
+    // pantalla y el `totalDue` guardado en la base son el mismo número por construcción:
+    // antes el display ya usaba el bruto (caso Ponce) pero la persistencia usaba el neto
+    // impago, y era la persistencia la que viajaba como saldo a favor al mes siguiente.
+    const punitoryOutsideConceptsForDisplay = record.debt
+      ? _punitoryOutsideConcepts(
+        record.debt,
+        record.debt.status !== 'PAID'
+          ? { unpaidAccumulatedPunitory: debtInfo?.unpaidAccumulatedPunitory, amount: debtInfo?.liveAccumulatedPunitory }
+          : null
+      )
+      : undefined;
+    const livePunResult = computeGrossRecordPunitory(record, contract, holidays, {
+      punitoryOutsideConcepts: punitoryOutsideConceptsForDisplay,
       isPostExpiry,
       calculationDate: getTodayLocalString(),
     });
     let livePunitoryAmount = livePunResult.amount;
     let livePunitoryDays = livePunResult.days;
-    let punitoriosAnteriores = livePunResult.unpaidFrozenPunitory;
+    // Split para el desglose "Acumulados / Actuales" de la pantalla: "Actuales" es el tramo
+    // devengado en vivo, "Acumulados" es todo el resto (ya cobrado + congelado). Se
+    // mantiene la propiedad `anteriores + actuales === bruto`.
     let punitoriosActuales = livePunResult.newPunitory;
+    let punitoriosAnteriores = round2(livePunitoryAmount - punitoriosActuales);
 
     // Calculate IVA (21% of rent if includeIva is true)
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
 
-    // Live total = rent + services + live punitorios + IVA - a favor anterior
-    const liveTotalDue = Math.max(record.rentAmount + record.servicesTotal + livePunitoryAmount + ivaAmount - record.previousBalance, 0);
-    // Live balance = what was paid minus what is owed (with live punitorios)
-    const liveBalance = Math.round((record.amountPaid - liveTotalDue) * 100) / 100;
+    // Live total = rent + services + live punitorios + IVA - a favor anterior.
+    // Se muestra clampeado a 0 (no se puede "deber negativo")...
+    const liveTotalDueRaw = record.rentAmount + record.servicesTotal + livePunitoryAmount + ivaAmount - record.previousBalance;
+    const liveTotalDue = Math.max(liveTotalDueRaw, 0);
+    // ...pero el balance se calcula SIN clampear, igual que el `balance` persistido (C-01).
+    // Con el clamp, un mes cubierto de sobra por el crédito mostraba "A Favor Sig." = 0
+    // mientras la base arrastraba el excedente al mes siguiente: la pantalla contradecía al
+    // número que efectivamente viajaba.
+    const liveBalance = Math.round((record.amountPaid - liveTotalDueRaw) * 100) / 100;
 
     // TOTALES HISTÓRICOS: incluyen punitorios de la deuda (pagados + impagos)
     let totalPunitoriosHistoricos = livePunitoryAmount; // Punitorios del record
@@ -962,33 +997,25 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     let totalHistorico = liveTotalDue; // Total con punitorios del record + IVA
 
     if (debtInfo && record.debt) {
-      // Punitorios del periodo tomados de la DEUDA (fuente de verdad), SIN duplicar:
+      // `livePunitoryAmount` ya viene BRUTO del helper (conceptos PUNITORIOS cobrados en el
+      // record + impago en vivo de la Deuda), así que el total histórico es ese mismo
+      // número — el mismo que `_recalculateCore` persiste en `totalDue`. Acá sólo se
+      // reconstruye el split que muestra la pantalla.
+      //
+      // Antes esto usaba `grossPunitoryToDate` de la Deuda. Servía para el caso Ponce
+      // (2026-07-13), donde `payDebt` ya había reescrito `accumulatedPunitory` con el bruto
+      // a la fecha, pero NO para una deuda recién creada: ahí `accumulatedPunitory` es el
+      // punitorio IMPAGO del record, así que ese "bruto" no incluye lo que el pago
+      // pre-cierre ya había cubierto — y faltaba exactamente esa parte.
       if (record.debt.status === 'PAID') {
-        // Deuda saldada: los punitorios cargados (y pagados) = acumulado de la deuda.
-        punitoriosAnteriores = record.debt.accumulatedPunitory || 0;
+        // Deuda saldada: no queda tramo vivo, todo el bruto es "acumulado".
         punitoriosActuales = 0;
+        punitoriosAnteriores = livePunitoryAmount;
       } else {
-        // Deuda viva: punitorios TOTALES (pagados + impagos) = "anteriores" (congelado
-        // previo) + "actuales" (devengado desde entonces). `totalPunitoriosHistoricos`
-        // se compara más abajo contra `totalAbonado` (TODO lo pagado en efectivo), así
-        // que acá necesitamos el BRUTO total, no el neto impago.
-        //
-        // Bug (2026-07-13, caso Ponce Emilia Roxana, pago parcial que cubre alquiler+
-        // servicios pero deja punitorios sin pagar): NO usar directamente
-        // `unpaidAccumulatedPunitory`/`newPunitoryAmount` acá — en la rama "base
-        // agotada" de `calculateDebtPunitory` (remainingBase<=0) `unpaidAccumulatedPunitory`
-        // queda hardcodeado en 0 y `newPunitoryAmount` es solo el incremento del día (0
-        // si el pago fue hoy), perdiendo los punitorios ya pagados. `grossPunitoryToDate`
-        // (nuevo campo en `calculateDebtPunitory`) ya resuelve esto correctamente en
-        // TODAS las ramas (incluida la rama "nunca se pagó nada", caso Airaldi, donde
-        // NO hay que sumarle `accumulatedPunitory` aparte — `grossPunitoryToDate` ya lo
-        // contempla). Reconstruimos el split anteriores/actuales restando el incremento
-        // del día del bruto total — da 0 exactamente en el caso Airaldi (bruto ==
-        // incremento ahí), y el congelado correcto en los demás casos.
         punitoriosActuales = debtInfo.newPunitoryAmount || 0;
-        punitoriosAnteriores = round2((debtInfo.grossPunitoryToDate || 0) - punitoriosActuales);
+        punitoriosAnteriores = round2(livePunitoryAmount - punitoriosActuales);
       }
-      totalPunitoriosHistoricos = Math.round((punitoriosAnteriores + punitoriosActuales) * 100) / 100;
+      totalPunitoriosHistoricos = livePunitoryAmount;
 
       // Días de mora para mostrar en el frontend
       livePunitoryDays = debtInfo.livePunitoryDays || 0;
@@ -1147,6 +1174,35 @@ const recalculateMonthlyRecord = async (monthlyRecordId) => {
 const _floatsDiffer = (a, b) => Math.abs((a || 0) - (b || 0)) >= 0.01;
 
 /**
+ * Parte del punitorio del período que NO figura en los conceptos PUNITORIOS del record,
+ * cuando el mes tiene una Deuda asociada. Es el segundo término de
+ * `computeGrossRecordPunitory` (utils/punitory.js) y se compone de:
+ *
+ *  - el punitorio IMPAGO en vivo de la Deuda (`unpaidAccumulatedPunitory + amount`, que es
+ *    el impago en las dos ramas de `calculateDebtPunitory`), y
+ *  - el punitorio que quedó cubierto por el SALDO A FAVOR. `payDebt` imputa el
+ *    `appliedCredit` antes que el efectivo y sólo el efectivo genera concepto PUNITORIOS,
+ *    así que esa porción no está en los conceptos; `calculateDebtPunitory` sí la descuenta
+ *    del impago (vía `paidToPunitory`, que suma efectivo + crédito). Sin sumarla acá el
+ *    crédito se restaría dos veces —una en `previousBalance` y otra en el punitorio— y
+ *    volvería a aparecer un saldo a favor fantasma.
+ *
+ * @param {object} debt     Fila de Debt (unpaidRentAmount, unpaidServicesAmount, appliedCredit, accumulatedPunitory)
+ * @param {object|null} livePun Resultado de `calculateDebtPunitory` (null si la deuda está PAID)
+ */
+const _punitoryOutsideConcepts = (debt, livePun) => {
+  const base = round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
+  const creditOnPunitory = round2(Math.min(
+    Math.max((debt.appliedCredit || 0) - base, 0),
+    debt.accumulatedPunitory || 0
+  ));
+  const liveUnpaid = livePun
+    ? round2((livePun.unpaidAccumulatedPunitory || 0) + (livePun.amount || 0))
+    : 0;
+  return round2(liveUnpaid + creditOnPunitory);
+};
+
+/**
  * Core cascading recalculation logic (must run inside a valid transaction)
  */
 const _recalculateCore = async (recordIds, tx) => {
@@ -1283,7 +1339,13 @@ const _recalculateCore = async (recordIds, tx) => {
     const isForgiven = (record.balanceForgiven || 0) > 0;
 
     const computeTotals = (punitoryForTotalDue) => {
-      const td = record.rentAmount + servicesTotal + punitoryForTotalDue + ivaAmount - activePreviousBalance;
+      const grossCharges = record.rentAmount + servicesTotal + punitoryForTotalDue + ivaAmount;
+      // Un mes cuyos cargos quedaron cubiertos ENTEROS por el saldo a favor arrastrado
+      // está saldado, aunque no haya entrado un peso nuevo (`amountPaid === 0`). Antes
+      // exigía `amountPaid > 0 || isForgiven` y esos meses quedaban PENDING para siempre:
+      // se mostraban como impagos y `closeMonth` los volvía a levantar todos los meses.
+      const creditCoversCharges = activePreviousBalance > 0 && activePreviousBalance >= grossCharges - 1;
+      const td = grossCharges - activePreviousBalance;
       // C-01: el balance se computa con `td` SIN clampear. Si el crédito arrastrado
       // (activePreviousBalance) supera los cargos brutos del mes, `td` da negativo — y
       // restarlo (sin clamp) es lo que hace sobrevivir el excedente como balance
@@ -1296,7 +1358,7 @@ const _recalculateCore = async (recordIds, tx) => {
       let st = 'PENDING';
       if (openDebt) {
         st = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
-      } else if (effBal >= -1 && (amountPaid > 0 || isForgiven)) {
+      } else if (effBal >= -1 && (amountPaid > 0 || isForgiven || creditCoversCharges)) {
         st = 'COMPLETE';
       } else if (amountPaid > 0) {
         st = 'PARTIAL';
@@ -1304,33 +1366,28 @@ const _recalculateCore = async (recordIds, tx) => {
       return { totalDue: td, balance: bal, effectiveBalance: effBal, status: st };
     };
 
-    // C-02: el punitorio que cuenta en `totalDue` es el VIVO (calculado, se haya
-    // cobrado o no) — así una mora nunca cobrada sigue marcando el mes PARTIAL en vez
-    // de auto-condonarse (antes se usaba solo la suma de conceptos PUNITORIOS ya
-    // pagados, que da $0 si el pago no alcanzó para cubrirlos). Si esa primera pasada
-    // YA da COMPLETE, se recalcula una segunda vez con el punitorio CONGELADO a lo
-    // efectivamente cobrado — evita reintroducir el saldo a favor falso de pagos de
-    // punitorios en varias tandas (memoria punitory-totaldue-concept-rule).
+    // El punitorio que entra en `totalDue` es el BRUTO del período: lo ya COBRADO más lo
+    // que sigue ADEUDADO (`computeGrossRecordPunitory`, utils/punitory.js). Es la única
+    // escala comparable contra `amountPaid`, que es toda la plata que entró — incluida la
+    // imputada al concepto PUNITORIOS.
     //
-    // Cuando el mes tiene una Deuda abierta/parcial asociada, el punitorio de `totalDue`
-    // tiene que venir del `accumulatedPunitory` CONGELADO de la Deuda (fuente única de
-    // verdad, actualizado por `payDebt` en cada pago — el mismo valor con el que la Deuda
-    // calcula su propio `currentTotal`), NO recomputarse acá de forma independiente. Bug
-    // (2026-07-13, caso Ponce Emilia Roxana / Los Pinos 4171 PB D, Mayo 2026): un pago de
-    // deuda PARCIAL que alcanza para cubrir alquiler+servicios pero no todos los
-    // punitorios hace que `computePunitoryBase` dé 0 y `computeLiveRecordPunitory` caiga
-    // en su rama "base agotada", que devuelve el punitorio CONGELADO del propio `record`
-    // — $0 para un mes recién cerrado que nunca tuvo una transacción antes de la deuda.
-    // Eso pierde los punitorios reales ya pagados/adeudados e infla `balance` como saldo
-    // a favor falso (por el monto exacto de los punitorios pagados), que además se
-    // arrastra como `previousBalance` al mes siguiente mientras la Deuda sigue
-    // reclamando el resto. Como un mes con Deuda abierta nunca llega a `COMPLETE` (ver
-    // `computeTotals` arriba), la rama de `sumPunitoryConcepts` tampoco llega a
-    // corregirlo. (No se usa el punitorio EN VIVO de `calculateDebtPunitory` acá: ese
-    // devuelve el remanente NETO impago en la rama "base agotada", no el bruto — sumarlo
-    // al bruto pagado duplicaría/reduciría mal el total. `accumulatedPunitory` es el
-    // mismo bruto congelado que ya usa `debt.currentTotal`, así que Control Mensual y
-    // Deudas quedan consistentes en el mismo instante congelado.)
+    // Antes había dos pasadas: la primera con el punitorio ADEUDADO y, si eso ya daba
+    // COMPLETE, una segunda con `sumPunitoryConcepts` (lo cobrado). Ese parche tapaba el
+    // problema sólo cuando el mes cerraba justo, y estaba explícitamente APAGADO cuando
+    // había una Deuda abierta — que es justo cuando importa. Con `totalDue` en escala
+    // neta y `amountPaid` en escala bruta, los punitorios ya cobrados contaban dos veces
+    // a favor del inquilino (`balance = 2 × cobrado − total + crédito`):
+    //   - Bastaba pagar más de la MITAD de la mora para que cerrar el mes generara un
+    //     saldo a favor fantasma y, al mismo tiempo, una Deuda por el resto (reproducido
+    //     2026-08-26: el balance saltaba de −153,50 a +100 sólo por cerrar).
+    //   - Y al revés: si lo cobrado superaba lo adeudado, la primera pasada daba COMPLETE
+    //     y la mora impaga se auto-condonaba en silencio (el mes quedaba "CANCELÓ SÍ"
+    //     debiendo punitorios, y `closeMonth` ni lo miraba).
+    //
+    // La capa de display ya usaba el bruto desde el caso Ponce (2026-07-13, ver
+    // `totalPunitoriosHistoricos` más abajo) con este mismo razonamiento; el arreglo nunca
+    // había llegado a las dos rutas que PERSISTEN `totalDue`/`balance` — ésta y el refresh
+    // de `getOrCreateMonthlyRecords`. Ahora las tres consumen el mismo helper.
     const holidaysForRecord = holidaysByYear.get(record.periodYear) || [];
 
     // Bug (2026-07-30, caso Biassi Gonzalo Amir, julio 2026): este loop recomputa
@@ -1355,17 +1412,32 @@ const _recalculateCore = async (recordIds, tx) => {
       previousBalance: activePreviousBalance, // el rolling, no el persistido
     };
 
-    let totalPunitory;
+    // Con Deuda asociada, el punitorio IMPAGO lo define la Deuda (fuente única, la misma
+    // que alimenta su `currentTotal` y el badge DEUDA del Control Mensual). Se usa el
+    // impago EN VIVO (`unpaidAccumulatedPunitory + amount`, que es el impago en las dos
+    // ramas de `calculateDebtPunitory`) y NO `accumulatedPunitory` crudo: en una deuda
+    // recién creada ese campo es el impago del record, pero después de `payDebt` pasa a
+    // ser el bruto a la fecha — semánticas distintas que no se pueden sumar a mano sin
+    // duplicar los punitorios cobrados vía deuda.
+    let punitoryOutsideConcepts;
     if (openDebt) {
-      totalPunitory = openDebt.accumulatedPunitory || 0;
-    } else {
-      totalPunitory = computeLiveRecordPunitory(recordForLivePunitory, record.contract, holidaysForRecord, { isFullyPaid: false }).amount;
+      try {
+        const livePun = await calculateDebtPunitory(openDebt, getTodayLocalString(), null, /* skipUpdate */ true);
+        punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun);
+      } catch (e) {
+        // Sin el cálculo en vivo, el congelado de la Deuda es la mejor aproximación al
+        // impago (es lo que usaba esta función antes del fix).
+        console.error(`[recalc] punitorio en vivo de la deuda ${openDebt.id} falló: ${e.message}`);
+        punitoryOutsideConcepts = openDebt.accumulatedPunitory || 0;
+      }
     }
-    let totals = computeTotals(totalPunitory);
-    if (!openDebt && totals.status === 'COMPLETE') {
-      totalPunitory = computeLiveRecordPunitory(recordForLivePunitory, record.contract, holidaysForRecord, { isFullyPaid: true }).amount;
-      totals = computeTotals(totalPunitory);
-    }
+    const totalPunitory = computeGrossRecordPunitory(
+      recordForLivePunitory,
+      record.contract,
+      holidaysForRecord,
+      { punitoryOutsideConcepts }
+    ).amount;
+    const totals = computeTotals(totalPunitory);
     const { totalDue, balance, effectiveBalance, status } = totals;
 
     // Update tracking variables for the next iteration.

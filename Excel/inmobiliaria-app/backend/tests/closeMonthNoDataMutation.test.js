@@ -46,22 +46,29 @@ function buildEnv() {
   }
 
   const created = [];
+  // `calculateImputation` es una función pura: se usa la REAL para que el stub reaccione al
+  // registro. Antes devolvía `totalUnpaid: 250000` fijo, ignorando el record — inofensivo
+  // mientras `closeMonth` filtraba por `status`, pero ahora que evalúa todos los candidatos
+  // y decide por la plata, ese stub le inventaba una deuda al mes que ya estaba pagado.
+  const { calculateImputation } = require('../src/services/debtService');
   const debtServiceStub = {
+    calculateImputation,
+    // Mismo contrato que el real: si no queda nada impago (neto del crédito, con la
+    // tolerancia de $1), no se crea deuda y devuelve null.
     createDebtFromMonthlyRecord: async (record) => {
+      const { totalUnpaid } = calculateImputation(record);
+      const appliedCredit = Math.min(Math.max(record.previousBalance || 0, 0), totalUnpaid);
+      if (totalUnpaid - appliedCredit <= 1) return null;
       const debt = { id: `debt-${record.id}`, monthlyRecordId: record.id };
       created.push(debt);
       return debt;
     },
-    calculateImputation: () => ({
-      unpaidRent: 250000, unpaidPunitory: 0, totalOriginal: 250000, totalUnpaid: 250000,
-      servicesCovered: 0, rentCovered: 0, punitoryCovered: 0,
-    }),
   };
 
   const svc = proxyquire('../src/services/monthlyCloseService', {
     '../lib/prisma': prisma,
     './debtService': debtServiceStub,
-    './monthlyRecordService': { isContractInRangeForMonth },
+    './monthlyRecordService': { isContractInRangeForMonth, processDirtyRecords: async () => 0 },
   });
 
   return { prisma, svc, writes, created };

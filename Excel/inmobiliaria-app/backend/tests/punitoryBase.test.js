@@ -388,15 +388,27 @@ test('A-04 (refresh del GET, integración): usa el punitorio VIVO cuando prevBal
     },
   });
 
-  // Punitorio vivo esperado = misma función real que usa el refresh del GET, con el
-  // mismo record/contrato/holidays ([]) y opciones (isFullyPaid:false).
-  const expectedLivePunitory = realPunitory.computeLiveRecordPunitory(
+  // Punitorio esperado = MISMA función real que usa el refresh del GET
+  // (`computeGrossRecordPunitory`, el bruto cobrado + adeudado), con el mismo
+  // record/contrato/holidays ([]).
+  //
+  // Dos correcciones al assert original (2026-08-26), las dos por copiar mal la llamada de
+  // producción, no por un cambio de comportamiento:
+  //  1. Faltaba `previousBalance`. El refresh arma `recordForLivePunitory` con el
+  //     `latestPrevBalance` fresco ($50.000) y `computePunitoryBase` lo cuenta como plata
+  //     cobrada (caso Biassi, commit b1cc2e4). Sin pasarlo, la base esperada quedaba
+  //     $50.000 más alta y el test fallaba por 50.000 × 0,6% × días — creciendo cada día
+  //     que pasaba (venía fallando en silencio desde el 30/07).
+  //  2. Usaba `computeLiveRecordPunitory` (sólo lo ADEUDADO). El refresh ahora usa el
+  //     BRUTO, que además suma los conceptos PUNITORIOS ya cobrados.
+  const expectedLivePunitory = realPunitory.computeGrossRecordPunitory(
     { rentAmount: 100000, servicesTotal: 30000, amountPaid: 20000, includeIva: true,
+      previousBalance: 50000,
       punitoryAmount: FROZEN_PUNITORY, punitoryForgiven: false, isPostExpiry: false,
       periodMonth: 8, periodYear: 2026, transactions: TRANSACTIONS },
     CONTRACT,
     [],
-    { isFullyPaid: false }
+    {}
   ).amount;
 
   await monthlyRecordService.getOrCreateMonthlyRecords('g1', 8, 2026);

@@ -29,7 +29,7 @@ function buildEnv() {
   const svc = proxyquire('../src/services/monthlyCloseService', {
     '../lib/prisma': prisma,
     './debtService': debtServiceStub,
-    './monthlyRecordService': { isContractInRangeForMonth },
+    './monthlyRecordService': { isContractInRangeForMonth, processDirtyRecords: async () => 0 },
   });
   return { prisma, svc };
 }
