@@ -208,4 +208,45 @@ test('ancla guardada como medianoche UTC del día 1 sigue conservando el catch-u
   );
 });
 
+test('anular el 3er pago restaura el punitorio BRUTO, no el adeudado (no se pierde lo ya cobrado)', async () => {
+  // `DebtPayment.punitoryAtPayment` guarda el punitorio ADEUDADO al momento del pago
+  // (`totalPunitoryOwed`), mientras que `debt.accumulatedPunitory` guarda el BRUTO
+  // (`grossPunitoryToDate`). Coinciden hasta que un pago empieza a imputar plata a
+  // punitorios; desde ahí difieren en lo ya cobrado. Restaurar el adeudado dejaba la deuda
+  // por DEBAJO de lo real (mismo patrón que el caso Ponce).
+  const prisma = makeFakePrisma();
+  const debtService = buildService(prisma);
+  const record = buildRecord();
+  await seedRecord(prisma, record);
+  await prisma.contract.create({ data: { ...CONTRACT } });
+
+  const debt = await debtService.createDebtFromMonthlyRecord(record, CONTRACT);
+  // El 1er pago ($470.000) supera la base ($445.450,04): a partir de ahí hay plata
+  // imputada a punitorios y bruto ≠ adeudado.
+  await debtService.payDebt(debt.id, 470000, '2026-08-05', 'EFECTIVO');
+  await debtService.payDebt(debt.id, 10000, '2026-08-10', 'EFECTIVO');
+  const trasPago2 = await prisma.debt.findUnique({ where: { id: debt.id } });
+  const brutoTrasPago2 = trasPago2.accumulatedPunitory;
+
+  await debtService.payDebt(debt.id, 10000, '2026-08-15', 'EFECTIVO');
+  const pays = await prisma.debtPayment.findMany({ where: { debtId: debt.id }, orderBy: { createdAt: 'asc' } });
+  assert.strictEqual(pays.length, 3);
+  assert.notStrictEqual(
+    round2(pays[1].punitoryAtPayment), round2(brutoTrasPago2),
+    'precondición: en este escenario el adeudado y el bruto YA difieren'
+  );
+  await prisma.debt.update({ where: { id: debt.id }, data: { payments: pays } });
+
+  const { debt: cancelled } = await debtService.cancelDebtPayment(debt.id, pays[2].id);
+
+  assert.strictEqual(
+    round2(cancelled.accumulatedPunitory), round2(brutoTrasPago2),
+    'vuelve exactamente al bruto que tenía tras el 2do pago; antes del fix restauraba el adeudado y perdía lo ya cobrado'
+  );
+  assert.strictEqual(
+    new Date(cancelled.lastPaymentDate).getTime(), new Date(pays[1].paymentDate).getTime(),
+    'el ancla vuelve a la fecha del 2do pago'
+  );
+});
+
 const { round2 } = realPunitory;

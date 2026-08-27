@@ -444,7 +444,12 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
 
   if (remainingBase <= 0) {
     // Todo el alquiler+servicios pagado; pueden quedar punitorios acumulados impagos.
-    const lastPaymentDate = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : new Date(debt.punitoryStartDate);
+    // Mismo clamp del ancla que la rama de abajo: el tramo vivo nunca arranca antes de
+    // `punitoryStartDate` (un pago fechado hacia atrás no puede re-devengar lo que
+    // `accumulatedPunitory` ya cubre).
+    const anchorStart = new Date(debt.punitoryStartDate);
+    const rawLastPayment = debt.lastPaymentDate ? new Date(debt.lastPaymentDate) : anchorStart;
+    const lastPaymentDate = rawLastPayment.getTime() < anchorStart.getTime() ? anchorStart : rawLastPayment;
 
     // Los punitorios nuevos se calculan SOBRE EL SALDO PENDIENTE REAL = punitorio impago
     // (acumulado − lo ya pagado a punitorios), NO sobre el acumulado total. Usar el total
@@ -508,6 +513,19 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
     effectiveLastPaymentDate = punitoryStartDate.getTime() !== firstOfMonth.getTime()
       ? punitoryStartDate
       : null;
+  }
+
+  // CLAMP DEL ANCLA (2026-08-26): el tramo vivo tiene que arrancar donde TERMINA
+  // `accumulatedPunitory`, y ése nunca es antes de `punitoryStartDate`. Nada valida la
+  // fecha de un pago de deuda (`payDebtHandler` acepta cualquier `paymentDate`), así que
+  // un pago fechado ANTES del ancla movía `lastPaymentDate` hacia atrás: el tramo entre la
+  // fecha vieja y la nueva quedaba cubierto por `accumulatedPunitory` Y se volvía a devengar
+  // en vivo. Verificado: sobre la deuda de julio de Brunello, un pago de $1 fechado el 10/07
+  // (ancla 23/07) inflaba el punitorio de $117.200,72 a $153.470,48. En producción ya existe
+  // un caso con esta forma (Etica S.A, Mayo 2026: pago 09/05 con ancla 14/05), inofensivo
+  // sólo porque la deuda terminó saldada.
+  if (effectiveLastPaymentDate && effectiveLastPaymentDate.getTime() < punitoryStartDate.getTime()) {
+    effectiveLastPaymentDate = punitoryStartDate;
   }
 
   // Punitorios históricos impagos que no están cubiertos por el cálculo live.
@@ -1427,7 +1445,23 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
   let newAccumulatedPunitory;
   if (debt.payments.length > 1) {
     const previousPayment = debt.payments[debt.payments.length - 2];
-    newAccumulatedPunitory = previousPayment.punitoryAtPayment || 0;
+    // `punitoryAtPayment` guarda el punitorio ADEUDADO al momento de ese pago
+    // (`totalPunitoryOwed` en payDebt), mientras que `accumulatedPunitory` guarda el BRUTO
+    // (`grossPunitoryToDate`). Coinciden sólo mientras ningún pago haya llegado a imputar
+    // plata a punitorios; a partir de ahí difieren en exactamente lo ya cobrado de
+    // punitorios, y restaurar el adeudado dejaba la deuda POR DEBAJO de lo real (mismo
+    // patrón que el caso Ponce: punitorio ya cobrado que desaparece del "Total").
+    // Verificado: 3 pagos sobre la deuda de julio de Brunello, anular el tercero dejaba
+    // $35.286,86 donde iban $59.836,82 — $24.549,96 perdidos.
+    // Bruto al pago previo = adeudado en ese momento + lo que los pagos ANTERIORES a él ya
+    // habían imputado a punitorios (todo lo que excede la base, misma fórmula que
+    // `paidToPunitory` en calculateDebtPunitory).
+    const totalBaseForRestore = round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
+    const paidBeforePrevious = round2(newAmountPaid - (previousPayment.amount || 0));
+    const paidToPunitoryBeforePrevious = round2(
+      Math.max(paidBeforePrevious + (debt.appliedCredit || 0) - totalBaseForRestore, 0)
+    );
+    newAccumulatedPunitory = round2((previousPayment.punitoryAtPayment || 0) + paidToPunitoryBeforePrevious);
   } else {
     // Bug real (2026-07-16, "pago completo, borro el pago, queda como saldada"): no
     // hay pago previo al que volver, pero NO se puede poner 0 acá — eso borra el
