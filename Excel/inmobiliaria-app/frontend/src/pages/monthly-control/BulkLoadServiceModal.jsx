@@ -3,6 +3,7 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { usePropertyGroups } from '../../hooks/usePropertyGroups'
+import { invalidateMoneyQueries } from '../../utils/invalidateMoneyQueries'
 import {
   XMarkIcon,
   TrashIcon,
@@ -152,8 +153,7 @@ export default function BulkLoadServiceModal({ groupId, records, periodMonth, pe
       return res.data
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
-      queryClient.invalidateQueries({ queryKey: ['monthlyServices'] })
+      invalidateMoneyQueries(queryClient, groupId)
       const assigned = data?.data?.totalAssigned ?? totalCombinations
       toast.success(`Se cargaron ${assigned} servicios correctamente`)
       onClose()

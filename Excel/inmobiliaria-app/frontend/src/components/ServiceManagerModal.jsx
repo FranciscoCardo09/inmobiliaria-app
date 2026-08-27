@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useMonthlyServices } from '../hooks/useMonthlyServices'
 import { useConceptTypes } from '../hooks/usePayments'
 import { useServiceCategories } from '../hooks/useServiceCategories'
+import { serviceSignedAmount } from '../utils/serviceLabel'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import {
@@ -92,10 +93,7 @@ export default function ServiceManagerModal({ record, groupId, onClose }) {
     setEditAmount('')
   }
 
-  const total = services.reduce((sum, s) => {
-    const isDiscount = s.conceptType?.category === 'DESCUENTO' || s.conceptType?.category === 'BONIFICACION'
-    return sum + (isDiscount ? -Math.abs(s.amount) : s.amount)
-  }, 0)
+  const total = services.reduce((sum, s) => sum + serviceSignedAmount(s), 0)
 
   return (
     <Modal
@@ -181,7 +179,7 @@ export default function ServiceManagerModal({ record, groupId, onClose }) {
                             setEditAmount(s.amount.toString())
                           }}
                         >
-                          {formatCurrency(s.amount)}
+                          {formatCurrency(serviceSignedAmount(s))}
                         </span>
                         <button
                           className="btn btn-xs btn-ghost text-error"

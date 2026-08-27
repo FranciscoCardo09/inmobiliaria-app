@@ -640,10 +640,14 @@ describe('propagateServiceForward - no toca meses con pago registrado', () => {
         },
       },
     };
-    // syncDebtServicesFromRecord (propagación a Deudas existentes, 2026-07-16)
-    // no es lo que este test verifica — se mockea como no-op para no pegarle a
-    // la DB real con los IDs sintéticos de este fixture.
-    const mockDebtService = { syncDebtServicesFromRecord: async () => {} };
+    // La propagación a Deudas existentes (2026-07-16) no es lo que este test verifica —
+    // se mockea como no-op para no pegarle a la DB real con los IDs sintéticos de este
+    // fixture. `getDebtSyncSnapshot` devolviendo null significa "el mes no tiene deuda",
+    // así que `settleRecordsWithDebt` hace una sola pasada de recálculo y no sincroniza.
+    const mockDebtService = {
+      getDebtSyncSnapshot: async () => null,
+      syncDebtServicesFromRecord: async () => {},
+    };
 
     const service = proxyquire('../src/services/monthlyServiceService', {
       '../lib/prisma': mockPrisma,

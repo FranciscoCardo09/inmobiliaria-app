@@ -1,7 +1,58 @@
 // Monthly Service Service - Manage services/extras for monthly records
-const { recalculateMonthlyRecord, recalculateMultipleRecords } = require('./monthlyRecordService');
+const { recalculateMultipleRecords } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
+
+// Campos de la deuda que una mutación de servicios puede mover. Se comparan antes/después
+// del sync para saber si hace falta la segunda pasada de recálculo (ver settleRecordsWithDebt).
+// El `select` que los trae vive en `debtService.getDebtSyncSnapshot`.
+const DEBT_SETTLE_KEYS = ['unpaidRentAmount', 'unpaidServicesAmount', 'currentTotal', 'status'];
+
+/**
+ * Liquidar los registros afectados por una mutación de servicios: dejar el mes con sus
+ * totales frescos, propagar el cambio a la deuda del mes (si la tiene) y —sólo si la deuda
+ * cambió— recalcular una segunda vez.
+ *
+ * Por qué las tres pasadas y en ESE orden (bug reportado 2026-08-27, caso Ciuro):
+ *
+ *  1. `syncDebtServicesFromRecord` lee `punitoryAmount` y `previousBalance` del
+ *     MonthlyRecord, columnas que sólo escribe `_recalculateCore`. Si se sincroniza la deuda
+ *     antes de recalcular, se la alimenta con valores viejos.
+ *  2. El recálculo tiene que ser INLINE. El modo por defecto sólo marca
+ *     `needsRecalculation` y agenda `processDirtyRecords` con `setImmediate`, así que el
+ *     endpoint respondía 200/201 con `servicesTotal`/`totalDue`/`balance` todavía viejos y el
+ *     modal de pago —que arma el total con esas columnas— mostraba el número anterior.
+ *     Ojo: `await processDirtyRecords()` NO alcanza como mitigación, porque tiene un guard
+ *     global `isProcessingDirtyRecords` y si el worker ya está corriendo retorna sin hacer
+ *     nada. Los caminos de dinero (`paymentTransactionService`, `debtService`) ya usan inline
+ *     por este mismo motivo.
+ *  3. El `totalDue` y el `status` de un mes CERRADO son función de su fila `Debt`:
+ *     `_recalculateCore` la lee para decidir el status y para derivar el punitorio del mes
+ *     vía `calculateDebtPunitory`. Si el sync la movió, el mes quedó calculado contra la
+ *     deuda vieja y necesita una segunda pasada. Condicional, así que un mes abierto (sin
+ *     deuda) sigue costando un solo recálculo.
+ *
+ * Los recálculos que los caminos masivos hacen DENTRO de su transacción se dejan como
+ * están: marcan `needsRecalculation` y quedan como red de seguridad si el proceso muere
+ * entre el commit y esta liquidación (el barrido de arranque los levanta).
+ */
+const settleRecordsWithDebt = async (recordIds) => {
+  const ids = [...new Set(recordIds || [])].filter(Boolean);
+  if (ids.length === 0) return;
+
+  await recalculateMultipleRecords(ids, null, true);
+
+  const { getDebtSyncSnapshot, syncDebtServicesFromRecord } = require('./debtService');
+  const needSecondPass = [];
+  for (const id of ids) {
+    const before = await getDebtSyncSnapshot(id);
+    if (!before) continue; // mes sin deuda: nada que propagar, una sola pasada
+    const after = await syncDebtServicesFromRecord(id);
+    if (!after || DEBT_SETTLE_KEYS.some((k) => before[k] !== after[k])) needSecondPass.push(id);
+  }
+
+  if (needSecondPass.length > 0) await recalculateMultipleRecords(needSecondPass, null, true);
+};
 
 /**
  * Add a service to a monthly record
@@ -19,10 +70,7 @@ const addService = async (monthlyRecordId, conceptTypeId, amount, description = 
     },
   });
 
-  // Recalculate the monthly record totals
-  await recalculateMonthlyRecord(monthlyRecordId);
-  // Si el mes ya generó deuda, propagar el servicio a la deuda (sumarlo + recalcular punitorios)
-  await require('./debtService').syncDebtServicesFromRecord(monthlyRecordId);
+  await settleRecordsWithDebt([monthlyRecordId]);
   return service;
 };
 
@@ -41,8 +89,7 @@ const updateService = async (monthlyServiceId, amount, description) => {
     },
   });
 
-  await recalculateMonthlyRecord(service.monthlyRecordId);
-  await require('./debtService').syncDebtServicesFromRecord(service.monthlyRecordId);
+  await settleRecordsWithDebt([service.monthlyRecordId]);
   return service;
 };
 
@@ -57,8 +104,7 @@ const removeService = async (monthlyServiceId) => {
   if (!service) return null;
 
   await prisma.monthlyService.delete({ where: { id: monthlyServiceId } });
-  await recalculateMonthlyRecord(service.monthlyRecordId);
-  await require('./debtService').syncDebtServicesFromRecord(service.monthlyRecordId);
+  await settleRecordsWithDebt([service.monthlyRecordId]);
   return service;
 };
 
@@ -185,10 +231,7 @@ const assignInstallmentService = async (groupId, contractId, conceptTypeId, tota
     return { results: out, affectedIds: Array.from(affected) };
   }, { timeout: 30000 });
 
-  // Propagar a deudas existentes (igual patrón que addService), fuera de la transacción
-  for (const id of affectedIds) {
-    await require('./debtService').syncDebtServicesFromRecord(id);
-  }
+  await settleRecordsWithDebt(affectedIds);
 
   return results;
 };
@@ -389,9 +432,7 @@ const copyConfig = async (groupId, contractId, sourceMonth, sourceYear, targetMo
   // transacción — evita que un mes con Debt ya generada quede con servicios
   // desincronizados (caso C06_none, 2026-07-16).
   const affectedIds = [...new Set(copiedServices.map((s) => s.monthlyRecordId))];
-  for (const id of affectedIds) {
-    await require('./debtService').syncDebtServicesFromRecord(id);
-  }
+  await settleRecordsWithDebt(affectedIds);
 
   return copiedServices;
 };
@@ -427,9 +468,7 @@ const batchAddServices = async (distributions, conceptTypeId, description = null
   // Propagar a deudas existentes (igual patrón que addService), fuera de la
   // transacción (caso C06_none, 2026-07-16).
   const affectedIds = [...new Set(results.map((s) => s.monthlyRecordId))];
-  for (const id of affectedIds) {
-    await require('./debtService').syncDebtServicesFromRecord(id);
-  }
+  await settleRecordsWithDebt(affectedIds);
 
   return results;
 };
@@ -490,9 +529,7 @@ const bulkAssignMultiContract = async (groupId, contractIds, conceptTypeId, amou
       // transacción — sin esto, un mes que ya generó Deuda quedaba con servicios
       // desincronizados: "Deuda" y el modal de pago no veían el servicio nuevo,
       // aunque Control Mensual sí (caso C06_none, 2026-07-16).
-      for (const id of chunkAffectedIds) {
-        await require('./debtService').syncDebtServicesFromRecord(id);
-      }
+      await settleRecordsWithDebt(Array.from(chunkAffectedIds));
     } catch (chunkError) {
       for (const contractId of chunkIds) {
         errors.push({ contractId, error: `Error en lote: ${chunkError.message}` });
@@ -542,9 +579,7 @@ const propagateServiceForward = async (groupId, contractId, conceptTypeId, amoun
   // que ya generó Deuda no reflejaba el servicio nuevo en "Deuda" ni en el modal
   // de pago, aunque Control Mensual sí lo mostrara (caso C06_none, 2026-07-16).
   const affectedIds = [...new Set(result.map((s) => s.monthlyRecordId))];
-  for (const id of affectedIds) {
-    await require('./debtService').syncDebtServicesFromRecord(id);
-  }
+  await settleRecordsWithDebt(affectedIds);
 
   return { results: result, skippedMonths };
 };
@@ -586,14 +621,13 @@ const removeServiceForward = async (groupId, contractId, conceptTypeId, fromMont
 
   // Propagar a deudas existentes (igual patrón que addService), fuera de la
   // transacción (caso C06_none, 2026-07-16).
-  for (const id of recordIds) {
-    await require('./debtService').syncDebtServicesFromRecord(id);
-  }
+  await settleRecordsWithDebt(recordIds);
 
   return { skippedMonths };
 };
 
 module.exports = {
+  settleRecordsWithDebt,
   addService,
   updateService,
   removeService,

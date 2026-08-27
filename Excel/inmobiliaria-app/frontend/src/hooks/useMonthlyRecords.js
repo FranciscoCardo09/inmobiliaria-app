@@ -153,6 +153,9 @@ export const useMonthlyRecordDetail = (groupId, recordId) => {
       return response.data.data
     },
     enabled: !!groupId && !!recordId,
-    staleTime: 5 * 60 * 1000,
+    // Es la query con la que el modal de pago arma el TOTAL a cobrar: no puede servir un
+    // record de hace 5 minutos (p. ej. con un servicio que ya se borró).
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }

@@ -220,14 +220,17 @@ export const useVencimientos = (groupId) => {
 
 export const useMonthlyRecordsForPago = (groupId, { month, year } = {}) => {
   const query = useQuery({
-    queryKey: ['monthlyRecords', 'pago', groupId, month, year],
+    // groupId en el indice 1 como TODAS las demas keys de la app: con `'pago'` ahi,
+    // `invalidateQueries(['monthlyRecords', groupId])` no la matcheaba y esta pantalla
+    // quedaba con datos viejos hasta 10 minutos despues de tocar un servicio.
+    queryKey: ['monthlyRecords', groupId, 'pago', month, year],
     queryFn: async () => {
       const params = new URLSearchParams({ month, year })
       const response = await api.get(`/groups/${groupId}/monthly-records?${params}`)
       return response.data.data
     },
     enabled: !!groupId && !!month && !!year,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 1000, // pantalla de cobro: no puede mostrar plata de hace 10 minutos
   })
 
   return {

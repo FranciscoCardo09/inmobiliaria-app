@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { invalidateMoneyQueries } from '../utils/invalidateMoneyQueries'
 
 export const useMonthlyServices = (groupId, recordId) => {
   const queryClient = useQueryClient()
@@ -18,11 +19,9 @@ export const useMonthlyServices = (groupId, recordId) => {
     staleTime: 2 * 60 * 1000,
   })
 
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['monthlyServices', groupId] })
-    queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
-    queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] })
-  }
+  // Antes esta lista era propia y no incluía las keys de deuda, así que borrar un servicio
+  // de un mes ya cerrado dejaba la ficha de Deuda y el modal de pago con el monto viejo.
+  const invalidateAll = () => invalidateMoneyQueries(queryClient, groupId)
 
   const addMutation = useMutation({
     retry: 0,

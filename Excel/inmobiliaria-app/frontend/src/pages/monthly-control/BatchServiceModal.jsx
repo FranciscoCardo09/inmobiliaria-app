@@ -3,6 +3,7 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { usePropertyGroups } from '../../hooks/usePropertyGroups'
+import { invalidateMoneyQueries } from '../../utils/invalidateMoneyQueries'
 import {
   XMarkIcon,
   TrashIcon,
@@ -222,8 +223,8 @@ export default function BatchServiceModal({ groupId, records, periodMonth, perio
       return res.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['monthlyServices'] })
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords'] })
+      // Antes invalidaba sin groupId (todos los grupos) y sin las keys de deuda.
+      invalidateMoneyQueries(queryClient, groupId)
       toast.success('Servicios asignados correctamente')
       onClose()
     },

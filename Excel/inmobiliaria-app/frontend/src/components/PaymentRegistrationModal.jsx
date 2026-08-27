@@ -6,7 +6,7 @@ import { useCanPayCurrentMonth, useDebts } from '../hooks/useDebts'
 import { useMonthlyRecordDetail } from '../hooks/useMonthlyRecords'
 import { useNotifications } from '../hooks/useNotifications'
 import { useAuthStore } from '../stores/authStore'
-import { formatServiceLabel } from '../utils/serviceLabel'
+import { formatServiceLabel, serviceSignedAmount } from '../utils/serviceLabel'
 import api from '../services/api'
 import toast from 'react-hot-toast'
 import Modal from './ui/Modal'
@@ -396,7 +396,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
                   <span className="ml-2">
                     {formatServiceLabel(s)}
                   </span>
-                  <span className="font-mono">{formatCurrency(s.amount)}</span>
+                  <span className="font-mono">{formatCurrency(serviceSignedAmount(s))}</span>
                 </div>
               ))
             ) : (

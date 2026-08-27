@@ -1,7 +1,8 @@
 import { useState, useEffect, memo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMonthlyServices } from '../../hooks/useMonthlyServices'
-import { formatServiceLabel } from '../../utils/serviceLabel'
+import { formatServiceLabel, serviceSignedAmount } from '../../utils/serviceLabel'
+import { invalidateMoneyQueries } from '../../utils/invalidateMoneyQueries'
 import api from '../../services/api'
 import {
   ChevronUpIcon,
@@ -63,7 +64,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
   const servicesTooltip = !record.services || record.services.length === 0
     ? 'Sin servicios'
     : record.services
-        .map((s) => `${formatServiceLabel(s)}: ${formatCurrency(s.amount)}`)
+        .map((s) => `${formatServiceLabel(s)}: ${formatCurrency(serviceSignedAmount(s))}`)
         .join('\n')
 
   return (
@@ -230,7 +231,10 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
         </td>
         <td className="text-xs text-right font-mono font-bold">
           {(() => {
-            const totalValue = record.totalHistorico || record.liveTotalDue || record.totalDue
+            // `??` y no `||`: un total legítimo de 0 (mes cuyo descuento cubre todo el
+            // cargo) caía al siguiente valor de la cadena y mostraba un número que no era
+            // el total del mes.
+            const totalValue = record.totalHistorico ?? record.liveTotalDue ?? record.totalDue
             const txs = record.transactions || []
             const recordObs = record.observations
             const txObs = txs
@@ -526,9 +530,7 @@ function ServiceManagerInline({ record, groupId }) {
         startYear: record.periodYear,
         montoTotal: total,
       })
-      queryClient.invalidateQueries({ queryKey: ['monthlyServices', groupId] })
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecords', groupId] })
-      queryClient.invalidateQueries({ queryKey: ['monthlyRecord', groupId] })
+      await invalidateMoneyQueries(queryClient, groupId)
       setSelectedConceptId('')
       setNewAmount('')
     } catch (e) {
