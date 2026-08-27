@@ -339,19 +339,43 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
       // `accumulatedPunitory` solo debe cambiar en su creación o al pagar
       // (payDebt), nunca en este auto-heal de solo lectura.
 
-      // GUARD: this auto-recompute exists to CORRECT legacy/corrupt debts DOWNWARD.
-      // It must NEVER inflate a debt. If the recomputed total exceeds what the debt
-      // was created with, the source MonthlyRecord is almost certainly corrupt
-      // (e.g. a stale negative previousBalance carried from a month that was deleted
-      // by an earlier bug). In that case the stored debt values are more trustworthy,
-      // so we leave them untouched. Without this guard, opening a settled debt whose
-      // MonthlyRecord has a bad previousBalance reinflates it to a huge phantom amount.
-      // `accumulatedPunitory` entra sin corregir en ambos lados de la comparación: el
-      // guard sigue protegiendo alquiler/servicios de un previousBalance corrupto,
-      // sin verse afectado por el punitorio (que ya no se toca).
+      // GUARD anti-inflación fantasma. El techo son los cargos BRUTOS VIVOS del mes, NO el
+      // total ya almacenado en la deuda.
+      //
+      // Comparar contra lo almacenado (como se hacía hasta 2026-08-27) convertía este
+      // auto-heal en un RATCHET DE UNA SOLA VÍA: la corrección hacia abajo se persistía y
+      // desde ahí ninguna corrección hacia arriba pasaba nunca más, porque el techo ya era el
+      // valor corrompido. Bug real (caso Ciuro, mayo 2026): se cargó un DESCUENTO en un mes ya
+      // cerrado en deuda —el exceso sobre los servicios se pliega dentro de `unpaidRent`, ver
+      // `calculateImputation`—, se borró al darse cuenta de que iba a otro mes, y el alquiler
+      // quedaba descontado PARA SIEMPRE: la deuda cobraba $80.000 de menos y el modal de pago
+      // mostraba el alquiler rebajado.
+      //
+      // Los cargos brutos del mes sí son un invariante: la imputación no puede devolver más
+      // que eso (`unpaidRent <= rentAmount` y `unpaidServices <= max(servicesTotal,0) + iva`).
+      // Así que toda corrección legítima pasa —incluidas las que SUBEN, p. ej. al borrar un
+      // descuento o al anularse un pago del mes— y sigue rechazada la inflación que viene de
+      // una fuente corrupta: con un `amountPaid` negativo la imputación pide servicios muy por
+      // encima de los facturados y eso queda por arriba del techo.
+      //
+      // `Math.max(servicesTotal, 0)`: con neto de servicios negativo el exceso ya está contado
+      // dentro del alquiler y `unpaidServices` queda en 0, así que el techo tiene que ser el
+      // alquiler completo. `accumulatedPunitory` entra sin corregir en los dos lados (no se
+      // toca acá, ver el comentario de arriba).
+      const grossCeiling = (mr.rentAmount || 0) + Math.max(mr.servicesTotal || 0, 0)
+        + (mr.ivaAmount || 0) + accumulatedPunitory;
       const storedTotal = (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0) + accumulatedPunitory;
       const recomputedTotal = correctUnpaidRent + correctUnpaidServices + accumulatedPunitory;
-      const wouldInflate = recomputedTotal > storedTotal + 0.5; // tolerancia de redondeo
+
+      // Excepción para una deuda YA CERRADA (`PAID`: saldada o CONDONADA vía `forgiveDebt`,
+      // que sólo marca el status y deja `currentTotal`/`unpaid*` como estaban): ahí el techo
+      // sigue siendo el total ALMACENADO. Una LECTURA no puede aumentar lo que debe una deuda
+      // cerrada — subirla requiere una acción explícita de escritura (mutar un servicio,
+      // anular un pago), que tiene su propia regla de reapertura (decisión 2026-07-16).
+      // Las correcciones hacia ABAJO siguen permitidas también para las PAID: era el
+      // propósito original de este auto-heal (arreglar deudas legacy/corruptas a la baja).
+      const ceiling = debt.status === 'PAID' ? storedTotal : grossCeiling;
+      const wouldInflate = recomputedTotal > ceiling + 0.5; // tolerancia de redondeo
 
       const updateData = {};
       if (!wouldInflate) {
@@ -955,8 +979,18 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
     const amountPaid = currentRecord.amountPaid || 0;
     // Misma fórmula canónica que PaymentRegistrationModal (totalDue = alquiler +
     // servicios + punitorio + iva − a favor anterior; remaining = totalDue − pagado).
+    //
+    // `servicesTotal` va SIN clampear, igual que el modal individual
+    // (PaymentRegistrationModal) y que el `liveTotalDue` de la grilla. Hasta 2026-08-27 acá
+    // había un `Math.max(..., 0)` que contradecía el comentario de arriba: cuando el
+    // descuento del mes superaba a los servicios reales, el neto quedaba negativo y este
+    // clamp lo descartaba, así que "Pagar varias" pedía MÁS que el modal individual y que la
+    // columna TOTAL para el mismo mes (alquiler 650.000 / LUZ 20.000 / DESCUENTO 100.000:
+    // 650.000 acá contra 570.000 en las otras dos vistas). El descuento reduce el TOTAL a
+    // pagar — lo que NO reduce es la base de punitorios, y de eso se ocupa
+    // `computePunitoryBase`, que tiene su propio clamp.
     const totalDue = round2(
-      (currentRecord.rentAmount || 0) + Math.max(currentRecord.servicesTotal || 0, 0)
+      (currentRecord.rentAmount || 0) + (currentRecord.servicesTotal || 0)
       + (preview.amount || 0) + (currentRecord.ivaAmount || 0) - previousBalance
     );
     const totalToPay = Math.max(round2(totalDue - amountPaid), 0);
@@ -967,7 +1001,9 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
       periodMonth: currentRecord.periodMonth,
       periodYear: currentRecord.periodYear,
       remainingRent: currentRecord.rentAmount || 0,
-      remainingServices: Math.max(currentRecord.servicesTotal || 0, 0),
+      // Neto real (puede ser negativo con descuento): así las líneas del desglose suman
+      // `totalToPay`. Clampeado, el desglose no cerraba con el total.
+      remainingServices: currentRecord.servicesTotal || 0,
       iva: currentRecord.ivaAmount || 0,
       punitory: preview.amount || 0,
       punitoryDays: preview.days || 0,
@@ -1897,20 +1933,48 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
 };
 
 /**
- * Sincronizar los servicios impagos de la deuda asociada a un MonthlyRecord.
+ * Snapshot de los campos de la deuda de un mes que una mutación de servicios puede mover.
+ * Devuelve `null` si el mes no tiene deuda.
+ *
+ * Lo consume `monthlyServiceService.settleRecordsWithDebt` para saber, comparando antes y
+ * después del sync, si hace falta la segunda pasada de recálculo del mes. Vive acá y no allá
+ * para que el módulo de servicios no tenga que conocer la tabla `debts`.
+ */
+const getDebtSyncSnapshot = async (monthlyRecordId) => prisma.debt.findUnique({
+  where: { monthlyRecordId },
+  select: {
+    unpaidRentAmount: true, unpaidServicesAmount: true, currentTotal: true, status: true,
+  },
+});
+
+/**
+ * Sincronizar los cargos impagos de la deuda asociada a un MonthlyRecord.
  *
  * Se llama cuando se agrega / edita / quita un servicio en un mes que YA generó
  * deuda. Antes, agregar un servicio actualizaba el mes pero NO la deuda: el servicio
- * no se sumaba a la deuda ni se le calculaban punitorios. Acá recalculamos los
- * servicios impagos desde los servicios actuales del mes (mismo criterio que
+ * no se sumaba a la deuda ni se le calculaban punitorios. Acá recalculamos los cargos
+ * impagos desde los servicios actuales del mes (mismo criterio que
  * createDebtFromMonthlyRecord: servicios netos + IVA, imputando primero los pagos del
  * mes a servicios) y los escribimos en la deuda.
  *
- * Solo toca servicios (y los totales derivados). NO toca el alquiler impago ni los
- * punitorios acumulados, así que NO interfiere con el guard anti-inflación de
- * calculateDebtPunitory (caso Yocsina): una vez sincronizada, la base almacenada
- * coincide con la recalculada. Los punitorios sobre el servicio nuevo los aplica
- * calculateDebtPunitory vía punitoryBase = saldo restante (alquiler + servicios).
+ * Escribe servicios impagos SIEMPRE, y alquiler impago sólo cuando la deuda todavía no
+ * tiene pagos propios (`debt.amountPaid === 0`) — mismo criterio que el auto-heal de
+ * `calculateDebtPunitory` y que el guard de `recalculateDebtFromMonthlyRecord`: con
+ * pagos propios, el ancla de alquiler/punitorios es responsabilidad de `payDebt`.
+ *
+ * Por qué el alquiler (cambio 2026-08-27, caso Ciuro mayo 2026): cuando el descuento del
+ * mes SUPERA a los servicios reales, `servicesTotal` queda negativo y `calculateImputation`
+ * pliega ese exceso dentro de `unpaidRent` (no dentro de `unpaidServices`, que queda en 0).
+ * Mientras esta función sólo tocaba servicios, borrar el descuento no tenía forma de
+ * devolverle al alquiler lo que se le había restado: la deuda quedaba cobrando de menos
+ * para siempre. Con un descuento como único servicio del mes era todavía peor — el
+ * early-return de abajo la volvía un no-op total (`unpaidServices` 0 → 0).
+ *
+ * NO toca los punitorios acumulados ni `punitoryStartDate`: eso lo hace
+ * `recalculateDebtFromMonthlyRecord`, y hacerlo acá rompería el invariante del ancla
+ * (correrlo en cada edición de servicio con el `getTodayLocalString()` del momento hacía
+ * crecer el solapamiento del tramo vivo, ver su comentario). Los punitorios sobre el
+ * servicio nuevo los aplica `calculateDebtPunitory` vía punitoryBase = saldo restante.
  */
 const syncDebtServicesFromRecord = async (monthlyRecordId) => {
   const debt = await prisma.debt.findUnique({ where: { monthlyRecordId } });
@@ -1956,7 +2020,7 @@ const syncDebtServicesFromRecord = async (monthlyRecordId) => {
   // SÍ debe netear acá: es lo pagado ANTES de cerrar el mes (congelado al crear la
   // deuda, nunca tocado por payDebt), la misma base que usó calculateImputation en
   // ese momento.
-  const { unpaidServices } = calculateImputation({
+  const { unpaidRent, unpaidServices } = calculateImputation({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount,
@@ -1965,11 +2029,24 @@ const syncDebtServicesFromRecord = async (monthlyRecordId) => {
     previousBalance: Math.max(record.previousBalance || 0, 0),
   });
 
-  if (round2(unpaidServices) === round2(debt.unpaidServicesAmount || 0)) return debt;
+  // Con pagos propios el alquiler impago no se toca (ver docblock): se conserva el
+  // almacenado y sólo se sincronizan los servicios.
+  const storedRent = round2(debt.unpaidRentAmount || 0);
+  const storedServices = round2(debt.unpaidServicesAmount || 0);
+  const newUnpaidRent = (debt.amountPaid || 0) === 0 ? round2(unpaidRent) : storedRent;
+  const newUnpaidServices = round2(unpaidServices);
 
-  const delta = round2(unpaidServices - (debt.unpaidServicesAmount || 0));
+  // El early-return tiene que mirar los DOS montos. Mirando sólo servicios, el caso
+  // "el descuento es el único servicio del mes" salía por acá sin hacer nada
+  // (unpaidServices 0 → 0) y el alquiler quedaba descontado.
+  if (newUnpaidServices === storedServices && newUnpaidRent === storedRent) return debt;
+
+  // `originalAmount` se mantiene por el delta de lo adeudado (alquiler + servicios), no
+  // sólo por el de servicios: así sigue siendo reversible cuando el descuento se carga y
+  // después se borra, y conserva el punitorio que ya tenía adentro desde la creación.
+  const delta = round2((newUnpaidRent + newUnpaidServices) - (storedRent + storedServices));
   const newCurrentTotal = round2(
-    Math.max((debt.unpaidRentAmount || 0) + unpaidServices + (debt.accumulatedPunitory || 0) - (debt.appliedCredit || 0) - (debt.amountPaid || 0), 0)
+    Math.max(newUnpaidRent + newUnpaidServices + (debt.accumulatedPunitory || 0) - (debt.appliedCredit || 0) - (debt.amountPaid || 0), 0)
   );
   const newOriginal = round2((debt.originalAmount || 0) + delta);
 
@@ -1985,7 +2062,8 @@ const syncDebtServicesFromRecord = async (monthlyRecordId) => {
   return prisma.debt.update({
     where: { id: debt.id },
     data: {
-      unpaidServicesAmount: unpaidServices,
+      unpaidRentAmount: newUnpaidRent,
+      unpaidServicesAmount: newUnpaidServices,
       currentTotal: newCurrentTotal,
       originalAmount: newOriginal,
       status: newStatus,
@@ -2068,6 +2146,7 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
 module.exports = {
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,
+  getDebtSyncSnapshot,
   syncDebtServicesFromRecord,
   syncDebtAppliedCreditFromRecord,
   calculateImputation,
