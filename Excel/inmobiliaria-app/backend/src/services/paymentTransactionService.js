@@ -153,12 +153,9 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   const amountPaidSoFar = record.amountPaid || 0;
   const servicesTotal = record.servicesTotal || 0;
   const prevBalance = record.previousBalance || 0;
-  // previousBalance (a favor) acts as an extra credit alongside actual payments
-  const totalCredits = amountPaidSoFar + prevBalance;
-  // Credits cover services first, remainder goes to rent
-  const paidTowardServices = Math.min(totalCredits, servicesTotal);
-  const paidTowardRent = round2(Math.max(totalCredits - servicesTotal, 0));
-  const unpaidRent = round2(Math.max(record.rentAmount - paidTowardRent, 0));
+  // El saldo a favor cuenta como crédito junto con los pagos previos (`alreadyPaid` más
+  // abajo). El reparto de esos créditos por concepto se calcula junto con los baldes de
+  // servicios/alquiler/IVA, para que el descuento entre una sola vez.
 
   // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase):
   // - Sin ningún pago real: solo el alquiler.
@@ -241,15 +238,46 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   const paymentAmount = parseFloat(amount);
   const alreadyPaid = round2(amountPaidSoFar + prevBalance);
 
-  // Cuánto falta de cada concepto ANTES de este pago (descontando créditos previos)
-  const creditsOnServices = round2(Math.min(alreadyPaid, Math.max(servicesTotal, 0)));
-  const remainingServicesOwed = round2(Math.max(servicesTotal - creditsOnServices, 0));
-  const remainingRentOwed = unpaidRent; // ya calculado arriba (neto de créditos)
+  // Servicios BRUTOS y descuentos POR SEPARADO. `record.servicesTotal` viene NETO, y
+  // usarlo como presupuesto de servicios era el bug (2026-08-28): el descuento entraba dos
+  // veces, una achicando el balde de servicios y otra como línea negativa del recibo.
+  //   - descuento MENOR que los servicios: el balde no alcanzaba para todos los servicios
+  //     reales, así que el último quedaba SIN concepto propio (desaparecía del recibo) y el
+  //     alquiler cobrado quedaba inflado.
+  //   - descuento MAYOR que los servicios: el balde daba 0, el bloque de conceptos se
+  //     salteaba entero y TODO el pago se etiquetaba ALQUILER, con los impuestos reales
+  //     viajando escondidos adentro. Caso Godoy (julio/agosto 2026): base de honorarios
+  //     300.000 en vez de 262.503 en un pago parcial, y `paidServicios` = 0 en Liquidación.
+  let grossServices = 0;
+  let discountTotal = 0;
+  for (const s of record.services || []) {
+    const cat = s.conceptType?.category;
+    if (cat === 'DESCUENTO' || cat === 'BONIFICACION') discountTotal += Math.abs(s.amount);
+    else grossServices += s.amount;
+  }
+
+  // El descuento se imputa contra el ALQUILER — misma regla que honorarios
+  // (`reportDataService`: DESCUENTO reduce la base del alquiler, no la de servicios). El
+  // sobrante cae a IVA y después a servicios, así el TOTAL adeudado no cambia: era
+  // `rent + (bruto − descuento) + iva` y pasa a ser `(rent − descuento) + bruto + iva`.
+  let pendingDiscount = discountTotal;
+  const rentOwedNet = round2(Math.max(record.rentAmount - pendingDiscount, 0));
+  pendingDiscount = round2(Math.max(pendingDiscount - record.rentAmount, 0));
+  const ivaOwedNet = round2(Math.max(ivaForPunitory - pendingDiscount, 0));
+  pendingDiscount = round2(Math.max(pendingDiscount - ivaForPunitory, 0));
+  const servicesOwedNet = round2(Math.max(grossServices - pendingDiscount, 0));
+
+  // Cuánto falta de cada concepto ANTES de este pago (descontando créditos previos).
+  // Los créditos se imputan en el mismo orden que el pago: servicios → alquiler → IVA.
+  const creditsOnServices = round2(Math.min(alreadyPaid, servicesOwedNet));
+  const remainingServicesOwed = round2(servicesOwedNet - creditsOnServices);
+  const creditsAfterServices = round2(alreadyPaid - creditsOnServices);
+  const remainingRentOwed = round2(Math.max(rentOwedNet - creditsAfterServices, 0));
   // IVA: créditos que exceden servicios + alquiler cubren el IVA antes que los punitorios.
   // Sin este concepto, en contratos con IVA el 21% del pago quedaba etiquetado como
   // SOBREPAGO ("a favor próximo mes") en recibos, aunque el balance fuera correcto.
-  const creditsBeyondRent = round2(Math.max(alreadyPaid - servicesTotal - record.rentAmount, 0));
-  const remainingIvaOwed = round2(Math.max(ivaForPunitory - creditsBeyondRent, 0));
+  const creditsBeyondRent = round2(Math.max(creditsAfterServices - rentOwedNet, 0));
+  const remainingIvaOwed = round2(Math.max(ivaOwedNet - creditsBeyondRent, 0));
   const remainingPunitoryOwed = round2(Math.max(punitoryAmount, 0)); // ya neto de créditos/frozen
 
   // Cuánto de ESTE pago se imputa a cada concepto (servicios → alquiler → IVA → punitorios → excedente)
@@ -289,13 +317,10 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
     let svcBudget = servicesPay;
     let skip = creditsOnServices; // porción de servicios ya cubierta por créditos previos
     for (const s of record.services) {
-      const isDiscount = s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION';
+      const cat = s.conceptType?.category;
+      if (cat === 'DESCUENTO' || cat === 'BONIFICACION') continue; // se imputan al alquiler
       const label = formatServiceLabel(s);
       const type = s.conceptType?.name || 'SERVICIO';
-      if (isDiscount) {
-        concepts.push({ type, amount: -Math.abs(s.amount), description: label });
-        continue;
-      }
       let amt = s.amount;
       if (skip > 0) {
         const sk = Math.min(skip, amt);
@@ -307,6 +332,22 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
         concepts.push({ type, amount: pay, description: label });
         svcBudget = round2(svcBudget - pay);
       }
+    }
+  }
+
+  // 2b. Descuentos / bonificaciones: línea informativa en negativo. Ya NO consumen el
+  //     presupuesto de servicios (se imputan contra el alquiler, ver `rentOwedNet` arriba),
+  //     pero tienen que verse en el recibo: antes, cuando el descuento superaba a los
+  //     servicios, `servicesPay` daba 0 y el descuento no aparecía en ningún lado.
+  if (servicesPay > 0 || rentPay > 0) {
+    for (const s of record.services) {
+      const cat = s.conceptType?.category;
+      if (cat !== 'DESCUENTO' && cat !== 'BONIFICACION') continue;
+      concepts.push({
+        type: s.conceptType?.name || 'DESCUENTO',
+        amount: -Math.abs(s.amount),
+        description: formatServiceLabel(s),
+      });
     }
   }
 
