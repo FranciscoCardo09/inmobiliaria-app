@@ -77,7 +77,31 @@ function isNaturallySorted(addresses) {
 
 describe('getLiquidacionesAllContracts', () => {
 
-  test('1. Addresses are returned in natural (numeric-aware) order', async () => {
+  // Este archivo apunta a la base que diga DATABASE_URL y usa UUIDs REALES de produccion
+  // (grupo Habitar Administracion, un propietario y contratos concretos). Contra cualquier
+  // otra base —la copia local del sim harness, por ejemplo— no existe ninguno de esos IDs
+  // y los 6 tests fallaban con "got 0 records", quedando en rojo permanente y tapando
+  // regresiones de verdad. Ahora se saltean explicitamente cuando los datos no estan.
+  let hayFixtures = false;
+
+  before(async () => {
+    const prisma = new PrismaClient();
+    try {
+      hayFixtures = (await prisma.monthlyRecord.count({
+        where: { groupId: GID, periodMonth: MONTH, periodYear: YEAR },
+      })) > 0;
+    } catch {
+      hayFixtures = false;
+    } finally {
+      await prisma.$disconnect();
+    }
+    if (!hayFixtures) {
+      console.log(`[liquidacion.test.js] omitido: la base conectada no tiene datos de ${MONTH}/${YEAR} para el grupo de fixtures`);
+    }
+  });
+
+  test('1. Addresses are returned in natural (numeric-aware) order', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const data = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: false });
     assert.ok(data.length > 0, 'Should return at least one record');
 
@@ -88,7 +112,8 @@ describe('getLiquidacionesAllContracts', () => {
     );
   });
 
-  test('2. contractIds filter: returns exactly the specified contracts', async () => {
+  test('2. contractIds filter: returns exactly the specified contracts', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const ids = CONTRACT_IDS_CANCELLED;
     const data = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: false }, null, ids);
 
@@ -101,7 +126,8 @@ describe('getLiquidacionesAllContracts', () => {
     assert.deepEqual(returnedIds, [...ids].sort(), 'Returned contractIds must match the requested ones');
   });
 
-  test('3. ownerId filter: returns all active INQUILINO contracts for the owner', async () => {
+  test('3. ownerId filter: returns all active INQUILINO contracts for the owner', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const data = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: false }, OWNER_ID);
 
     assert.ok(data.length > 0, 'Owner should have at least one active contract');
@@ -131,7 +157,8 @@ describe('getLiquidacionesAllContracts', () => {
     }
   });
 
-  test('4. soloConPago=true: returns only isCancelled records', async () => {
+  test('4. soloConPago=true: returns only isCancelled records', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const data = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: true });
 
     assert.ok(data.length > 0, 'Should have at least one paid record');
@@ -140,7 +167,8 @@ describe('getLiquidacionesAllContracts', () => {
     }
   });
 
-  test('5. soloConPago=false: includes unpaid records', async () => {
+  test('5. soloConPago=false: includes unpaid records', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const allData    = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: false });
     const paidData   = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: true });
 
@@ -155,7 +183,8 @@ describe('getLiquidacionesAllContracts', () => {
     );
   });
 
-  test('6. Explicit contractIds bypass soloConPago: returns all specified contracts regardless of payment', async () => {
+  test('6. Explicit contractIds bypass soloConPago: returns all specified contracts regardless of payment', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     // Mix cancelled + not-cancelled contracts
     const mixedIds = [...CONTRACT_IDS_CANCELLED.slice(0, 2), ...CONTRACT_IDS_NOT_CANCELLED.slice(0, 2)];
 
@@ -175,7 +204,8 @@ describe('getLiquidacionesAllContracts', () => {
     );
   });
 
-  test('7. Natural sort: Torre 1 appears before Torre 2 and Torre 3', async () => {
+  test('7. Natural sort: Torre 1 appears before Torre 2 and Torre 3', async (t) => {
+    if (!hayFixtures) return t.skip('sin datos de produccion en la base conectada');
     const data = await getLiquidacionesAllContracts(GID, MONTH, YEAR, null, { soloConPago: false }, OWNER_ID);
     const addresses = data.map(d => d.propiedad.direccion.trim().replace(/\s+/g, ' '));
 

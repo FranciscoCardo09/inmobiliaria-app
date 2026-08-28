@@ -625,8 +625,13 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
     });
   }
 
-  // Total from visible conceptos only (gastos/mantenimiento excluded)
-  const total = conceptos.reduce((sum, c) => sum + c.importe, 0);
+  // Total from visible conceptos only (gastos/mantenimiento excluded).
+  // round2 obligatorio: la suma flotante de los conceptos arrastra centésimas de centavo
+  // cuando el IVA da fraccionario (alquiler 133.333 → IVA 27.999,93 → total
+  // 801.331,3300000001). Ese número se muestra y se suma en los totales generales del
+  // reporte. Lo fijaba `tests/consistenciaControlLiquidacion.test.js` ("Redondeo — sin
+  // diferencias de centavos"), que estaba en rojo desde antes por esto.
+  const total = round2(conceptos.reduce((sum, c) => sum + c.importe, 0));
 
   // Subtotal alquileres = ONLY rent (as requested by user for the main totals)
   const subtotalAlquileres = monthlyRecord.rentAmount;

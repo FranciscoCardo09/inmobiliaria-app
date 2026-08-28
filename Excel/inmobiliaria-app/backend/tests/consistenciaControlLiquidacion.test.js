@@ -198,9 +198,17 @@ describe('Redondeo — sin diferencias de centavos', () => {
     const liquidacion = await buildLiquidacionFromRecord(record, EMPRESA, 1, 2026, { holidays: [] });
     const sumaConceptos = liquidacion.conceptos.reduce((s, c) => s + c.importe, 0);
 
-    assert.strictEqual(liquidacion.total, sumaConceptos, 'total debe ser exactamente la suma de conceptos');
-    // Redondeado a centavos (2 decimales), sin arrastre de error flotante
-    assert.strictEqual(Math.round(liquidacion.total * 100) / 100, liquidacion.total);
+    // La comparacion es A CENTAVOS, no contra la suma CRUDA. Los tres importes de este
+    // fixture ya son exactos al centavo (133.333 + 27.999,93 + 191.999,52) y aun asi su
+    // suma flotante da 353.332,44999999995: es aritmetica IEEE754, no un error de calculo.
+    // `total` tiene que venir redondeado (es lo que se muestra y lo que suman los totales
+    // generales del reporte), asi que exigir `total === sumaCruda` era insatisfacible.
+    // El bug real que este test destapaba estaba del otro lado y quedo arreglado:
+    // `buildLiquidacionFromRecord` no aplicaba round2 al total.
+    const aCentavos = (n) => Math.round(n * 100) / 100;
+    assert.strictEqual(liquidacion.total, aCentavos(sumaConceptos), 'total debe ser la suma de conceptos, al centavo');
+    // Y `total` ya tiene que venir redondeado, sin arrastre de error flotante
+    assert.strictEqual(aCentavos(liquidacion.total), liquidacion.total);
   });
 
   test('honorariosCobrado redondeado a 2 decimales, sin arrastre de flotantes', async () => {
