@@ -58,6 +58,39 @@ function isContractInRangeForMonth(contract, monthNumber) {
 }
 
 /**
+ * Saldo a favor que un mes le puede pasar al siguiente ("A Favor Ant." del Control
+ * Mensual), a partir del registro del mes anterior.
+ *
+ * Normalmente es `max(balance, 0)`. Pero si el mes tiene una Deuda ABIERTA, su
+ * `balance` persistido es un snapshot que puede haber quedado viejo: nada vuelve a
+ * recalcular un mes con deuda abierta (el refresh del GET sólo reacciona a cambios de
+ * alquiler o de `previousBalance`), mientras los punitorios de la Deuda siguen corriendo
+ * todos los días. Un `balance` positivo rancio se arrastraba como plata real y encima
+ * entraba como `appliedCredit` de la deuda del mes siguiente.
+ *
+ * Techo correcto: lo que la propia Deuda NO absorbió del crédito que recibió este mes.
+ * `syncDebtAppliedCreditFromRecord` ya clampea `appliedCredit` al total EN VIVO de la
+ * deuda, así que el excedente legítimo pasa entero y el fantasma no.
+ *
+ * Caso real: Ponce Emilia Roxana, junio→julio 2026 ($151.356,91 de saldo a favor que
+ * nunca existió, sobre un junio que seguía debiendo $415.832,45).
+ */
+function carryForwardCredit(prevRecord) {
+  if (!prevRecord) return 0;
+  const balance = prevRecord.balance > 0 ? prevRecord.balance : 0;
+  if (balance === 0) return 0;
+
+  const debt = prevRecord.debt;
+  if (!debt || (debt.status !== 'OPEN' && debt.status !== 'PARTIAL')) return balance;
+
+  const unabsorbedCredit = Math.max(
+    round2((prevRecord.previousBalance || 0) - (debt.appliedCredit || 0)),
+    0,
+  );
+  return Math.min(balance, unabsorbedCredit);
+}
+
+/**
  * Whether new MonthlyRecord rows can be created for this contract.
  * Renewed (active=false + renewedAt) and otherwise inactive contracts cannot
  * receive new records — we only READ what already exists for their periods.
@@ -92,6 +125,7 @@ async function repairContractRecordMonthNumbers(contract, { deletePhantoms = tru
     where: { contractId: contract.id },
     select: {
       id: true, periodMonth: true, periodYear: true, monthNumber: true, amountPaid: true,
+      isPostExpiry: true,
       debt: { select: { id: true } },
       _count: { select: { transactions: true } },
     },
@@ -99,14 +133,30 @@ async function repairContractRecordMonthNumbers(contract, { deletePhantoms = tru
 
   const result = { updated: 0, deleted: 0, paidOrphans: [] };
   const toUpdate = []; // { id, target }
+  const flagToUpdate = []; // { id, isPostExpiry } — ver isPostExpiryMonth abajo
 
   for (const r of records) {
     const target = getMonthNumber(contract, r.periodMonth, r.periodYear);
     const inRange = target >= contract.startMonth && target <= endMonth;
+    // El mes extra post-vencimiento vive DELIBERADAMENTE fuera de [startMonth..endMonth]
+    // (es `endMonth + 1`), con el mismo predicado que lo genera en
+    // `getOrCreateMonthlyRecords`. Sin esta rama el repair lo trataba como mes fantasma
+    // y lo BORRABA en cada edición de cronograma, llevándose los servicios del último
+    // mes (que se cobran a mes vencido).
+    const isPostExpiryMonth = target === endMonth + 1
+      && contract.active && !contract.renewedAt && !contract.rescindedAt;
     const hasMoney = (r.amountPaid || 0) > 0 || !!r.debt || (r._count?.transactions || 0) > 0;
 
-    if (inRange) {
+    if (inRange || isPostExpiryMonth) {
       if (r.monthNumber !== target) toUpdate.push({ id: r.id, target });
+      // `isPostExpiry` es DERIVADO de (startMonth, durationMonths): al mover el
+      // cronograma, un mes que era el extra post-vencimiento puede volver a ser un mes
+      // real del contrato (y al revés). Antes se escribía solo al CREAR el registro y no
+      // se revisaba nunca más: el flag rancio dejaba al mes sin punitorios y fuera del
+      // cierre mensual (nunca generaba Deuda). Caso Gutierrez Juan Rodrigo, agosto 2026.
+      if (!!r.isPostExpiry !== isPostExpiryMonth) {
+        flagToUpdate.push({ id: r.id, isPostExpiry: isPostExpiryMonth });
+      }
     } else if (hasMoney) {
       result.paidOrphans.push({
         id: r.id, periodMonth: r.periodMonth, periodYear: r.periodYear,
@@ -130,6 +180,13 @@ async function repairContractRecordMonthNumbers(contract, { deletePhantoms = tru
     };
     if (client === prisma) await prisma.$transaction(apply); else await apply(client);
     result.updated = toUpdate.length;
+  }
+
+  for (const f of flagToUpdate) {
+    await client.monthlyRecord.update({
+      where: { id: f.id },
+      data: { isPostExpiry: f.isPostExpiry },
+    });
   }
 
   return result;
@@ -424,7 +481,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       periodYear: prevYear,
       contractId: { in: contractIds },
     },
-    select: { contractId: true, balance: true },
+    // `previousBalance` + la Deuda hacen falta para `carryForwardCredit`: un mes con
+    // deuda abierta sólo puede arrastrar el crédito que su Deuda no absorbió.
+    select: {
+      contractId: true, balance: true, previousBalance: true,
+      debt: { select: { status: true, appliedCredit: true } },
+    },
   });
   for (const pr of prevRecords) {
     prevRecordsByContractId.set(pr.contractId, pr);
@@ -518,9 +580,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       let previousBalance = 0;
       if (monthNumber - 1 >= 1) {
         const prevRecord = prevRecordsByContractId.get(contract.id);
-        if (prevRecord && prevRecord.balance > 0) {
-          previousBalance = prevRecord.balance;
-        }
+        previousBalance = carryForwardCredit(prevRecord);
       } else if (monthNumber === 1 && contract.renewedFromContractId) {
         // C-06: mes 1 de un contrato renovado hereda el saldo a favor final del viejo
         // (simétrico con las deudas, que ya se encadenan vía expandToChain).
@@ -720,6 +780,23 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       continue; // Skip this contract instead of crashing
     }
 
+    // `isPostExpiry` es DERIVADO de (startMonth, durationMonths), pero se escribía UNA
+    // sola vez al crear el registro. Si después cambia el cronograma (edición o
+    // renovación), un mes que nació como "extra post-vencimiento" puede pasar a ser un
+    // mes REAL del contrato — y el flag rancio lo dejaba sin punitorios
+    // (`computeLiveRecordPunitory` corta en seco) y fuera del cierre mensual
+    // (`isCloseCandidate` lo excluye, así que NUNCA generaba Deuda). Caso Gutierrez Juan
+    // Rodrigo, agosto 2026: $900.000 + mora invisibles para la cobranza.
+    //
+    // Acá el valor recién derivado es `isPostExpiry` (viene de `activeContracts`), así
+    // que alcanza con comparar. A-06: un mes ya COMPLETE no se toca ni para esto — su
+    // corrección queda para `repairContractRecordMonthNumbers`, que corre solo ante una
+    // edición explícita del contrato.
+    if (contract.active && record.status !== 'COMPLETE' && !!record.isPostExpiry !== !!isPostExpiry) {
+      updatesToPerform.push({ id: record.id, data: { isPostExpiry: !!isPostExpiry } });
+      record.isPostExpiry = !!isPostExpiry;
+    }
+
     // A-06 (AUDITORIA_FUNCIONAL_2026-07-10.md): este refresh corre en cada GET
     // (pantalla mensual, dashboard, reportes), incluso para el rol VIEWER.
     // ANTES recalculaba y persistía rentAmount/IVA/status de meses YA
@@ -782,7 +859,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       let prevBalanceChanged = false;
       if (monthNumber - 1 >= 1) {
         const prevRecord = prevRecordsByContractId.get(contract.id);
-        latestPrevBalance = (prevRecord && prevRecord.balance > 0) ? prevRecord.balance : 0;
+        latestPrevBalance = carryForwardCredit(prevRecord);
         prevBalanceChanged = latestPrevBalance !== record.previousBalance;
       }
 
@@ -1127,11 +1204,20 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     });
   }
 
-  // Perform non-nested updates in small chunks to avoid pool exhaustion
+  // Perform non-nested updates in small chunks to avoid pool exhaustion.
+  // Se fusionan por `id` primero: un mismo registro puede acumular más de un update en
+  // esta pasada (p. ej. la corrección de `isPostExpiry` y el refresh de totales), y
+  // mandarlos como dos UPDATE concurrentes dentro del mismo `Promise.all` es pedirle una
+  // carrera a la misma fila sin necesidad.
   if (updatesToPerform.length > 0) {
+    const mergedById = new Map();
+    for (const u of updatesToPerform) {
+      mergedById.set(u.id, { id: u.id, data: { ...(mergedById.get(u.id)?.data || {}), ...u.data } });
+    }
+    const merged = [...mergedById.values()];
     const CHUNK_SIZE = 5;
-    for (let i = 0; i < updatesToPerform.length; i += CHUNK_SIZE) {
-      const chunk = updatesToPerform.slice(i, i + CHUNK_SIZE);
+    for (let i = 0; i < merged.length; i += CHUNK_SIZE) {
+      const chunk = merged.slice(i, i + CHUNK_SIZE);
       await Promise.all(chunk.map(update => 
         prisma.monthlyRecord.update({
           where: { id: update.id },
