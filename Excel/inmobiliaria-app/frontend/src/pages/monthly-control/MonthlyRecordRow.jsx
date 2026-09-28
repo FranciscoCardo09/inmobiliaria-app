@@ -338,7 +338,11 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
           <BoolBadge value={record.isCancelled} />
         </td>
         <td className="text-center">
-          <BoolBadge value={record.amountPaid > 0} />
+          {/* "Pagó": miraba sólo si entró EFECTIVO en el mes, así que un mes saldado con el
+              saldo a favor arrastrado (amountPaid = 0) decía "No" al lado de un "Canceló:
+              Sí" — contradictorio. Se suma `isPaid` para cubrir ese caso, sin perder la
+              distinción útil: un mes con pago parcial sigue siendo Pagó Sí / Canceló No. */}
+          <BoolBadge value={record.amountPaid > 0 || record.isPaid} />
         </td>
         <td className="text-center">
           {record.debtInfo && record.debtInfo.status !== 'PAID' ? (
