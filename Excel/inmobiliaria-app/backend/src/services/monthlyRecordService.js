@@ -1418,7 +1418,15 @@ const _recalculateCore = async (recordIds, tx) => {
     // `syncDebtAppliedCreditFromRecord` (debtService.js) para el detalle y las guardas.
     if (openDebt) {
       const { syncDebtAppliedCreditFromRecord } = require('./debtService');
-      await syncDebtAppliedCreditFromRecord(openDebt.id, activePreviousBalance, tx);
+      const synced = await syncDebtAppliedCreditFromRecord(openDebt.id, activePreviousBalance, tx);
+      // `openDebt` se leyó ANTES del sync y más abajo alimenta `calculateDebtPunitory` y
+      // `_punitoryOutsideConcepts` — que lee `appliedCredit` para saber qué parte del
+      // punitorio quedó cubierta por el saldo a favor. Sin refrescarlo acá, ese término se
+      // calculaba con el crédito VIEJO y el `totalDue` del mes salía corto justo cuando el
+      // crédito acababa de cambiar; recién se acomodaba en el siguiente recálculo.
+      // Verificado 2026-09-28 reparando una deuda de junio: el mes quedó en $274.035,11 en
+      // vez de $420.559,03 — exactamente los $146.523,92 de punitorio cubierto por crédito.
+      if (synced) Object.assign(openDebt, synced);
     }
     // Un saldo condonado (balanceForgiven) salda el registro aunque no haya pago real:
     // permite "perdonar multa"/condonar el total de un registro nunca pagado (status COMPLETE).

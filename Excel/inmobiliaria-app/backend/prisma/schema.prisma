@@ -721,6 +721,12 @@ model DebtPayment {
   paymentDate         DateTime @map("payment_date")
   amount              Float
   punitoryAtPayment   Float    @default(0) @map("punitory_at_payment")
+  // Foto de `debt.accumulatedPunitory` JUSTO ANTES de que payDebt lo pisara. Es lo único
+  // que permite que anular un pago devuelva la deuda al estado exacto que tenía: sin esto
+  // hay que adivinar el valor con un re-devengo, y cualquier heurística mueve el monto del
+  // mes (caso Ponce, junio 2026). NULL en pagos anteriores a esta columna → se cae a la
+  // reconstrucción heurística de siempre.
+  punitoryBefore      Float?   @map("punitory_before")
   paymentMethod       String   @default("EFECTIVO") @map("payment_method")
   observations        String?
   createdAt           DateTime @default(now()) @map("created_at")

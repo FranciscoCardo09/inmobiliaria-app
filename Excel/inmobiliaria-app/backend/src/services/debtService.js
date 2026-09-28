@@ -698,6 +698,10 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
         paymentDate: parseLocalDate(paymentDate),
         amount: parsedAmount,
         punitoryAtPayment: totalPunitoryOwed,
+        // Estado del ancla ANTES de que este pago la mueva (ver schema.prisma). Anular el
+        // pago restaura exactamente esto; sin la foto había que re-devengar y el monto del
+        // mes cambiaba solo por cargar y deshacer un pago.
+        punitoryBefore: debt.accumulatedPunitory || 0,
         paymentMethod,
         observations,
       },
@@ -1429,8 +1433,11 @@ const canPayCurrentMonth = async (groupId, contractId, targetPeriod = null) => {
  * Anular un pago de deuda (solo el último - LIFO).
  * Revierte cambios en la Debt y en el MonthlyRecord asociado.
  * @param {string} skipTransactionDeletion - Si es true, no intenta eliminar el PaymentTransaction (ya fue eliminado)
+ * @param {object|null} tx - Transacción Prisma del llamador (deleteTransaction, C-05)
+ * @param {string|null} excludeTransactionId - PaymentTransaction que el llamador va a borrar
+ *   DESPUÉS de esta función: hay que ignorarla al reconstruir el ancla de punitorios.
  */
-const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = false, tx = null) => {
+const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = false, tx = null, excludeTransactionId = null) => {
   // Cuando deleteTransaction (C-05) llama con skipTransactionDeletion=true, pasa su propia
   // `tx` (transacción con advisory lock) para que revertir la Debt/DebtPayment y borrar la
   // PaymentTransaction ocurran atómicamente. El endpoint standalone de anular pago (sin
@@ -1479,7 +1486,14 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
   // Cada DebtPayment guarda punitoryAtPayment = punitorios totales calculados al momento de ese pago.
   // Al anular el último pago, el accumulatedPunitory debe volver al valor del pago previo.
   let newAccumulatedPunitory;
-  if (debt.payments.length > 1) {
+  if (payment.punitoryBefore !== null && payment.punitoryBefore !== undefined) {
+    // Camino exacto: `payDebt` dejó la foto del ancla previa al pago. Anular es volver a
+    // ESE valor, sin re-devengar nada. Cubre por igual el primer pago y los siguientes
+    // (LIFO), y es lo único que garantiza que cargar y deshacer un pago deje el mes en el
+    // mismo monto — el síntoma que reportó el usuario (Ponce, junio 2026: $415.832,45 se
+    // convertía en $0 anulando desde el historial, o en $567.189,36 desde Deudas).
+    newAccumulatedPunitory = round2(payment.punitoryBefore);
+  } else if (debt.payments.length > 1) {
     const previousPayment = debt.payments[debt.payments.length - 2];
     // `punitoryAtPayment` guarda el punitorio ADEUDADO al momento de ese pago
     // (`totalPunitoryOwed` en payDebt), mientras que `accumulatedPunitory` guarda el BRUTO
@@ -1533,10 +1547,19 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
         // anterior y no matchea nunca. Con esa comparación, un mes sin pagos entraba a la
         // rama de abajo y se le escribía $0 de punitorio acumulado — justo el bug de
         // 2026-07-16 que este bloque existe para evitar.
-        // A esta altura la PaymentTransaction del pago que se anula ya se borró, así que
-        // las que quedan son exactamente las previas al cierre.
+        // Las que quedan tras la anulación son las previas al cierre. OJO: sólo en el
+        // camino standalone la PaymentTransaction del pago YA se borró arriba. Llamados
+        // desde `deleteTransaction` (skipTransactionDeletion=true) la borran DESPUÉS, así
+        // que hay que excluirla a mano por id — si no, esta rama cree que el mes tuvo un
+        // pago propio pre-cierre y se va por `anchorIsPayment`, que devuelve el punitorio
+        // impago del record (0 en un mes que nunca se pagó): `accumulatedPunitory` quedaba
+        // en $0 y la mora devengada desaparecía (caso Ponce, junio 2026 — $146.523,92
+        // borrados y el mes pasando de $415.832,45 a $0).
         const remainingTxs = await db.paymentTransaction.findMany({
-          where: { monthlyRecordId: debt.monthlyRecordId },
+          where: {
+            monthlyRecordId: debt.monthlyRecordId,
+            ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}),
+          },
           select: { amount: true },
         });
         const anchorIsPayment = remainingTxs.length > 0;

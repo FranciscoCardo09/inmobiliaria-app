@@ -740,7 +740,10 @@ const deleteTransaction = async (groupId, id) => {
         if (matchingDebtPayment) {
           // Si esto lanza, la excepción propaga y Prisma revierte toda la transacción:
           // el PaymentTransaction NO se borra.
-          await cancelDebtPayment(debt.id, matchingDebtPayment.id, true, tx);
+          // `id`: la PaymentTransaction que este camino borra MÁS ABAJO. cancelDebtPayment
+          // necesita saberlo para no contarla entre "las que quedan" al reconstruir el
+          // ancla de punitorios (caso Ponce, junio 2026).
+          await cancelDebtPayment(debt.id, matchingDebtPayment.id, true, tx, id);
         }
       }
       if (!matchingDebtPayment) {
