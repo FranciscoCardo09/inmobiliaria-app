@@ -618,7 +618,18 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
     // Todo caller suma `remainingDebt + unpaidAccumulatedPunitory + amount` para el
     // total en vivo, así que restar acá el sobrante (dejando remainingDebt negativo
     // si hace falta) es matemáticamente equivalente a restarlo de los punitorios.
-    remainingDebt: round2(Math.max(remainingBase - (debt.appliedCredit || 0), 0) - Math.max(paidToPunitory - accumulatedPunitory, 0)),
+    // El pool de punitorios CONGELADO sólo puede absorber crédito si de verdad forma parte
+    // del total en vivo — y eso pasa únicamente con `hasPayment`, que es cuando
+    // `unpaidAccumulatedPunitory` deja de ser 0. Sin ningún pago, `result.amount` ya es el
+    // bruto completo desde el día 1 (el congelado está CONTENIDO ahí, ver el comentario de
+    // `grossPunitoryToDate`): descontarle al crédito la parte "absorbida" por un pool que no
+    // se suma hacía desaparecer plata del inquilino. Caso real 2026-09-28: una deuda de
+    // junio con $1.085.643,83 de saldo a favor mostraba $401.652,72 cuando debía
+    // $255.128,80 — exactamente los $146.523,92 del congelado, cobrados dos veces.
+    remainingDebt: round2(
+      Math.max(remainingBase - (debt.appliedCredit || 0), 0)
+      - Math.max(paidToPunitory - (hasPayment ? accumulatedPunitory : 0), 0),
+    ),
     remainingServices,
     remainingRent,
     iva: remainingIva,
@@ -1147,7 +1158,9 @@ const computeLiveDebtTotal = async (debt, calculationDate, preloaded = null) => 
     ...debt,
     liveAccumulatedPunitory: currentPunitory,
     livePunitoryDays: days,
-    liveCurrentTotal: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
+    // round2: es una suma de tres flotantes que va directo a pantalla y al modal de pago;
+    // sin redondear salía con arrastre binario (269308.52999999997).
+    liveCurrentTotal: round2(remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory),
     remainingDebt,
     unpaidAccumulatedPunitory: unpaidAccumulatedPunitory || 0,
     punitoryFromDate: startDate,
@@ -2154,15 +2167,41 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
   );
   const newAppliedCredit = round2(Math.min(Math.max(currentPreviousBalance || 0, 0), liveTotalCeiling));
 
-  if (newAppliedCredit === round2(debt.appliedCredit || 0)) return debt; // sin cambios, no escribir
-
   const newCurrentTotal = round2(
     Math.max(totalUnpaidBase - newAppliedCredit - (debt.amountPaid || 0), 0)
   );
 
+  // Una deuda que el SALDO A FAVOR cubre entera está saldada, aunque no haya entrado un
+  // peso de efectivo: `payDebt` es el único que la cerraba, así que estas quedaban en OPEN
+  // para siempre y la pantalla las mostraba como impagas con total $0 (reportado
+  // 2026-09-28: un julio enteramente cubierto por el sobrante de junio seguía figurando
+  // como deuda abierta). Se limita al caso limpio —sin pagos propios— para no tocar la
+  // lógica de cierre de las deudas que sí cobraron efectivo, que vive en `payDebt`.
+  //
+  // `accumulatedPunitory` se congela en el bruto a la fecha, exactamente como hace
+  // `payDebt`: a partir de acá el crédito cubrió ESA mora, y es lo que `_punitoryOutsideConcepts`
+  // necesita leer para reponerla en el bruto del mes.
+  const settledByCredit = (debt.amountPaid || 0) === 0
+    && liveTotalCeiling > 0
+    && newAppliedCredit >= liveTotalCeiling - 1;
+
+  // Sin cambios que escribir. El chequeo va DESPUÉS de `settledByCredit` a propósito: una
+  // deuda que ya tenía el crédito bien aplicado pero seguía en OPEN salía por acá y nunca
+  // llegaba a cerrarse (reportado 2026-09-28: julio con crédito $1.213.155,02 y total $0
+  // seguía figurando como deuda abierta recálculo tras recálculo).
+  if (!settledByCredit && newAppliedCredit === round2(debt.appliedCredit || 0)) return debt;
+
   return tx.debt.update({
     where: { id: debt.id },
-    data: { appliedCredit: newAppliedCredit, currentTotal: newCurrentTotal },
+    data: {
+      appliedCredit: newAppliedCredit,
+      currentTotal: settledByCredit ? 0 : newCurrentTotal,
+      ...(settledByCredit ? {
+        accumulatedPunitory: round2(livePunitory.grossPunitoryToDate || 0),
+        status: 'PAID',
+        closedAt: debt.closedAt || new Date(),
+      } : {}),
+    },
   });
 };
 

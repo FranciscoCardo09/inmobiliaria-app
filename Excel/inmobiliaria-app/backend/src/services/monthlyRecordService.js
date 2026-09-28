@@ -1278,7 +1278,13 @@ const _floatsDiffer = (a, b) => Math.abs((a || 0) - (b || 0)) >= 0.01;
  */
 const _punitoryOutsideConcepts = (debt, livePun) => {
   const base = round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
-  const creditOnPunitory = round2(Math.min(
+  // `creditOnPunitory` repone lo que `calculateDebtPunitory` DESCONTÓ del impago por haber
+  // sido cubierto con saldo a favor. Ese descuento sólo existe cuando la deuda tuvo algún
+  // pago (`hasPayment`): sin ningún pago, `livePun.amount` es el bruto completo desde el
+  // día 1, ya sin descontar nada, y reponer acá lo sumaba de más (caso 2026-09-28: junio
+  // mostraba $415.832,45 en vez de $269.308,53 mientras la deuda seguía abierta).
+  const debtHasPayment = (debt.amountPaid || 0) > 0 || (debt.previousRecordPayment || 0) > 0;
+  const creditOnPunitory = (livePun && !debtHasPayment) ? 0 : round2(Math.min(
     Math.max((debt.appliedCredit || 0) - base, 0),
     debt.accumulatedPunitory || 0
   ));
@@ -1407,10 +1413,14 @@ const _recalculateCore = async (recordIds, tx) => {
 
     const ivaAmount = record.includeIva ? record.rentAmount * 0.21 : 0;
 
-    // Simple check for open debt (una sola vez; se reutiliza en las dos pasadas de abajo)
-    const openDebt = await tx.debt.findFirst({
-      where: { monthlyRecordId: record.id, status: { in: ['OPEN', 'PARTIAL'] } },
-    });
+    // La Deuda del mes, CUALQUIERA sea su estado (una sola vez; se reutiliza abajo). Antes
+    // sólo se leían las OPEN/PARTIAL, y con eso una deuda ya saldada perdía el término
+    // `creditOnPunitory`: la mora que se pagó con saldo a favor (no con efectivo) no está
+    // en los conceptos PUNITORIOS de ninguna transacción, así que desaparecía del bruto del
+    // mes y reaparecía como saldo a favor fantasma para el mes siguiente. Caso real
+    // 2026-09-28: al saldar junio se arrastraron $297.880,83 que no existían.
+    const recordDebt = await tx.debt.findFirst({ where: { monthlyRecordId: record.id } });
+    const openDebt = recordDebt && recordDebt.status !== 'PAID' ? recordDebt : null;
 
     // Sincronizar el saldo a favor (appliedCredit) de la deuda con el previousBalance
     // EN VIVO de este mes (bug reportado 2026-07-12: Control Mensual y Deudas mostraban
@@ -1450,7 +1460,9 @@ const _recalculateCore = async (recordIds, tx) => {
       const bal = Math.round((amountPaid - td) * 100) / 100;
       const effBal = bal + (record.balanceForgiven || 0);
       let st = 'PENDING';
-      if (openDebt) {
+      // `openDebt` puede haber quedado SALDADA recién, en el sync de arriba (el saldo a
+      // favor cubrió el total): en ese caso ya no bloquea el COMPLETE del mes.
+      if (openDebt && openDebt.status !== 'PAID') {
         st = (amountPaid > 0) ? 'PARTIAL' : 'PENDING';
       } else if (effBal >= -1 && (amountPaid > 0 || isForgiven || creditCoversCharges)) {
         st = 'COMPLETE';
@@ -1514,7 +1526,13 @@ const _recalculateCore = async (recordIds, tx) => {
     // ser el bruto a la fecha — semánticas distintas que no se pueden sumar a mano sin
     // duplicar los punitorios cobrados vía deuda.
     let punitoryOutsideConcepts;
-    if (openDebt) {
+    if (recordDebt && recordDebt.status === 'PAID') {
+      // Deuda ya saldada: no queda punitorio impago que calcular en vivo, pero sí hay que
+      // reponer el que se pagó con SALDO A FAVOR — no generó concepto PUNITORIOS y sin
+      // esto se cae del bruto del mes (saldo a favor fantasma, ver el comentario de
+      // `recordDebt` arriba).
+      punitoryOutsideConcepts = _punitoryOutsideConcepts(recordDebt, null);
+    } else if (openDebt) {
       try {
         const livePun = await calculateDebtPunitory(openDebt, getTodayLocalString(), null, /* skipUpdate */ true);
         punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun);
@@ -1750,4 +1768,7 @@ module.exports = {
   isContractInRangeForMonth,
   canCreateRecordForContract,
   repairContractRecordMonthNumbers,
+  // Exportado sólo para tests: mantener una copia de esta fórmula en el test la dejaba
+  // desincronizada del código real y el test seguía "pasando" con el número viejo.
+  _punitoryOutsideConcepts,
 };

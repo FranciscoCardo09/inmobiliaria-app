@@ -79,16 +79,10 @@ function buildService(prisma) {
   });
 }
 
-// Réplica de `_punitoryOutsideConcepts` (monthlyRecordService.js): es el término por el que
-// `accumulatedPunitory` entra en el `totalDue` que ve el usuario en Control Mensual.
-const punitoryOutsideConcepts = (debt, live) => {
-  const base = realPunitory.round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
-  const creditOnPunitory = realPunitory.round2(Math.min(
-    Math.max((debt.appliedCredit || 0) - base, 0), debt.accumulatedPunitory || 0,
-  ));
-  const liveUnpaid = realPunitory.round2((live.unpaidAccumulatedPunitory || 0) + (live.amount || 0));
-  return realPunitory.round2(liveUnpaid + creditOnPunitory);
-};
+// La función REAL (exportada para tests): es el término por el que el punitorio de la
+// Deuda entra en el `totalDue` que ve el usuario en Control Mensual. Importarla —en vez de
+// copiarla acá— es lo que evita que el test se quede con una fórmula vieja.
+const { _punitoryOutsideConcepts: punitoryOutsideConcepts } = require('../src/services/monthlyRecordService');
 
 const totalDueJunio = (debt, live) => realPunitory.round2(
   RECORD.rentAmount + RECORD.servicesTotal + punitoryOutsideConcepts(debt, live) - RECORD.previousBalance,
@@ -109,18 +103,25 @@ async function payAndEmbed(debtService, prisma, { amount, paymentDate }) {
   return payments[payments.length - 1];
 }
 
-test('el monto del mes sale de accumulatedPunitory (línea base del caso real)', async () => {
+test('Control Mensual y Deudas muestran el MISMO monto para un mes con saldo a favor', async () => {
   const prisma = makeFakePrisma();
   const debtService = buildService(prisma);
   const debt = await seed(prisma);
 
-  HOY = '2026-09-28';
-  let live = await debtService.calculateDebtPunitory(debt, HOY, null, true);
-  assert.strictEqual(totalDueJunio(debt, live), 415832.45, 'junio al 28/09, como lo mostró el sistema');
-
-  HOY = '2026-09-25';
-  live = await debtService.calculateDebtPunitory(debt, HOY, null, true);
-  assert.strictEqual(totalDueJunio(debt, live), 401652.72, 'junio al 25/09 (fecha de la transferencia)');
+  // alquiler 787.763 + mora bruta desde el día 1 − saldo a favor arrastrado 1.085.643,83.
+  // El punitorio CONGELADO ($146.523,92 = los primeros 31 días) está contenido en la mora
+  // bruta: contarlo aparte inflaba las dos pantallas en ese monto.
+  for (const [fecha, esperado, mora] of [
+    ['2026-09-25', 255128.80, 553009.63],
+    ['2026-09-28', 269308.53, 567189.36],
+  ]) {
+    HOY = fecha;
+    const live = await debtService.calculateDebtPunitory(debt, fecha, null, true);
+    const pantallaDeudas = await debtService.computeLiveDebtTotal(debt, fecha, null);
+    assert.strictEqual(live.amount, mora, `mora bruta al ${fecha}`);
+    assert.strictEqual(totalDueJunio(debt, live), esperado, `Control Mensual al ${fecha}`);
+    assert.strictEqual(pantallaDeudas.liveCurrentTotal, esperado, `Deudas al ${fecha}`);
+  }
 
   HOY = '2026-09-28';
 });
@@ -191,5 +192,100 @@ test('sin la foto (pagos anteriores a punitoryBefore) el conteo de transacciones
   assert.strictEqual(
     after.accumulatedPunitory, realPunitory.round2(787763 * 0.006 * 120),
     '1/06 → 28/09 = 120 días sobre el alquiler; antes del fix: $0',
+  );
+});
+
+// ============================================================================
+// BUG (2026-09-28, mismo contrato): el saldo a favor arrastrado y el punitorio
+// CONGELADO se mezclaban mal en tres lugares distintos.
+// ============================================================================
+
+test('el saldo a favor no puede ser absorbido por un punitorio congelado que el total no cuenta', async () => {
+  const prisma = makeFakePrisma();
+  const debtService = buildService(prisma);
+  const debt = await seed(prisma);
+
+  // Sin ningún pago, `amount` ya es el bruto completo desde el día 1 (117 días al 25/09),
+  // así que el congelado ($146.523,92 = los primeros 31 días) está CONTENIDO ahí.
+  const live = await debtService.computeLiveDebtTotal(debt, '2026-09-25', null);
+  assert.strictEqual(live.liveAccumulatedPunitory, 553009.63, 'mora bruta al 25/09');
+  assert.strictEqual(
+    live.liveCurrentTotal, 255128.80,
+    'alquiler 787.763 + mora 553.009,63 − crédito 1.085.643,83; antes daba 401.652,72 '
+    + '(los 31 días congelados cobrados dos veces)',
+  );
+});
+
+test('una deuda que el saldo a favor cubre entera queda SALDADA, no abierta con total $0', async () => {
+  const prisma = makeFakePrisma();
+  const debtService = buildService(prisma);
+  // Deuda sin pagos propios y un crédito arrastrado que la cubre por completo.
+  await prisma.contract.create({ data: { ...CONTRACT, id: 'c-cred' } });
+  await prisma.monthlyRecord.create({
+    data: { ...RECORD, id: 'mr-jul', contractId: 'c-cred', periodMonth: 7, previousBalance: 0 },
+  });
+  await prisma.debt.create({
+    data: {
+      ...DEBT, id: 'd-jul', contractId: 'c-cred', monthlyRecordId: 'mr-jul',
+      periodMonth: 7, periodLabel: 'Julio 2026', originalAmount: 910654.03,
+      accumulatedPunitory: 122891.03, appliedCredit: 0,
+      punitoryStartDate: new Date(2026, 6, 1), status: 'OPEN',
+    },
+  });
+
+  // Mora al 28/09 = 90 días × $787.763 × 0,6% = $425.392,02 → total $1.213.155,02.
+  const settled = await debtService.syncDebtAppliedCreditFromRecord('d-jul', 1213155.02, prisma);
+
+  assert.strictEqual(settled.status, 'PAID', 'antes quedaba OPEN con currentTotal $0');
+  assert.strictEqual(settled.currentTotal, 0);
+  assert.strictEqual(settled.appliedCredit, 1213155.02);
+  assert.strictEqual(
+    settled.accumulatedPunitory, 425392.02,
+    'la mora se congela en el bruto a la fecha, como hace payDebt: es la que cubrió el crédito',
+  );
+});
+
+test('un crédito que NO alcanza deja la deuda abierta', async () => {
+  const prisma = makeFakePrisma();
+  const debtService = buildService(prisma);
+  await prisma.contract.create({ data: { ...CONTRACT, id: 'c-parc' } });
+  await prisma.monthlyRecord.create({
+    data: { ...RECORD, id: 'mr-ago', contractId: 'c-parc', periodMonth: 8, previousBalance: 0 },
+  });
+  await prisma.debt.create({
+    data: {
+      ...DEBT, id: 'd-ago', contractId: 'c-parc', monthlyRecordId: 'mr-ago',
+      periodMonth: 8, periodLabel: 'Agosto 2026', originalAmount: 939013.50,
+      accumulatedPunitory: 151250.50, appliedCredit: 0,
+      punitoryStartDate: new Date(2026, 7, 1), status: 'OPEN',
+    },
+  });
+
+  const partial = await debtService.syncDebtAppliedCreditFromRecord('d-ago', 431716.18, prisma);
+  assert.strictEqual(partial.status, 'OPEN', 'el crédito no cubre el total: sigue abierta');
+  assert.strictEqual(partial.appliedCredit, 431716.18);
+});
+
+test('una deuda ya cubierta por crédito se cierra aunque el crédito no haya cambiado', async () => {
+  const prisma = makeFakePrisma();
+  const debtService = buildService(prisma);
+  await prisma.contract.create({ data: { ...CONTRACT, id: 'c-idem' } });
+  await prisma.monthlyRecord.create({
+    data: { ...RECORD, id: 'mr-idem', contractId: 'c-idem', periodMonth: 7, previousBalance: 0 },
+  });
+  await prisma.debt.create({
+    data: {
+      ...DEBT, id: 'd-idem', contractId: 'c-idem', monthlyRecordId: 'mr-idem',
+      periodMonth: 7, periodLabel: 'Julio 2026', originalAmount: 910654.03,
+      accumulatedPunitory: 122891.03,
+      appliedCredit: 1213155.02, // ya aplicado en un recálculo anterior
+      currentTotal: 0, punitoryStartDate: new Date(2026, 6, 1), status: 'OPEN',
+    },
+  });
+
+  const settled = await debtService.syncDebtAppliedCreditFromRecord('d-idem', 1644871.20, prisma);
+  assert.strictEqual(
+    settled.status, 'PAID',
+    'antes salía por el early-return "sin cambios" y quedaba OPEN para siempre',
   );
 });
