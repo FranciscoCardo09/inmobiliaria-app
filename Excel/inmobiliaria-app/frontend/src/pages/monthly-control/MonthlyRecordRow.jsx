@@ -234,7 +234,7 @@ export const MonthlyRecordRow = memo(function MonthlyRecordRow({
             // `??` y no `||`: un total legítimo de 0 (mes cuyo descuento cubre todo el
             // cargo) caía al siguiente valor de la cadena y mostraba un número que no era
             // el total del mes.
-            const totalValue = record.totalHistorico ?? record.liveTotalDue ?? record.totalDue
+            const totalValue = record.totalMes ?? record.totalHistorico ?? record.liveTotalDue ?? record.totalDue
             const txs = record.transactions || []
             const recordObs = record.observations
             const txObs = txs

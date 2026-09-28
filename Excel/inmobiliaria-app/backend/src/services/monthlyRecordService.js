@@ -1105,6 +1105,19 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       );
     }
 
+    // COLUMNA "TOTAL" de Control Mensual (decisión del usuario 2026-09-28): lo que COSTÓ el
+    // mes — alquiler + servicios + IVA + punitorios — sin restarle el saldo a favor, que ya
+    // tiene su propia columna ("A Favor Ant."). Antes la columna mostraba el neto CLAMPEADO
+    // a 0, así que un mes enteramente cubierto por el crédito aparecía con alquiler y
+    // punitorios a la vista y TOTAL $0, como si el mes se hubiera evaporado.
+    const totalMes = round2(record.rentAmount + record.servicesTotal + ivaAmount + totalPunitoriosHistoricos);
+    // Neto SIN clampear: es el que define cuánta plata pasa al mes siguiente. Clampearlo
+    // (como hacía `totalHistorico`) borraba el excedente del crédito: "A Favor Sig." salía
+    // vacío mientras el mes siguiente mostraba ese mismo saldo en "A Favor Ant.", o sea la
+    // pantalla se contradecía sola. Mismo criterio que C-01 en `_recalculateCore`.
+    const netoMes = round2(totalMes - record.previousBalance);
+    const balanceReal = round2(totalAbonado - netoMes);
+
     records.push({
       ...record,
       debtInfo,
@@ -1118,7 +1131,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       punitoriosAnteriores,
       punitoriosActuales,
       totalAbonado,                // Total pagado (record + deuda)
-      totalHistorico,              // Total real (alquiler + servicios + todos los punitorios)
+      totalHistorico,              // Neto adeudado (ya descontado el saldo a favor, clampeado a 0)
+      totalMes,                    // COLUMNA "TOTAL": lo que costó el mes, sin descontar el saldo a favor
       contractHasOpenDebt: contractsWithOpenDebt.has(contract.id),
       // Enriched data
       contractType: contract.contractType || 'INQUILINO',
@@ -1162,38 +1176,15 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       })(),
       // Calculated fields for the view
       // IMPORTANTE: Cuando hay deuda, calcular balance sobre totales históricos
-      aFavorNextMonth: (() => {
-        let realBalance;
-        if (debtInfo && record.debt) {
-          // Si hay deuda (abierta o pagada), usar totales históricos
-          realBalance = totalAbonado - totalHistorico;
-        } else {
-          // Sin deuda, usar balance del período actual
-          realBalance = liveBalance;
-        }
-        return realBalance > 0 ? realBalance : 0;
-      })(),
-      debeNextMonth: (() => {
-        let realBalance;
-        if (debtInfo && record.debt) {
-          // Si hay deuda (abierta o pagada), usar totales históricos
-          realBalance = totalAbonado - totalHistorico;
-        } else {
-          // Sin deuda, usar balance del período actual
-          realBalance = liveBalance;
-        }
-        return realBalance < 0 ? Math.abs(realBalance) : 0;
-      })(),
+      // `balanceReal` (neto SIN clampear) vale para las dos ramas: sin deuda coincide con
+      // `liveBalance`, y con deuda es lo que antes se calculaba contra el `totalHistorico`
+      // clampeado — que hacía desaparecer el excedente del crédito.
+      aFavorNextMonth: balanceReal > 0 ? balanceReal : 0,
+      debeNextMonth: balanceReal < 0 ? Math.abs(balanceReal) : 0,
       // Recalcular isCancelled y status en vivo para corregir redondeo de IVA
       ...(() => {
         if (debtInfo && debtInfo.status !== 'PAID') return {};
-        let realBalance;
-        if (debtInfo && record.debt) {
-          realBalance = totalAbonado - totalHistorico;
-        } else {
-          realBalance = liveBalance;
-        }
-        const liveComplete = record.amountPaid > 0 && realBalance >= -1;
+        const liveComplete = record.amountPaid > 0 && balanceReal >= -1;
         if (liveComplete) {
           return { isCancelled: true, isPaid: true, status: 'COMPLETE' };
         }

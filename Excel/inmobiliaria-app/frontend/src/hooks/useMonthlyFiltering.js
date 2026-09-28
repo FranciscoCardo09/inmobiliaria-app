@@ -108,8 +108,11 @@ export function useMonthlyFiltering(allRecords = [], filters = {}) {
             valB = b.rentAmount || 0
             return sortDirection === 'asc' ? valA - valB : valB - valA
           case 'total':
-            valA = a.totalHistorico || a.liveTotalDue || a.totalDue || 0
-            valB = b.totalHistorico || b.liveTotalDue || b.totalDue || 0
+            // Mismo valor que muestra la celda TOTAL (`totalMes`), si no ordenaba por un
+            // número distinto del que se ve. `??`: un total legítimo de 0 no debe caer al
+            // siguiente de la cadena.
+            valA = a.totalMes ?? a.totalHistorico ?? a.liveTotalDue ?? a.totalDue ?? 0
+            valB = b.totalMes ?? b.totalHistorico ?? b.liveTotalDue ?? b.totalDue ?? 0
             return sortDirection === 'asc' ? valA - valB : valB - valA
           case 'pagado':
             valA = a.amountPaid || 0
