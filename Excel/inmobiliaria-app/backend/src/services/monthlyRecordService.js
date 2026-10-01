@@ -91,6 +91,30 @@ function carryForwardCredit(prevRecord) {
 }
 
 /**
+ * Cargos que le sobran a un mes extra post-vencimiento, o `null` si no hay nada que
+ * corregir.
+ *
+ * El mes extra (`endMonth + 1`) cobra SÓLO los servicios del último mes: alquiler $0,
+ * IVA $0 y sin punitorios. Eso se garantizaba únicamente al CREARLO desde
+ * `getOrCreateMonthlyRecords`; si el registro ya existía de antes —creado con alquiler
+ * por otro camino, o marcado `isPostExpiry` después por la re-derivación del flag—
+ * nadie le sacaba el alquiler: el refresh del GET saltea los meses extra y
+ * `_recalculateCore` usaba el `rentAmount` persistido.
+ *
+ * Caso real: Martinez Natalia Noemi (Alem 960), septiembre 2026. El registro lo creó el
+ * 23/04/2026 una propagación de servicios "hasta diciembre" con alquiler $361.000 (cinco
+ * días antes de que `bulkAssign` tuviera la guarda de fin de contrato); el 27/09 quedó
+ * marcado como mes extra pero siguió cobrando $382.902 en vez de los $21.902 del agua.
+ *
+ * A-06: un mes ya COMPLETE no se toca — lo cobrado queda como se cobró.
+ */
+function postExpiryChargeFix(record) {
+  if (!record || !record.isPostExpiry || record.status === 'COMPLETE') return null;
+  if ((record.rentAmount || 0) === 0 && (record.ivaAmount || 0) === 0 && !record.includeIva) return null;
+  return { rentAmount: 0, ivaAmount: 0, includeIva: false };
+}
+
+/**
  * Whether new MonthlyRecord rows can be created for this contract.
  * Renewed (active=false + renewedAt) and otherwise inactive contracts cannot
  * receive new records — we only READ what already exists for their periods.
@@ -530,6 +554,10 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
     if (isPostExpiry) {
       // Mes extra post-vencimiento: alquiler $0, IVA $0. Solo se cobran los
       // servicios del último mes (mes vencido), que se copian luego del bulk-create.
+      // Hereda el saldo a favor del último mes como cualquier otro mes (antes nacía
+      // con 0 y el crédito se perdía); totalDue/balance/status los deriva
+      // `_recalculateCore` después de copiar los servicios.
+      const credit = carryForwardCredit(prevRecordsByContractId.get(contract.id));
       recordsToCreate.push({
         groupId,
         contractId: contract.id,
@@ -540,12 +568,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         includeIva: false,
         ivaAmount: 0,
         servicesTotal: 0,
-        previousBalance: 0,
+        previousBalance: credit,
         punitoryAmount: 0,
         punitoryDays: 0,
         totalDue: 0,
         amountPaid: 0,
-        balance: 0,
+        balance: credit,
         isPostExpiry: true,
         comprobantesStatus: [],
       });
@@ -723,15 +751,15 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       for (const contract of postExpiryContractsToSetup) {
         const postExpiryRecord = recordsByContractId.get(contract.id);
         if (!postExpiryRecord) continue;
-        const svcTotal = await copyLastMonthServices(contract, postExpiryRecord.id);
-        if (svcTotal !== 0) {
-          const newTotalDue = round2(svcTotal);
-          await prisma.monthlyRecord.update({
-            where: { id: postExpiryRecord.id },
-            data: { servicesTotal: svcTotal, totalDue: newTotalDue, balance: -newTotalDue },
-          });
-        }
+        await copyLastMonthServices(contract, postExpiryRecord.id);
       }
+      // Totales del mes extra (servicios copiados − saldo a favor heredado) y su status:
+      // los deriva el motor, igual que en cualquier otra mutación de servicios. Antes se
+      // escribían a mano acá (`totalDue = servicios`), sin el crédito.
+      const postExpiryIds = postExpiryContractsToSetup
+        .map((c) => recordsByContractId.get(c.id)?.id)
+        .filter(Boolean);
+      if (postExpiryIds.length > 0) await recalculateMultipleRecords(postExpiryIds, null, true);
       // Re-fetch post-expiry records so they include the copied services
       const postExpiryContractIds = postExpiryContractsToSetup.map(c => c.id);
       const updatedPostExpiryRecords = await prisma.monthlyRecord.findMany({
@@ -831,15 +859,20 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         });
         Object.assign(record, { rentAmount: penalty, servicesTotal: svcTotal, services: refreshed, totalDue: newTotalDue, balance: newBalance });
       }
-    } else if (record && !isPenaltyRecord && !isPostExpiry && contract.active && record.status !== 'COMPLETE') {
+    } else if (record && !isPenaltyRecord && contract.active && record.status !== 'COMPLETE') {
       // Renewed/inactive contracts have frozen historical records: do not
       // recalculate rent/IVA/balance from the current contract config — that
       // would clobber legitimate historical values.
-      // Post-expiry records (alquiler $0, solo servicios) tampoco se recalculan:
-      // recomputaríamos el alquiler desde el historial y romperíamos el $0.
       // A-06: un mes ya COMPLETE nunca entra a este bloque (ver guard arriba)
       // — queda completamente congelado, no solo el previousBalance.
-      const currentRent = getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
+      //
+      // El mes extra post-vencimiento SÍ entra, con alquiler objetivo $0 (nunca el del
+      // historial). Antes se salteaba entero para no pisar su $0 con el alquiler del
+      // historial, y con eso dos cosas quedaban congeladas para siempre: un alquiler que
+      // el registro traía de antes de ser mes extra (caso Martinez Natalia Noemi, Alem
+      // 960, septiembre 2026: $361.000 cobrados de más — ver `postExpiryChargeFix`) y
+      // el saldo a favor del último mes, que nunca llegaba al mes extra.
+      const currentRent = isPostExpiry ? 0 : getBatchedRentForMonth(contract.id, monthNumber, contract.baseRent);
       const rentChanged = currentRent !== record.rentAmount;
 
       // Bug (2026-07-14): este bloque solía "sincronizar" includeIva desde
@@ -852,7 +885,9 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       // en milisegundos). `record.includeIva` es la fuente de verdad para un
       // registro ya creado; el contrato solo define el default al GENERARLO
       // (más arriba, `const includeIva = !!contract.pagaIva`).
-      const effectiveIva = record.includeIva;
+      // El mes extra no lleva IVA (es sobre el alquiler, que ahí es $0).
+      const effectiveIva = isPostExpiry ? false : record.includeIva;
+      const ivaFlagChanged = effectiveIva !== record.includeIva;
 
       // Refresh previousBalance from batch (el mes ya no puede estar COMPLETE acá)
       let latestPrevBalance = record.previousBalance;
@@ -863,7 +898,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         prevBalanceChanged = latestPrevBalance !== record.previousBalance;
       }
 
-      if (rentChanged || prevBalanceChanged) {
+      if (rentChanged || prevBalanceChanged || ivaFlagChanged) {
         const effectiveRent = rentChanged ? currentRent : record.rentAmount;
         const recordIva = round2(effectiveIva ? effectiveRent * 0.21 : 0);
         // A-04: usar el punitorio VIVO (misma función que el display y _recalculateCore),
@@ -924,6 +959,12 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
           totalDue: Math.max(newTotalDue, 0),
           balance: newBalance,
         };
+        if (ivaFlagChanged) {
+          // Sólo el mes extra llega acá (ver `effectiveIva`): el toggle manual de IVA de
+          // un mes normal sigue siendo la fuente de verdad y no se toca.
+          updateData.includeIva = effectiveIva;
+          updateData.ivaAmount = recordIva;
+        }
         if (rentChanged) {
           updateData.rentAmount = currentRent;
           // El % de IVA es sobre el alquiler: si el alquiler cambió, el monto de
@@ -1363,6 +1404,14 @@ const _recalculateCore = async (recordIds, tx) => {
   let runningPreviousBalance = null;
 
   for (const record of records) {
+    // El mes extra post-vencimiento cobra SÓLO servicios: el alquiler y el IVA son $0
+    // por definición, no por lo que haya quedado persistido. Ver `postExpiryChargeFix`.
+    // Se aplica sobre el `record` en memoria ANTES de cualquier cálculo, así el IVA, el
+    // `totalDue` y la base de punitorios salen de los cargos correctos, y se persiste
+    // más abajo junto con el resto de los campos.
+    const chargeFix = postExpiryChargeFix(record);
+    if (chargeFix) Object.assign(record, chargeFix);
+
     let servicesTotal = 0;
     for (const s of record.services) {
       if (s.conceptType.category === 'DESCUENTO' || s.conceptType.category === 'BONIFICACION') {
@@ -1570,10 +1619,11 @@ const _recalculateCore = async (recordIds, tx) => {
       record.isPaid !== isPaid ||
       record.isCancelled !== isPaid;
 
-    if (shouldUpdate || ids.includes(record.id) || record.needsRecalculation) {
+    if (shouldUpdate || chargeFix || ids.includes(record.id) || record.needsRecalculation) {
       await tx.monthlyRecord.update({
         where: { id: record.id },
         data: {
+          ...(chargeFix || {}),
           servicesTotal,
           punitoryAmount,
           punitoryDays,
@@ -1758,6 +1808,7 @@ module.exports = {
   calculateRentForMonth,
   isContractInRangeForMonth,
   canCreateRecordForContract,
+  postExpiryChargeFix,
   repairContractRecordMonthNumbers,
   // Exportado sólo para tests: mantener una copia de esta fórmula en el test la dejaba
   // desincronizada del código real y el test seguía "pasando" con el número viejo.

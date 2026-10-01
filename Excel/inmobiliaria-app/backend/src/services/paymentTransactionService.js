@@ -11,7 +11,7 @@ const RECORD_SELECT = {
   periodMonth: true, periodYear: true, rentAmount: true,
   servicesTotal: true, previousBalance: true, amountPaid: true,
   punitoryAmount: true, punitoryDays: true, punitoryForgiven: true,
-  includeIva: true, status: true,
+  includeIva: true, status: true, isPostExpiry: true,
   contract: {
     select: {
       id: true, punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
@@ -169,7 +169,10 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   // después muestra Control Mensual, el mes quedaría con un pendiente que el
   // recibo no explica.
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
-  const unpaidRentForPunitory = computePunitoryBase({
+  // El mes extra post-vencimiento nunca devenga punitorios, ni siquiera sobre los
+  // servicios impagos tras un pago parcial (misma regla que computeLiveRecordPunitory,
+  // que corta en seco con `isPostExpiry`). Antes este cálculo ni leía el flag.
+  const unpaidRentForPunitory = record.isPostExpiry ? 0 : computePunitoryBase({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
@@ -196,7 +199,7 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   const lastTxPunitoryPaid = (lastTransaction?.concepts || [])
     .filter((c) => c.type === 'PUNITORIOS')
     .reduce((s, c) => s + c.amount, 0);
-  const unpaidFrozenPunitory = lastTransaction?.punitoryForgiven
+  const unpaidFrozenPunitory = (lastTransaction?.punitoryForgiven || record.isPostExpiry)
     ? 0
     : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
 
@@ -483,6 +486,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
       id: true, periodMonth: true, periodYear: true, rentAmount: true,
       servicesTotal: true, previousBalance: true, amountPaid: true,
       punitoryAmount: true, punitoryDays: true, status: true, includeIva: true,
+      isPostExpiry: true,
       contract: {
         select: {
           punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
@@ -520,7 +524,10 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   // en registerPaymentCore: el preview del formulario tiene que anticipar exactamente
   // el punitorio que se va a cobrar.
   const ivaForPunitory = record.includeIva ? record.rentAmount * 0.21 : 0;
-  const unpaidRentForPunitory = computePunitoryBase({
+  // Mes extra post-vencimiento: sin base de punitorios (mismo criterio que el cobro).
+  // `computeLiveRecordPunitory` de abajo ya corta con `record.isPostExpiry`, que antes no
+  // se seleccionaba: el modal mostraba mora sobre el alquiler (caso Alem 960, sep-2026).
+  const unpaidRentForPunitory = record.isPostExpiry ? 0 : computePunitoryBase({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
