@@ -13,6 +13,7 @@ import {
 import DateInput, { getLocalToday } from './ui/DateInput'
 import { useBulkDebtPreview } from '../hooks/useDebts'
 import api from '../services/api'
+import { allocateBulkPayment, summarizeAllocation, effectiveTotal as effTotal } from '../utils/bulkDebtAllocation'
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
@@ -106,13 +107,7 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
     return fallback
   }, [preview, debts, currentRecord])
 
-  // Total efectivo a pagar de un mes: si se condona, el punitorio no cuenta (igual
-  // criterio que el backend — ver debtService.payDebtsBulk, que topea cada deuda sin
-  // punitorio cuando forgivePunitorios=true para no dejarla con sobrepago/saldo a favor).
-  const effectiveTotal = (it) => {
-    const raw = it.totalToPay || 0
-    return forgivePunitorios ? Math.max(raw - (it.punitory || 0), 0) : raw
-  }
+  const effectiveTotal = (it) => effTotal(it, forgivePunitorios)
 
   const total = useMemo(
     () => items.reduce((s, it) => s + effectiveTotal(it), 0),
@@ -128,25 +123,16 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
 
   const parsedAmount = typeof amount === 'number' ? amount : (parseFloat(amount) || 0)
 
-  // Waterfall en vivo: repartir el monto entre los meses en orden. El último ítem (mes
-  // actual, si está presente) es el único que puede quedar con excedente ("saldo a
-  // favor"); las deudas nunca lo reciben (se topean a su total efectivo).
-  const allocation = useMemo(() => {
-    let remaining = parsedAmount
-    const rows = items.map((it) => {
-      const cap = effectiveTotal(it)
-      const applied = Math.min(Math.max(remaining, 0), cap)
-      remaining = remaining - applied
-      const pending = cap - applied
-      let status = 'NONE'
-      if (applied <= 0.5) status = 'NONE'
-      else if (pending <= 1) status = 'FULL'
-      else status = 'PARTIAL'
-      return { ...it, totalToPay: cap, applied, pending, status }
-    })
-    const overpay = Math.max(remaining, 0)
-    return { rows, overpay }
-  }, [items, parsedAmount, forgivePunitorios])
+  // Waterfall en vivo + resumen (lógica pura en utils/bulkDebtAllocation, con tests).
+  // El último ítem (mes actual, si está presente) es el único que puede quedar con
+  // excedente ("saldo a favor"); las deudas nunca lo reciben (se topean a su total).
+  const allocation = useMemo(
+    () => allocateBulkPayment(items, parsedAmount, forgivePunitorios),
+    [items, parsedAmount, forgivePunitorios]
+  )
+  const summary = useMemo(() => summarizeAllocation(allocation), [allocation])
+
+  const shortLabel = (r) => r.periodLabel.replace(/\s*\(mes actual\)\s*$/, '')
 
   const handleSubmit = async () => {
     if (!parsedAmount || parsedAmount <= 0) return
@@ -275,6 +261,22 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
                   <span className="text-base-content/60">A aplicar</span>
                   <span className="font-mono text-success">{row.applied > 0.5 ? formatCurrency(row.applied) : '-'}</span>
                 </div>
+                {row.coverage && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-base-300 space-y-0.5">
+                    {row.coverage.map((c) => (
+                      <div key={c.label} className="flex justify-between text-xs">
+                        <span>{c.label}</span>
+                        <span className={c.missing > 0.5 ? 'text-warning' : 'text-success'}>
+                          {c.missing <= 0.5
+                            ? 'cubierto'
+                            : c.paid > 0.5
+                              ? `cubre ${formatCurrency(c.paid)} · falta ${formatCurrency(c.missing)}`
+                              : `falta ${formatCurrency(c.missing)}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -335,6 +337,60 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
             />
           </div>
         </div>
+
+        {/* Resumen: qué meses cancela el monto ingresado */}
+        {parsedAmount > 0 && allocation.rows.length > 0 && (
+          <div className="bg-base-200/60 border border-base-300 rounded-lg p-3 space-y-1 text-sm">
+            {summary.full.length === allocation.rows.length ? (
+              <div className="flex items-start gap-2 text-success font-semibold">
+                <CheckCircleIcon className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>Cancela todos los meses</span>
+              </div>
+            ) : summary.full.length > 0 ? (
+              <div className="flex items-start gap-2">
+                <CheckCircleIcon className="w-4 h-4 mt-0.5 shrink-0 text-success" />
+                <span><span className="font-semibold text-success">Cancela:</span> {summary.full.map(shortLabel).join(', ')}</span>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 text-error">
+                <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 shrink-0" />
+                <span className="font-semibold">No alcanza para cancelar ningún mes</span>
+              </div>
+            )}
+            {summary.partial && (
+              <div className="flex items-start gap-2">
+                <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 shrink-0 text-warning" />
+                <span>
+                  <span className="font-semibold text-warning">Parcial:</span> {shortLabel(summary.partial)}: paga {formatCurrency(summary.partial.applied)},{' '}
+                  <span className="font-semibold">faltan {formatCurrency(summary.partial.pending)}</span>
+                </span>
+              </div>
+            )}
+            {summary.none.length > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="w-4 text-center shrink-0 text-base-content/50">✕</span>
+                <span>
+                  <span className="font-semibold text-base-content/70">No cubre:</span>{' '}
+                  {summary.none.map((r) => `${shortLabel(r)} (${formatCurrency(r.totalToPay)})`).join(', ')}
+                </span>
+              </div>
+            )}
+            <div className="divider my-0.5"></div>
+            {summary.missingTotal > 1 ? (
+              <div className="flex justify-between font-semibold">
+                <span>Falta para cancelar todo</span>
+                <span className="font-mono text-error">{formatCurrency(summary.missingTotal)}</span>
+              </div>
+            ) : allocation.overpay > 1 ? (
+              <div className="flex justify-between font-semibold">
+                <span>Sobran (quedan a favor)</span>
+                <span className="font-mono text-info">{formatCurrency(allocation.overpay)}</span>
+              </div>
+            ) : (
+              <div className="font-semibold text-success">Monto exacto: no queda nada pendiente</div>
+            )}
+          </div>
+        )}
 
         {/* Método de pago */}
         <div className="form-control">

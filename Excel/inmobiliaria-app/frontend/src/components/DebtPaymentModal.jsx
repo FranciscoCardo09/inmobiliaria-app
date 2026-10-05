@@ -1,8 +1,9 @@
 // Debt Payment Modal - Pay open debts
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
+import BulkDebtPaymentModal from './BulkDebtPaymentModal'
 import {
   CurrencyDollarIcon,
   ExclamationTriangleIcon,
@@ -18,6 +19,7 @@ import { useDebtPunitoryPreview, useDebts, useDebt, useCanPayCurrentMonth } from
 import { useNotifications } from '../hooks/useNotifications'
 import api from '../services/api'
 import toast from 'react-hot-toast'
+import { selectBulkDebts } from '../utils/bulkDebtAllocation'
 
 const formatCurrency = (amount) => {
   if (!amount && amount !== 0) return '$0'
@@ -53,6 +55,7 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const [observations, setObservations] = useState('')
   const [cancelingPaymentId, setCancelingPaymentId] = useState(null)
   const [paymentSuccess, setPaymentSuccess] = useState(null) // { transactionId }
+  const [showBulkModal, setShowBulkModal] = useState(false)
 
   const { sendCashReceipt } = useNotifications(groupId)
 
@@ -71,7 +74,14 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
 
   // Recalculate punitorios when date changes
   const { data: preview } = useDebtPunitoryPreview(groupId, debt?.id, paymentDate)
-  const { cancelPayment, isCancelingPayment } = useDebts(groupId)
+  const { cancelPayment, isCancelingPayment, payDebtsBulk, isPayingBulk } = useDebts(groupId)
+
+  // "Pagar varias": qué deudas entran (prefijo contiguo; ver utils/bulkDebtAllocation).
+  const bulkDebts = useMemo(
+    () => selectBulkDebts({ openDebts: orderCheck?.debts, debt, isBlocked, blocker }),
+    [orderCheck, debt, isBlocked, blocker]
+  )
+  const canPayBulk = bulkDebts.length > 0
 
   // Use preview data when available, fallback to enriched debt data from backend
   // unpaidServices ya viene NETO de IVA (calculateDebtPunitory lo desglosa en el
@@ -190,6 +200,22 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
   const difference = totalToPay - parsedAmount
   const isPartial = parsedAmount > 0 && difference > 1
 
+  // Reemplaza este modal por el de pago múltiple (mismo patrón que PaymentRegistrationModal).
+  if (showBulkModal) {
+    return (
+      <BulkDebtPaymentModal
+        debts={bulkDebts}
+        groupId={groupId}
+        onPay={payDebtsBulk}
+        isPaying={isPayingBulk}
+        onClose={() => {
+          setShowBulkModal(false)
+          onClose()
+        }}
+      />
+    )
+  }
+
   return (
     <Modal isOpen={true} onClose={onClose} title={paymentSuccess ? "Pago Registrado" : "Pagar Deuda"} size="lg">
       <div className="space-y-4">
@@ -293,11 +319,31 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
               <ExclamationTriangleIcon className="w-4 h-4" />
               Ir a pagar {blocker?.periodLabel || 'el período anterior'}
             </Button>
+            {canPayBulk && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => setShowBulkModal(true)}
+              >
+                <CurrencyDollarIcon className="w-4 h-4" />
+                Pagar varios meses juntos ({bulkDebts.length})
+              </Button>
+            )}
           </div>
         )}
 
         {/* Breakdown + Form (hidden if blocked) */}
         {!isBlocked && <>
+        {canPayBulk && !paymentSuccess && (
+          <div className="flex items-center justify-between gap-2 bg-warning/10 border border-warning/30 rounded-lg px-3 py-2 text-sm">
+            <span>El inquilino adeuda {bulkDebts.length} meses.</span>
+            <Button variant="outline" size="sm" onClick={() => setShowBulkModal(true)}>
+              <CurrencyDollarIcon className="w-4 h-4" />
+              Pagar varios meses juntos
+            </Button>
+          </div>
+        )}
         <div className="bg-base-100 border border-base-300 rounded-lg p-4">
           <h3 className="font-semibold text-sm mb-3">Desglose</h3>
           <div className="space-y-1 text-sm">
