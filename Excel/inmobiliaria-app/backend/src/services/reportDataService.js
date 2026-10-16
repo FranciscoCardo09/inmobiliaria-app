@@ -778,7 +778,11 @@ const buildLiquidacionFromRecord = async (monthlyRecord, empresa, month, year, o
   let paymentStatus;
   if (total <= 0) {
     paymentStatus = 'SALDO A FAVOR';
-  } else if (amtPaid >= total - 0.01) { // 1 cent tolerance
+  } else if (amtPaid >= total - 1) {
+    // Tolerancia de $1, la MISMA que usa el motor (computeTotals en monthlyRecordService:
+    // `effBal >= -1` → COMPLETE). Con $0,01 un mes que Control Mensual da por pagado
+    // (caso Quevedo, oct-2026: pagó $550.000 de $550.001) salía "PAGO PARCIAL", quedaba
+    // oculto por el filtro "Solo con pago" y no se podían marcar Gastos a mi cargo.
     paymentStatus = saldoAFavor > 0 ? 'SALDO A FAVOR' : 'PAGADO';
   } else if (amtPaid > 0) {
     paymentStatus = 'PAGO PARCIAL';
