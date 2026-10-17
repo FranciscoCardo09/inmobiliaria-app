@@ -39,6 +39,9 @@ const ServiceTypeList = lazy(() => import('./pages/services/ServiceTypeList'))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage'))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
 const NotificationDashboard = lazy(() => import('./pages/notifications/NotificationDashboard'))
+const ConsorciosPage = lazy(() => import('./pages/consorcios/ConsorciosPage'))
+const ConsorcioDetail = lazy(() => import('./pages/consorcios/ConsorcioDetail'))
+const RendicionPage = lazy(() => import('./pages/consorcios/RendicionPage'))
 
 function App() {
   const { isAuthenticated, setLoading, isLoading, setUser, setGroups, setPendingInvites } = useAuthStore()
@@ -123,6 +126,11 @@ function App() {
 
           {/* Phase 6: Reports */}
           <Route path="reports" element={<ReportsPage />} />
+
+          {/* Consorcios: rendición mensual desde el extracto bancario */}
+          <Route path="consorcios" element={<ConsorciosPage />} />
+          <Route path="consorcios/rendiciones/:rid" element={<RendicionPage />} />
+          <Route path="consorcios/:id" element={<ConsorcioDetail />} />
 
           {/* Notifications */}
           <Route path="notifications" element={<NotificationDashboard />} />

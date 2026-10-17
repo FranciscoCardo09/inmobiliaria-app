@@ -19,6 +19,7 @@ import {
   BellIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  BuildingOffice2Icon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../../stores/authStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -34,6 +35,7 @@ const navItems = [
   { name: 'Historial Pagos', href: '/payment-history', icon: ClockIcon, phase: 5 },
   { name: 'Servicios', href: '/services', icon: WrenchScrewdriverIcon, phase: 5 },
   { name: 'Reportes', href: '/reports', icon: DocumentTextIcon, phase: 6 },
+  { name: 'Consorcios', href: '/consorcios', icon: BuildingOffice2Icon },
   { name: 'Notificaciones', href: '/notifications', icon: BellIcon },
 ]
 

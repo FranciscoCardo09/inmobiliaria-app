@@ -28,6 +28,7 @@ const notificationsRoutes = require('./notifications.routes');
 const cronRoutes = require('./cron.routes');
 const propertyGroupsRoutes = require('./propertyGroups.routes');
 const rentExpensesRoutes = require('./rentExpenses.routes');
+const consorciosRoutes = require('./consorcios.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -98,6 +99,9 @@ router.use('/groups/:groupId/reports', reportsRoutes);
 
 // Gastos Alquiler (recibo de gastos de ingreso)
 router.use('/groups/:groupId/rent-expenses', rentExpensesRoutes);
+
+// Consorcios: rendición mensual desde el extracto bancario
+router.use('/groups/:groupId/consorcios', consorciosRoutes);
 
 // Settings (Phase 6+)
 router.use('/groups/:groupId/settings', settingsRoutes);

@@ -224,6 +224,13 @@ function makeFakePrisma() {
     'holiday',
     'conceptType',
     'receiptSequence',
+    'userGroup',
+    'consorcio',
+    'consorcioRubro',
+    'consorcioRegla',
+    'rendicion',
+    'rendicionMovimiento',
+    'rendicionAjuste',
   ];
 
   const client = {};

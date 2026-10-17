@@ -102,6 +102,7 @@ model Group {
   propertyGroups        PropertyGroup[]
   rentExpenseConcepts   RentExpenseConcept[]
   rentExpenseReceipts   RentExpenseReceipt[]
+  consorcios            Consorcio[]
 
   @@map("groups")
 }
@@ -936,4 +937,152 @@ model RentExpenseReceiptItem {
 
   @@index([receiptId])
   @@map("rent_expense_receipt_items")
+}
+
+// ============================================
+// CONSORCIOS: rendición mensual desde el extracto bancario
+// ============================================
+// Montos: TODOS los campos *Cents guardan centavos enteros (Float para no
+// desbordar Int32 con saldos de millones; nunca tienen decimales).
+
+model Consorcio {
+  id                  String   @id @default(uuid())
+  groupId             String   @map("group_id")
+  name                String                                   // Título del informe: "Portal del Hierro , Torre I"
+  bankAccountName     String?  @map("bank_account_name")       // Como figura en el extracto: "EDIFICIO GABINO BLANCO 1951"
+  cbu                 String                                   // El extracto subido tiene que ser de este CBU
+  initialReserveCents Float?   @map("initial_reserve_cents")   // Reserva Caja de la primera rendición
+  reserveLabel        String   @default("Reserva Caja") @map("reserve_label")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  group       Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  rubros      ConsorcioRubro[]
+  reglas      ConsorcioRegla[]
+  rendiciones Rendicion[]
+
+  @@unique([groupId, cbu])
+  @@index([groupId])
+  @@map("consorcios")
+}
+
+model ConsorcioRubro {
+  id               String   @id @default(uuid())
+  consorcioId      String   @map("consorcio_id")
+  number           Int                                   // 1 → "01- Ingresos del periodo"
+  name             String
+  kind             String                                // INGRESO | EGRESO
+  role             String?                               // INGRESOS | GASTOS_BANCARIOS | RESERVA (clasificación automática)
+  defaultItemLabel String?  @map("default_item_label")   // Texto de la línea automática, admite {mesAnterior}
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  consorcio Consorcio @relation(fields: [consorcioId], references: [id], onDelete: Cascade)
+
+  @@unique([consorcioId, number])
+  @@index([consorcioId])
+  @@map("consorcio_rubros")
+}
+
+model ConsorcioRegla {
+  id               String   @id @default(uuid())
+  consorcioId      String   @map("consorcio_id")
+  matchCuit        String?  @map("match_cuit")
+  matchText        String?  @map("match_text")           // contenido en la descripción (sin mayúsculas/acentos)
+  matchConcept     String?  @map("match_concept")        // código de concepto del banco
+  direction        String?                               // CREDITO | DEBITO | null (cualquiera)
+  matchAmountCents Float?   @map("match_amount_cents")
+  rubroId          String   @map("rubro_id")
+  itemLabel        String   @map("item_label")
+  alwaysAsk        Boolean  @default(false) @map("always_ask") // sólo sugiere; el usuario decide cada mes
+  priority         Int      @default(0)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  consorcio Consorcio @relation(fields: [consorcioId], references: [id], onDelete: Cascade)
+
+  @@index([consorcioId])
+  @@map("consorcio_reglas")
+}
+
+model Rendicion {
+  id                  String    @id @default(uuid())
+  groupId             String    @map("group_id")
+  consorcioId         String    @map("consorcio_id")
+  year                Int
+  month               Int
+  status              String    @default("BORRADOR")     // BORRADOR | CERRADA
+  fileName            String?   @map("file_name")
+  fileHash            String    @map("file_hash")        // sha256 del contenido del extracto (detecta duplicados)
+  periodFrom          String    @map("period_from")      // "2026-07-01"
+  periodTo            String    @map("period_to")
+  openingBalanceCents Float     @map("opening_balance_cents")
+  closingBalanceCents Float     @map("closing_balance_cents")
+  reserveCents        Float?    @map("reserve_cents")    // sólo si reserveSource = MANUAL o al cerrar
+  reserveSource       String    @default("ANTERIOR") @map("reserve_source") // ANTERIOR | INICIAL | MANUAL
+  reserveNote         String?   @map("reserve_note")
+  lineOrder           Json?     @map("line_order")       // orden de las líneas del informe (claves)
+  snapshot            Json?                              // informe congelado al cerrar
+  totalCajaCents      Float?    @map("total_caja_cents") // congelado al cerrar: Reserva del mes siguiente
+  closedAt            DateTime? @map("closed_at")
+  closedById          String?   @map("closed_by_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  consorcio   Consorcio             @relation(fields: [consorcioId], references: [id], onDelete: Cascade)
+  movimientos RendicionMovimiento[]
+  ajustes     RendicionAjuste[]
+
+  @@unique([consorcioId, year, month])
+  @@index([groupId])
+  @@map("rendiciones")
+}
+
+model RendicionMovimiento {
+  id           String   @id @default(uuid())
+  rendicionId  String   @map("rendicion_id")
+  index        Int                                  // orden en el extracto
+  page         Int
+  date         String                               // "2026-07-06"
+  voucher      String?
+  conceptCode  String   @map("concept_code")
+  description  String
+  cuit         String?
+  counterparty String?
+  ownAccount   Boolean  @default(false) @map("own_account")
+  amountCents  Float    @map("amount_cents")        // + crédito / − débito
+  fingerprint  String
+  status       String                               // AUTO | REGLA | MANUAL | EXCLUIDO | PENDIENTE
+  rubroId      String?  @map("rubro_id")
+  itemLabel    String?  @map("item_label")
+  ruleId       String?  @map("rule_id")
+  reason       String?
+  suggestions  Json?
+  note         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  rendicion Rendicion @relation(fields: [rendicionId], references: [id], onDelete: Cascade)
+
+  @@index([rendicionId])
+  @@map("rendicion_movimientos")
+}
+
+model RendicionAjuste {
+  id          String   @id @default(uuid())
+  rendicionId String   @map("rendicion_id")
+  kind        String                              // AJUSTE (cambia el monto de una línea) | MANUAL (línea sin movimiento)
+  rubroId     String   @map("rubro_id")
+  itemLabel   String   @map("item_label")
+  amountCents Float    @map("amount_cents")       // AJUSTE: monto final de la línea; MANUAL: importe
+  note        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  rendicion Rendicion @relation(fields: [rendicionId], references: [id], onDelete: Cascade)
+
+  @@index([rendicionId])
+  @@map("rendicion_ajustes")
 }

@@ -14,7 +14,8 @@
     "db:studio": "prisma studio",
     "test": "node --test",
     "test:unit": "node --test tests/*.test.js",
-    "test:integration": "bash test/integration/run.sh"
+    "test:integration": "bash test/integration/run.sh",
+    "test:consorcio": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='src/services/consorcio/**' --test-coverage-include='src/controllers/consorcioController.js' --test-coverage-include='src/validators/consorcioValidators.js' --test-coverage-include='src/routes/consorcios.routes.js' tests/consorcio/*.test.js"
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",
@@ -31,6 +32,7 @@
     "nodemailer": "^8.0.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "pdfjs-dist": "^4.10.38",
     "pdfkit": "^0.17.2",
     "prisma": "^5.10.0",
     "resend": "^6.9.2",

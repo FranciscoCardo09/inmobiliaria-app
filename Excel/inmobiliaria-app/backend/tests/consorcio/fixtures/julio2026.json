@@ -1,0 +1,785 @@
+{
+ "header": {
+  "accountName": "EDIFICIO DE PRUEBA 123",
+  "holderName": "TITULAR DE PRUEBA",
+  "holderCuit": "27000000001",
+  "cbu": "2470005610000009999990",
+  "accountNumber": "099999/9",
+  "branch": "Sucursal Prueba",
+  "from": "1/7/2026",
+  "to": "31/7/2026"
+ },
+ "opening": {
+  "date": "01/07/2026",
+  "cents": 486183133
+ },
+ "movements": [
+  {
+   "date": "01/07/2026",
+   "voucher": null,
+   "concept": "127",
+   "cents": -1323700,
+   "desc": "COM.MANTENIMIENTO CUENTA MENSUAL"
+  },
+  {
+   "date": "01/07/2026",
+   "voucher": null,
+   "concept": "130",
+   "cents": -277977,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "01/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -1668,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "01/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -7942,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1001",
+   "concept": "580",
+   "cents": 19940288,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1002",
+   "concept": "148",
+   "cents": -119642,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1003",
+   "concept": "580",
+   "cents": 27613165,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1004",
+   "concept": "148",
+   "cents": -165679,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1005",
+   "concept": "580",
+   "cents": 27613165,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": "1006",
+   "concept": "148",
+   "cents": -165679,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": null,
+   "concept": "130",
+   "cents": -31800,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -1100,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "02/07/2026",
+   "voucher": null,
+   "concept": "288",
+   "cents": -151432,
+   "desc": "COM. SIRO PAGOS QR"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1007",
+   "concept": "580",
+   "cents": 28669910,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1008",
+   "concept": "148",
+   "cents": -172019,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "130",
+   "cents": -12129,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -420,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "288",
+   "cents": -57759,
+   "desc": "COM. SIRO PAGOS QR"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1009",
+   "concept": "190",
+   "cents": -2520000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 20111111112",
+    "PROVEEDOR MATERIALES"
+   ]
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1010",
+   "concept": "148",
+   "cents": -15120,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1011",
+   "concept": "190",
+   "cents": -27815100,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 27222222223",
+    "PERSONA, EXCLUIDA"
+   ]
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1012",
+   "concept": "148",
+   "cents": -166891,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1013",
+   "concept": "580",
+   "cents": 20629470,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1014",
+   "concept": "148",
+   "cents": -123777,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1015",
+   "concept": "190",
+   "cents": -16940000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 27333333334",
+    "VIDRIERIA, ESPEJOS SA"
+   ]
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": "1016",
+   "concept": "148",
+   "cents": -101640,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "130",
+   "cents": -8728,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -301,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "06/07/2026",
+   "voucher": null,
+   "concept": "288",
+   "cents": -41561,
+   "desc": "COM. SIRO PAGOS QR"
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1017",
+   "concept": "515",
+   "cents": 28509324,
+   "desc": "PAGO MIS CUENTAS SIRO"
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1018",
+   "concept": "194",
+   "cents": -541677,
+   "desc": "COM. ONLINE SIRO PAGO MIS CUENTAS"
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1019",
+   "concept": "148",
+   "cents": -174989,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1020",
+   "concept": "130",
+   "cents": -113752,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1021",
+   "concept": "161",
+   "cents": -90000000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 23444444445 LIMPIEZA",
+    "SERVICIOS INTEGRALES"
+   ]
+  },
+  {
+   "date": "07/07/2026",
+   "voucher": "1022",
+   "concept": "148",
+   "cents": -540000,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "08/07/2026",
+   "voucher": "1023",
+   "concept": "530",
+   "cents": 30360579,
+   "desc": "RAPIPAGO SIN FACTURA SIRO"
+  },
+  {
+   "date": "08/07/2026",
+   "voucher": "1024",
+   "concept": "214",
+   "cents": -834916,
+   "desc": "COM. ONLINE SIRO RAPIPAGO SIN FACTURA"
+  },
+  {
+   "date": "08/07/2026",
+   "voucher": "1025",
+   "concept": "130",
+   "cents": -175332,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "08/07/2026",
+   "voucher": "1026",
+   "concept": "148",
+   "cents": -188224,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1027",
+   "concept": "580",
+   "cents": 19021382,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1028",
+   "concept": "148",
+   "cents": -114128,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1029",
+   "concept": "580",
+   "cents": 20675414,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1030",
+   "concept": "148",
+   "cents": -124052,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1031",
+   "concept": "580",
+   "cents": 20078125,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1032",
+   "concept": "148",
+   "cents": -120469,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1033",
+   "concept": "580",
+   "cents": 20032180,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1034",
+   "concept": "148",
+   "cents": -120193,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1035",
+   "concept": "190",
+   "cents": -26188700,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30555555556",
+    "ASCENSORES DEL CENTRO SRL"
+   ]
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1036",
+   "concept": "148",
+   "cents": -157132,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1037",
+   "concept": "190",
+   "cents": -750000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 20111111112",
+    "PROVEEDOR MATERIALES"
+   ]
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1038",
+   "concept": "148",
+   "cents": -4500,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1039",
+   "concept": "580",
+   "cents": 27751001,
+   "desc": "CREDITO POR COBRO QR CON TRANSF. DIST. TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1040",
+   "concept": "148",
+   "cents": -166506,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1041",
+   "concept": "530",
+   "cents": 20132396,
+   "desc": "RAPIPAGO SIN FACTURA SIRO"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1042",
+   "concept": "214",
+   "cents": -553641,
+   "desc": "COM. ONLINE SIRO RAPIPAGO SIN FACTURA"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1043",
+   "concept": "148",
+   "cents": -124814,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1044",
+   "concept": "130",
+   "cents": -116265,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": null,
+   "concept": "130",
+   "cents": -45505,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": null,
+   "concept": "148",
+   "cents": -1575,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": null,
+   "concept": "288",
+   "cents": -216689,
+   "desc": "COM. SIRO PAGOS QR"
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1045",
+   "concept": "506",
+   "cents": 21451400,
+   "desc": "BAK - TRANSF. DISTINTO TIT."
+  },
+  {
+   "date": "13/07/2026",
+   "voucher": "1046",
+   "concept": "148",
+   "cents": -128708,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1047",
+   "concept": "536",
+   "cents": 28740731,
+   "desc": "PAGOFACIL SIN FACTURA SIRO"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1048",
+   "concept": "515",
+   "cents": 24271240,
+   "desc": "PAGO MIS CUENTAS SIRO"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1049",
+   "concept": "194",
+   "cents": -461154,
+   "desc": "COM. ONLINE SIRO PAGO MIS CUENTAS"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1050",
+   "concept": "222",
+   "cents": -790370,
+   "desc": "COM. ONLINE SIRO PAGOFACIL SIN FACTURA"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1051",
+   "concept": "148",
+   "cents": -327157,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1052",
+   "concept": "130",
+   "cents": -262820,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1053",
+   "concept": "190",
+   "cents": -839190,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30666666667",
+    "ASEGURADORA EJEMPLO SA"
+   ]
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1054",
+   "concept": "148",
+   "cents": -5035,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1055",
+   "concept": "190",
+   "cents": -6425700,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30666666667",
+    "ASEGURADORA EJEMPLO SA"
+   ]
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1056",
+   "concept": "148",
+   "cents": -38554,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1057",
+   "concept": "172",
+   "cents": -50000000,
+   "desc": [
+    "TRANSF.INTERB.MISMO TIT. 27000000001",
+    "TITULAR DE PRUEBA"
+   ]
+  },
+  {
+   "date": "14/07/2026",
+   "voucher": "1058",
+   "concept": "172",
+   "cents": -2500000,
+   "desc": [
+    "TRANSF.INTERB.MISMO TIT. 27000000001",
+    "TITULAR DE PRUEBA"
+   ]
+  },
+  {
+   "date": "15/07/2026",
+   "voucher": "1059",
+   "concept": "536",
+   "cents": 20271240,
+   "desc": "PAGOFACIL SIN FACTURA SIRO"
+  },
+  {
+   "date": "15/07/2026",
+   "voucher": "1060",
+   "concept": "222",
+   "cents": -557459,
+   "desc": "COM. ONLINE SIRO PAGOFACIL SIN FACTURA"
+  },
+  {
+   "date": "15/07/2026",
+   "voucher": "1061",
+   "concept": "130",
+   "cents": -117066,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "15/07/2026",
+   "voucher": "1062",
+   "concept": "148",
+   "cents": -125674,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "16/07/2026",
+   "voucher": "1063",
+   "concept": "190",
+   "cents": -54120000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 27777777778",
+    "VIGILANCIA PRIVADA"
+   ]
+  },
+  {
+   "date": "16/07/2026",
+   "voucher": "1064",
+   "concept": "148",
+   "cents": -324720,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1065",
+   "concept": "190",
+   "cents": -20698000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30888888889",
+    "PAGOS Y COBRANZAS SA"
+   ]
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1066",
+   "concept": "148",
+   "cents": -124188,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1067",
+   "concept": "190",
+   "cents": -29682800,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30888888889",
+    "PAGOS Y COBRANZAS SA"
+   ]
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1068",
+   "concept": "148",
+   "cents": -178097,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1069",
+   "concept": "190",
+   "cents": -5733200,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30888888889",
+    "PAGOS Y COBRANZAS SA"
+   ]
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1070",
+   "concept": "148",
+   "cents": -34399,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1071",
+   "concept": "190",
+   "cents": -44502570,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 30888888889",
+    "PAGOS Y COBRANZAS SA"
+   ]
+  },
+  {
+   "date": "22/07/2026",
+   "voucher": "1072",
+   "concept": "148",
+   "cents": -267015,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "23/07/2026",
+   "voucher": "1073",
+   "concept": "536",
+   "cents": 22452481,
+   "desc": "PAGOFACIL SIN FACTURA SIRO"
+  },
+  {
+   "date": "23/07/2026",
+   "voucher": "1074",
+   "concept": "222",
+   "cents": -617443,
+   "desc": "COM. ONLINE SIRO PAGOFACIL SIN FACTURA"
+  },
+  {
+   "date": "23/07/2026",
+   "voucher": "1075",
+   "concept": "130",
+   "cents": -129663,
+   "desc": "I.V.A."
+  },
+  {
+   "date": "23/07/2026",
+   "voucher": "1076",
+   "concept": "148",
+   "cents": -139198,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1077",
+   "concept": "190",
+   "cents": -10000000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 20999999990",
+    "ELECTRICISTA, OFICIO"
+   ]
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1078",
+   "concept": "148",
+   "cents": -60000,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1079",
+   "concept": "190",
+   "cents": -823769,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 20111111112",
+    "PROVEEDOR MATERIALES"
+   ]
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1080",
+   "concept": "148",
+   "cents": -4943,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1081",
+   "concept": "190",
+   "cents": -1500000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 20111111112",
+    "PROVEEDOR MATERIALES"
+   ]
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1082",
+   "concept": "148",
+   "cents": -9000,
+   "desc": "IMPUESTO LEY 25413"
+  },
+  {
+   "date": "27/07/2026",
+   "voucher": "1083",
+   "concept": "172",
+   "cents": -1000000,
+   "desc": [
+    "TRANSF.INTERB.MISMO TIT. 27000000001",
+    "TITULAR DE PRUEBA"
+   ]
+  },
+  {
+   "date": "31/07/2026",
+   "voucher": "1084",
+   "concept": "190",
+   "cents": -54120000,
+   "desc": [
+    "TRANSF.INTERB.DISTINTO TIT. 27777777778",
+    "VIGILANCIA PRIVADA"
+   ]
+  },
+  {
+   "date": "31/07/2026",
+   "voucher": "1085",
+   "concept": "148",
+   "cents": -324720,
+   "desc": "IMPUESTO LEY 25413"
+  }
+ ]
+}
