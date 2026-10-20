@@ -1,5 +1,5 @@
 // Payment Transaction Service - Register and manage payment transactions
-const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeLiveRecordPunitory } = require('../utils/punitory');
+const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeLiveRecordPunitory, creditPaidFrozenPunitory } = require('../utils/punitory');
 const { formatServiceLabel } = require('../utils/serviceLabel');
 const { recalculateMonthlyRecord, recalculateMultipleRecords } = require('./monthlyRecordService');
 const { canPayCurrentMonth } = require('./debtService');
@@ -199,9 +199,22 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   const lastTxPunitoryPaid = (lastTransaction?.concepts || [])
     .filter((c) => c.type === 'PUNITORIOS')
     .reduce((s, c) => s + c.amount, 0);
+  // La mora que el saldo a favor ya pagó en el primer pago tampoco está impaga (caso
+  // Yocsina, ver `creditPaidFrozenPunitory`).
+  const txCount = await tx.paymentTransaction.count({ where: { monthlyRecordId } });
+  const creditPaidPunitory = creditPaidFrozenPunitory({
+    txCount,
+    frozenPunitory,
+    lastTxPunitoryPaid,
+    appliedCredit: prevBalance,
+    amountPaid: amountPaidSoFar,
+    rentAmount: record.rentAmount,
+    servicesTotal,
+    ivaAmount: ivaForPunitory,
+  });
   const unpaidFrozenPunitory = (lastTransaction?.punitoryForgiven || record.isPostExpiry)
     ? 0
-    : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
+    : Math.max(frozenPunitory - lastTxPunitoryPaid - creditPaidPunitory, 0);
 
   // Bug (2026-07-14): esta base (unpaidRentForPunitory) da 0 en cuanto el
   // alquiler+servicios+IVA queda cubierto, aunque siga habiendo punitorio

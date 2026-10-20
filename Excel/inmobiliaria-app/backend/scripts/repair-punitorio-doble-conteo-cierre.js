@@ -142,6 +142,9 @@ async function repairOne(prisma, item) {
       accumulatedPunitory: item.correctAccum,
       currentTotal: item.newCurrentTotal,
       originalAmount: item.newOriginalAmount,
+      // Si al bajar la mora el crédito/pagos ya cubren todo, la deuda está saldada. Sin esto
+      // quedaba OPEN con $0 y seguía devengando mora en vivo (caso Yocsina, Julio 2026).
+      ...(item.newCurrentTotal <= 1 ? { status: 'PAID', closedAt: new Date() } : {}),
     },
   });
 }

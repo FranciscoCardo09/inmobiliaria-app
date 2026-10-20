@@ -93,6 +93,38 @@ function calculateImputation(monthlyRecord) {
 }
 
 /**
+ * Neto de una deuda AL ANCLA: impago (alquiler + servicios) + mora congelada − saldo a favor
+ * aplicado − pagos propios. Es la misma cuenta que usan `createDebtFromMonthlyRecord`,
+ * `recalculateDebtFromMonthlyRecord` y `syncDebtServicesFromRecord` para decidir si la deuda
+ * existe / quedó saldada (corte ≤ $1).
+ *
+ * Bug real (2026-10-20, caso Yocsina 1615, Julio 2026): una reparación dejó una deuda OPEN
+ * con neto −$0,08; la mora en vivo corría sobre el alquiler completo ($524.348,70 en 95 días)
+ * y, como era el período más viejo, no dejaba cobrar Agosto.
+ */
+const debtNetAtAnchor = (debt) => round2(
+  (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0) + (debt.accumulatedPunitory || 0)
+  - (debt.appliedCredit || 0) - (debt.amountPaid || 0)
+);
+
+/**
+ * ¿La deuda está saldada al ancla? Sólo tiene sentido con algún pago (`hasPayment`, mismo
+ * criterio que `calculateDebtPunitory`): ahí el ancla es la fecha de ese pago y
+ * `accumulatedPunitory` es TODA la mora devengada hasta él, así que si el crédito y los pagos
+ * cubren el neto no queda base sobre la cual correr mora. Sin ningún pago el ancla es el día 1
+ * y la mora congelada está CONTENIDA en la mora en vivo: el neto con el congelado no dice nada,
+ * y la regla vigente es que esa deuda sigue devengando aunque el crédito supere la base (caso
+ * Ponce, `debtCreditExceedsBase.test.js`).
+ *
+ * Invariante: una deuda saldada al ancla no devenga mora en vivo, no bloquea el orden
+ * cronológico y `syncDebtAppliedCreditFromRecord` la cierra como PAID.
+ */
+const isDebtSettledAtAnchor = (debt) => {
+  const hasPayment = (debt.amountPaid || 0) > 0 || (debt.previousRecordPayment || 0) > 0;
+  return hasPayment && debtNetAtAnchor(debt) <= 1;
+};
+
+/**
  * Crear deuda a partir de un MonthlyRecord impago/parcial.
  * Se llama durante el cierre mensual.
  */
@@ -403,6 +435,14 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
   }
   const totalBase = round2(unpaidRentAmount + unpaidServicesAmount);
   const remainingBase = round2(Math.max(totalBase - debt.amountPaid, 0));
+
+  // Deuda saldada al ancla (ver `isDebtSettledAtAnchor`): el crédito y los pagos ya cubren todo lo
+  // adeudado, así que no queda base sobre la cual correr mora. Sin este corte, la rama
+  // `hasPayment` devengaba sobre `remainingBase` —que no descuenta el crédito— y la mora
+  // fantasma impedía, además, que `syncDebtAppliedCreditFromRecord` la cerrara.
+  if (isDebtSettledAtAnchor({ ...debt, unpaidRentAmount, unpaidServicesAmount, accumulatedPunitory })) {
+    return { days: 0, amount: 0, newPunitoryAmount: 0, accumulatedPunitory, unpaidAccumulatedPunitory: 0, grossPunitoryToDate: accumulatedPunitory, remainingDebt: 0, remainingServices: 0, remainingRent: 0, iva: 0, startDate: null, endDate: null };
+  }
 
   // Regla de base para punitorios:
   //  - Si NUNCA hubo un pago (ni del MonthlyRecord original → previousRecordPayment,
@@ -1295,6 +1335,8 @@ const getUnpaidPeriods = async (groupId, contractId) => {
     select: {
       id: true, monthlyRecordId: true, periodMonth: true, periodYear: true,
       periodLabel: true, contractId: true,
+      unpaidRentAmount: true, unpaidServicesAmount: true, accumulatedPunitory: true,
+      appliedCredit: true, amountPaid: true, previousRecordPayment: true,
     },
     orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
   });
@@ -1347,6 +1389,9 @@ const getUnpaidPeriods = async (groupId, contractId) => {
 
   const periods = [];
   for (const d of openDebts) {
+    // Saldada al ancla (ver `isDebtSettledAtAnchor`): aunque algún escritor la haya dejado en
+    // OPEN, no es una obligación y no puede bloquear el cobro de los meses siguientes.
+    if (isDebtSettledAtAnchor(d)) continue;
     periods.push({
       type: 'DEBT',
       id: d.id,
@@ -2181,9 +2226,14 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
   // `accumulatedPunitory` se congela en el bruto a la fecha, exactamente como hace
   // `payDebt`: a partir de acá el crédito cubrió ESA mora, y es lo que `_punitoryOutsideConcepts`
   // necesita leer para reponerla en el bruto del mes.
-  const settledByCredit = (debt.amountPaid || 0) === 0
+  const settledByLiveCredit = (debt.amountPaid || 0) === 0
     && liveTotalCeiling > 0
     && newAppliedCredit >= liveTotalCeiling - 1;
+  // Saldada al ancla con el crédito nuevo (ver `isDebtSettledAtAnchor`). Sin esto, una deuda
+  // con pago previo al cierre que el crédito cubría entera quedaba OPEN con $0 para siempre
+  // (caso Yocsina, Julio 2026). Acá la mora congelada ya está cubierta: no se toca.
+  const settledAtAnchor = isDebtSettledAtAnchor({ ...debt, appliedCredit: newAppliedCredit });
+  const settledByCredit = settledByLiveCredit || settledAtAnchor;
 
   // Sin cambios que escribir. El chequeo va DESPUÉS de `settledByCredit` a propósito: una
   // deuda que ya tenía el crédito bien aplicado pero seguía en OPEN salía por acá y nunca
@@ -2206,6 +2256,8 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
 };
 
 module.exports = {
+  debtNetAtAnchor,
+  isDebtSettledAtAnchor,
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,
   getDebtSyncSnapshot,

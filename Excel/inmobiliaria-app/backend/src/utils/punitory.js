@@ -223,6 +223,34 @@ function round2(n) {
 }
 
 /**
+ * Mora del congelado que pagó el SALDO A FAVOR arrastrado (no tiene concepto PUNITORIOS).
+ *
+ * El crédito del mes anterior entra como plata del PRIMER pago (caso Biassi): ese pago lo
+ * aplica a servicios → alquiler → punitorios, y lo que sobra del crédito tras cubrir los cargos
+ * paga mora sin dejar rastro en los conceptos. Quien calculaba el congelado impago restaba
+ * sólo el concepto PUNITORIOS del último pago, así que esa mora volvía como impaga y encima
+ * generaba mora compuesta sobre sí misma.
+ *
+ * Bug real (2026-10-20, caso Yocsina 1615, Julio 2026): crédito $1.017.110,08 + pago $10.457 el
+ * 18/07 sobre alquiler $900.000 + servicios $30.367 + mora $97.200 → el mes quedaba saldado
+ * (sobraban $0,08), pero se daban por impagos $86.743 de mora ($97.200 − $10.457) que había
+ * pagado el crédito. El modal de cobro mostró un saldo que no existía (el 21/07 se "condonaron"
+ * $11.142,92) y el Control Mensual le seguía cobrando mora compuesta.
+ *
+ * Sólo cuenta con UNA transacción: el crédito actúa en el primer pago, y el congelado de los
+ * pagos siguientes ya nace sin esa mora (descontarla de nuevo sub-contaría).
+ */
+function creditPaidFrozenPunitory({
+  txCount = 0, frozenPunitory = 0, lastTxPunitoryPaid = 0, appliedCredit = 0, amountPaid = 0,
+  rentAmount = 0, servicesTotal = 0, ivaAmount = 0,
+}) {
+  if (txCount !== 1 || !(appliedCredit > 0)) return 0;
+  const surplus = appliedCredit + amountPaid - (rentAmount + servicesTotal + ivaAmount) - lastTxPunitoryPaid;
+  const cap = Math.min(appliedCredit, Math.max(frozenPunitory - lastTxPunitoryPaid, 0));
+  return round2(Math.min(Math.max(surplus, 0), cap));
+}
+
+/**
  * Base ÚNICA de punitorios para un mes abierto (LOGICA.md §4.3, regla confirmada
  * por el usuario 2026-07-11 — AUDITORIA_FUNCIONAL_2026-07-10.md A-03/A-04):
  *   - Sin ningún pago real: la base es SOLO el alquiler (los servicios/IVA
@@ -357,6 +385,7 @@ function computeLiveRecordPunitory(record, contract, holidays, {
   let amount = record.punitoryAmount || 0;
   let days = record.punitoryDays || 0;
   let unpaidFrozenPunitory = 0;
+  let creditPaidPunitory = 0;
   let newPunitory = 0;
 
   let graceDate = null;
@@ -387,9 +416,19 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     const lastTxPunitoryPaid = (lastTx?.concepts || [])
       .filter((c) => c.type === 'PUNITORIOS')
       .reduce((s, c) => s + c.amount, 0);
+    creditPaidPunitory = lastTx?.punitoryForgiven ? 0 : creditPaidFrozenPunitory({
+      txCount: txs.length,
+      frozenPunitory,
+      lastTxPunitoryPaid,
+      appliedCredit: record.previousBalance || 0,
+      amountPaid,
+      rentAmount: record.rentAmount || 0,
+      servicesTotal,
+      ivaAmount: ivaForPunitory,
+    });
     unpaidFrozenPunitory = lastTx?.punitoryForgiven
       ? 0
-      : Math.max(frozenPunitory - lastTxPunitoryPaid, 0);
+      : Math.max(frozenPunitory - lastTxPunitoryPaid - creditPaidPunitory, 0);
 
     const lastPaymentDate = lastTx ? new Date(lastTx.paymentDate) : null;
 
@@ -452,7 +491,7 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     newPunitory = 0;
   }
 
-  return { amount, days, unpaidFrozenPunitory, newPunitory, graceDate, fromDate, toDate };
+  return { amount, days, unpaidFrozenPunitory, creditPaidPunitory, newPunitory, graceDate, fromDate, toDate };
 }
 
 /**
@@ -520,7 +559,10 @@ function computeGrossRecordPunitory(record, contract, holidays, {
   });
   const newPunitory = live.newPunitory || 0;
   const unpaid = round2((live.unpaidFrozenPunitory || 0) + newPunitory);
-  return { amount: round2(paid + unpaid), paid, unpaid, newPunitory, days: live.days };
+  // La mora que pagó el saldo a favor es BRUTO cobrado aunque no tenga concepto: sin sumarla
+  // acá se caería del total del mes y el crédito sobrante bajaría como saldo a favor fantasma.
+  const paidWithCredit = live.creditPaidPunitory || 0;
+  return { amount: round2(paid + paidWithCredit + unpaid), paid: round2(paid + paidWithCredit), unpaid, newPunitory, days: live.days };
 }
 
 // Keep legacy functions for backward compatibility
@@ -566,6 +608,7 @@ module.exports = {
   computePunitoryBase,
   computeLiveRecordPunitory,
   computeGrossRecordPunitory,
+  creditPaidFrozenPunitory,
   getEffectiveGraceDate,
   getHolidaysForYear,
   clearHolidayCache,
