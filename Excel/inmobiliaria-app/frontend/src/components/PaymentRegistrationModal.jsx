@@ -110,7 +110,11 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   const iva = record?.ivaAmount || 0
   const alreadyPaid = record?.amountPaid || 0
 
-  const totalDue = Math.round(alquiler + servicios + punitoryAmount + iva - aFavorAnterior)
+  // `alreadyPaid` incluye la mora que ya se cobró este mes; esa plata no pagó alquiler ni
+  // servicios, así que se suma al total para no proponer de menos (p. ej. al agregar un
+  // servicio o el IVA a un mes ya pagado con mora).
+  const punitoryPaidSoFar = punitoryPreview?.punitoryPaidSoFar || 0
+  const totalDue = Math.round(alquiler + servicios + punitoryAmount + punitoryPaidSoFar + iva - aFavorAnterior)
   const remaining = Math.max(totalDue - Math.round(alreadyPaid), 0)
 
   useEffect(() => {

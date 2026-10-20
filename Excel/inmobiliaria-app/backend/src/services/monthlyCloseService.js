@@ -1,5 +1,6 @@
 // Monthly Close Service - Cierre mensual que genera deudas automáticas
-const { createDebtFromMonthlyRecord, calculateImputation } = require('./debtService');
+const { createDebtFromMonthlyRecord, computeDebtDraft } = require('./debtService');
+const { getTodayLocalString } = require('../utils/dateUtils');
 const { isContractInRangeForMonth, processDirtyRecords } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
@@ -31,6 +32,24 @@ const isCloseCandidate = (record) => {
   if (record.debt) return false;
   if ((record.balanceForgiven || 0) > 0) return false;
   return isContractInRangeForMonth(record.contract, record.monthNumber);
+};
+
+/**
+ * Sólo se cierra un mes que ya terminó (o su último día). Antes nada lo impedía: cerrar
+ * Diciembre en Octubre generó 104 deudas en la prueba de la auditoría 2026-10-20, con mora
+ * corriendo sobre meses que todavía no vencían.
+ */
+const assertMonthCanClose = (periodMonth, periodYear, today = getTodayLocalString()) => {
+  const [ty, tm, td] = today.split('-').map(Number);
+  const lastDay = new Date(periodYear, periodMonth, 0).getDate();
+  const periodKey = periodYear * 12 + periodMonth;
+  const todayKey = ty * 12 + tm;
+  if (periodKey < todayKey) return;
+  if (periodKey === todayKey && td >= lastDay) return;
+  throw Object.assign(
+    new Error(`Todavía no se puede cerrar ${monthNames[periodMonth]} ${periodYear}: se cierra a partir del ${lastDay}/${periodMonth}/${periodYear}.`),
+    { code: 'PAYMENT_BLOCKED' },
+  );
 };
 
 const monthNames = [
@@ -76,7 +95,7 @@ const previewCloseMonth = async (groupId, month, year) => {
           conceptType: { select: { name: true, label: true, category: true } },
         },
       },
-      transactions: { orderBy: { createdAt: 'asc' } },
+      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }] },
       debt: true, // Verificar si ya tiene deuda
     },
   });
@@ -88,17 +107,16 @@ const previewCloseMonth = async (groupId, month, year) => {
   // del contrato?" — se reutiliza en `isCloseCandidate` en vez de duplicar la lógica.
   const recordsToClose = unpaidRecords.filter(isCloseCandidate);
 
-  const debtsPreview = recordsToClose.map((record) => {
-    const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, servicesCovered, rentCovered, punitoryCovered } = calculateImputation(record);
+  const debtsPreview = await Promise.all(recordsToClose.map(async (record) => {
+    // Mismo cálculo que el cierre real (`computeDebtDraft`), incluido el catch-up de mora de
+    // los meses sin pagos y el crédito aplicado al total: preview y cierre no pueden diferir.
+    const draft = await computeDebtDraft(record, record.contract);
+    const { unpaidRent, unpaidPunitory, totalOriginal, totalUnpaid, appliedCredit, netUnpaid } = draft;
+    const amountPaid = record.amountPaid || 0;
+    const servicesCovered = Math.min(amountPaid, record.servicesTotal || 0);
+    const rentCovered = Math.min(Math.max(amountPaid - servicesCovered - (record.ivaAmount || 0), 0), record.rentAmount || 0);
+    const punitoryCovered = Math.max(amountPaid - servicesCovered - (record.ivaAmount || 0) - rentCovered, 0);
     const isPropietario = record.contract.contractType === 'PROPIETARIO';
-
-    // El saldo a favor arrastrado se aplica al TOTAL adeudado, igual que en la ejecución
-    // (`createDebtFromMonthlyRecord`), y el corte es el mismo: ≤ $1 no genera deuda.
-    // Antes el preview anunciaba `totalUnpaid > 0` sin aplicar el crédito, así que mostraba
-    // "sí genera deuda" para meses que después no generaban nada y el usuario veía un
-    // preview que no coincidía con el resultado.
-    const appliedCredit = Math.min(Math.max(record.previousBalance || 0, 0), totalUnpaid);
-    const netUnpaid = Math.round((totalUnpaid - appliedCredit) * 100) / 100;
 
     return {
       monthlyRecordId: record.id,
@@ -126,7 +144,7 @@ const previewCloseMonth = async (groupId, month, year) => {
       netUnpaid,
       willGenerateDebt: netUnpaid > 1,
     };
-  });
+  }));
 
   const summary = {
     totalRecords: unpaidRecords.length,
@@ -135,7 +153,7 @@ const previewCloseMonth = async (groupId, month, year) => {
     willGenerateDebts: debtsPreview.filter((d) => d.willGenerateDebt).length,
     // Neto del crédito y sólo de las que efectivamente se van a crear: es la plata que
     // realmente va a quedar como deuda.
-    totalDebtAmount: debtsPreview.reduce((sum, d) => sum + (d.willGenerateDebt ? d.netUnpaid : 0), 0),
+    totalDebtAmount: Math.round(debtsPreview.reduce((sum, d) => sum + (d.willGenerateDebt ? d.netUnpaid : 0), 0) * 100) / 100,
   };
 
   return { debtsPreview, summary };
@@ -147,6 +165,7 @@ const previewCloseMonth = async (groupId, month, year) => {
 const closeMonth = async (groupId, month, year) => {
   const periodMonth = parseInt(month);
   const periodYear = parseInt(year);
+  assertMonthCanClose(periodMonth, periodYear);
 
   // Saldar los recálculos pendientes ANTES de decidir quién debe: si un servicio o el IVA
   // se tocaron hace un instante, el recálculo corre fire-and-forget y el registro puede
@@ -168,7 +187,7 @@ const closeMonth = async (groupId, month, year) => {
           conceptType: { select: { category: true } },
         },
       },
-      transactions: { orderBy: { createdAt: 'asc' } },
+      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }] },
       debt: true,
     },
   });
@@ -211,6 +230,7 @@ const closeMonth = async (groupId, month, year) => {
 };
 
 module.exports = {
+  assertMonthCanClose,
   previewCloseMonth,
   closeMonth,
 };

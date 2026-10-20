@@ -1,6 +1,7 @@
 // Payment Transaction Service - Register and manage payment transactions
 const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, computeLiveRecordPunitory, creditPaidFrozenPunitory } = require('../utils/punitory');
 const { formatServiceLabel } = require('../utils/serviceLabel');
+const { sumPunitoryConcepts } = require('../utils/helpers');
 const { recalculateMonthlyRecord, recalculateMultipleRecords } = require('./monthlyRecordService');
 const { canPayCurrentMonth } = require('./debtService');
 
@@ -220,6 +221,18 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   // abajo). El reparto de esos créditos por concepto se calcula junto con los baldes de
   // servicios/alquiler/IVA, para que el descuento entre una sola vez.
 
+  // Mora YA cobrada en pagos anteriores del mes (conceptos PUNITORIOS). Esa plata no pagó
+  // cargos: si después se agregó un servicio o el IVA, no puede imputarse a cubrirlos. Antes
+  // `alreadyPaid` la contaba como crédito para servicios/alquiler y el servicio nuevo no se
+  // cobraba nunca: el mes quedaba PARTIAL debiendo la mora y el modal proponía $0
+  // (auditoría 2026-10-20, Falco Sánchez nov: −$76.302).
+  const priorTxs = await tx.paymentTransaction.findMany({
+    where: { monthlyRecordId },
+    select: { punitoryForgiven: true, concepts: { select: { type: true, amount: true } } },
+  });
+  const priorPunitoryPaid = sumPunitoryConcepts(priorTxs);
+  const cashOnChargesSoFar = round2(Math.max(amountPaidSoFar - priorPunitoryPaid, 0));
+
   // Base ÚNICA de punitorios (A-03, utils/punitory.js#computePunitoryBase):
   // - Sin ningún pago real: solo el alquiler.
   // - Con pago parcial: el saldo restante (alquiler + servicios + IVA impago − pagos
@@ -239,7 +252,7 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
-    amountPaid: amountPaidSoFar,
+    amountPaid: cashOnChargesSoFar,
     appliedCredit: prevBalance,
   });
 
@@ -315,7 +328,9 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
   // servicios → alquiler → punitorios; luego ESTE pago cubre lo que reste en ese mismo orden.
   const concepts = [];
   const paymentAmount = parseFloat(amount);
-  const alreadyPaid = round2(amountPaidSoFar + prevBalance);
+  // Créditos que cubren cargos: efectivo previo SIN la mora que ya pagó, más el saldo a favor
+  // SIN la mora que pagó el crédito (`creditPaidPunitory`).
+  const alreadyPaid = round2(Math.max(cashOnChargesSoFar + prevBalance - creditPaidPunitory, 0));
 
   // Servicios BRUTOS y descuentos POR SEPARADO. `record.servicesTotal` viene NETO, y
   // usarlo como presupuesto de servicios era el bug (2026-08-28): el descuento entraba dos
@@ -606,11 +621,12 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate, groupId = 
   // Mes extra post-vencimiento: sin base de punitorios (mismo criterio que el cobro).
   // `computeLiveRecordPunitory` de abajo ya corta con `record.isPostExpiry`, que antes no
   // se seleccionaba: el modal mostraba mora sobre el alquiler (caso Alem 960, sep-2026).
+  // Misma base que el cobro: la mora ya cobrada no cubre cargos (ver registerPaymentCore).
   const unpaidRentForPunitory = record.isPostExpiry ? 0 : computePunitoryBase({
     rentAmount: record.rentAmount,
     servicesTotal,
     ivaAmount: ivaForPunitory,
-    amountPaid,
+    amountPaid: Math.max(amountPaid - sumPunitoryConcepts(record.transactions || []), 0),
     appliedCredit: prevBalance,
   });
 
@@ -642,6 +658,10 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate, groupId = 
     lastPaymentDate: lastTx?.paymentDate || null,
     lastPaymentAmount: lastTx?.amount || null,
     amountPaid: record.amountPaid,
+    // Mora YA cobrada este mes (conceptos PUNITORIOS + la que pagó el saldo a favor). El modal
+    // la necesita para proponer el monto: `amountPaid` la incluye, y restarla como si hubiera
+    // pagado cargos proponía de menos justo ese monto (auditoría 2026-10-20).
+    punitoryPaidSoFar: round2(sumPunitoryConcepts(record.transactions || []) + (livePun.creditPaidPunitory || 0)),
     status: record.status,
   };
 };
@@ -872,6 +892,7 @@ const deleteTransaction = async (groupId, id) => {
 };
 
 module.exports = {
+  nextReceiptNumber,
   registerPayment,
   calculatePunitoryPreview,
   getPaymentHistory,

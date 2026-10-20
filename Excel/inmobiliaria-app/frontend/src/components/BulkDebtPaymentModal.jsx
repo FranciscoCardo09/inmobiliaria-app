@@ -149,12 +149,15 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
 
       // Recibo combinado: un único PDF con todos los meses efectivamente pagados.
       const paidMonthlyRecordIds = result?.result?.paidMonthlyRecordIds
+      // Con la transacción de este cobro en cada mes: el recibo muestra lo cobrado ahora,
+      // no el total del período.
+      const paidTransactions = result?.result?.paidTransactions
       if (paymentMethod === 'EFECTIVO' && paidMonthlyRecordIds?.length > 0) {
         setIsDownloadingReceipt(true)
         try {
           const response = await api.post(
             `/groups/${groupId}/reports/pago-efectivo/pdf/multi`,
-            { monthlyRecordIds: paidMonthlyRecordIds },
+            paidTransactions?.length > 0 ? { items: paidTransactions } : { monthlyRecordIds: paidMonthlyRecordIds },
             { responseType: 'blob' }
           )
           const blob = new Blob([response.data], { type: 'application/pdf' })

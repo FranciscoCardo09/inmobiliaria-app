@@ -39,6 +39,9 @@ export const usePaymentTransactions = (groupId, filters = {}) => {
       queryClient.invalidateQueries({ queryKey: ['debt', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['debtPunitoryPreview', groupId] }),
       queryClient.invalidateQueries({ queryKey: ['canPayCurrentMonth', groupId] }),
+      queryClient.invalidateQueries({ queryKey: ['bulkDebtPreview', groupId] }),
+      // El dashboard (deuda total, cobrado del mes) también cambia al registrar o anular.
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary', groupId] }),
     ])
   }
 

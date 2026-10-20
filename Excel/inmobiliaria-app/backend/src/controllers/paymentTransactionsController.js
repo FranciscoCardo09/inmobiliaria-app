@@ -84,6 +84,7 @@ const getPunitoryPreview = async (req, res, next) => {
       lastPaymentDate: result.lastPaymentDate,
       lastPaymentAmount: result.lastPaymentAmount,
       amountPaid: result.amountPaid,
+      punitoryPaidSoFar: result.punitoryPaidSoFar,
       recordStatus: result.status,
     });
   } catch (error) {

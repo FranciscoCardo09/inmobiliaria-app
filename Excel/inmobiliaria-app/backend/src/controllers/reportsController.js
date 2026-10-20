@@ -420,13 +420,19 @@ const downloadPagoEfectivoPDF = async (req, res, next) => {
 const downloadMultiPagoEfectivoPDF = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { monthlyRecordIds } = req.body;
+    const { monthlyRecordIds, items } = req.body;
 
-    if (!monthlyRecordIds || !Array.isArray(monthlyRecordIds) || monthlyRecordIds.length === 0) {
-      return ApiResponse.badRequest(res, 'Se requiere monthlyRecordIds (array)');
+    // `items` [{ monthlyRecordId, transactionId }]: el recibo de cada mes muestra lo cobrado en
+    // ESA transacción. Sólo con `monthlyRecordIds` salía el total del período (un agosto del
+    // que se cobraron $600.204 figuraba con $1.200.408; auditoría 2026-10-20).
+    const list = Array.isArray(items) && items.length > 0
+      ? items.filter((it) => it && it.monthlyRecordId)
+      : (Array.isArray(monthlyRecordIds) ? monthlyRecordIds.map((id) => ({ monthlyRecordId: id, transactionId: null })) : []);
+    if (list.length === 0) {
+      return ApiResponse.badRequest(res, 'Se requiere items o monthlyRecordIds (array)');
     }
 
-    const results = await Promise.all(monthlyRecordIds.map(id => getPagoEfectivoFromRecord(groupId, id)));
+    const results = await Promise.all(list.map((it) => getPagoEfectivoFromRecord(groupId, it.monthlyRecordId, it.transactionId || null)));
     const dataArray = results.filter(Boolean);
 
     if (dataArray.length === 0) {

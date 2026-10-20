@@ -439,11 +439,15 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     // Base ÚNICA de punitorios (A-03/A-04, computePunitoryBase). El saldo a favor
     // del mes anterior entra como plata del primer pago (caso Biassi, ver el
     // docblock de computePunitoryBase).
+    // La plata que el recibo imputó a PUNITORIOS no pagó cargos: si después se agrega un
+    // servicio o el IVA, esa mora ya cobrada no puede "cubrirlo" (auditoría 2026-10-20: el mes
+    // quedaba debiendo la mora ya cobrada, con la mora nueva corriendo sobre una base chica).
+    const cashOnCharges = Math.max(amountPaid - sumPunitoryConcepts(record.transactions || []), 0);
     const punitoryBase = computePunitoryBase({
       rentAmount: record.rentAmount || 0,
       servicesTotal,
       ivaAmount: ivaForPunitory,
-      amountPaid,
+      amountPaid: cashOnCharges,
       appliedCredit: record.previousBalance || 0,
     });
 

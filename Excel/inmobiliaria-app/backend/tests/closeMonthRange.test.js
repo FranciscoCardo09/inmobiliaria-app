@@ -25,6 +25,10 @@ function buildEnv() {
       unpaidRent: 100000, unpaidPunitory: 0, totalOriginal: 100000, totalUnpaid: 100000,
       servicesCovered: 0, rentCovered: 0, punitoryCovered: 0,
     }),
+    computeDebtDraft: async () => ({
+      unpaidRent: 100000, unpaidPunitory: 0, totalOriginal: 100000, totalUnpaid: 100000,
+      appliedCredit: 0, netUnpaid: 100000,
+    }),
   };
   const svc = proxyquire('../src/services/monthlyCloseService', {
     '../lib/prisma': prisma,

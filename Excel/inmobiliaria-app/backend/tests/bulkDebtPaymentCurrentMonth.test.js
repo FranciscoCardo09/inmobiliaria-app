@@ -43,6 +43,7 @@ function buildService(prisma, { registerPaymentImpl, calculatePunitoryPreviewImp
     // que a su vez requiere debtService a nivel de módulo).
     './paymentTransactionService': {
       registerPayment,
+      nextReceiptNumber: async () => 'REC-TEST',
       calculatePunitoryPreview: calculatePunitoryPreviewImpl || (async () => ({ amount: 0, days: 0 })),
     },
   });
@@ -261,6 +262,7 @@ test('forgivePunitorios=true se propaga a payDebt (punitorios en 0) y a register
       recalculateMultipleRecords: async () => 0,
     },
     './paymentTransactionService': {
+      nextReceiptNumber: async () => 'REC-TEST',
       registerPayment: async (groupId, monthlyRecordId, data) => {
         registerPaymentCalls.push({ groupId, monthlyRecordId, data });
         return { transaction: { id: 'tx-stub' }, monthlyRecord: {} };

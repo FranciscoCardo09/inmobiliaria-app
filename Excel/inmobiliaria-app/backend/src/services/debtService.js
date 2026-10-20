@@ -128,15 +128,22 @@ const isDebtSettledAtAnchor = (debt) => {
  * Crear deuda a partir de un MonthlyRecord impago/parcial.
  * Se llama durante el cierre mensual.
  */
-const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
-  // Verificar que no exista deuda para este record
-  const existing = await prisma.debt.findUnique({
-    where: { monthlyRecordId: monthlyRecord.id },
-  });
-  if (existing) {
-    return existing;
-  }
-
+/**
+ * Borrador de la deuda que generaría el cierre de un mes, SIN escribir nada. Fuente única
+ * para `createDebtFromMonthlyRecord` y `previewCloseMonth`: antes el preview usaba
+ * `calculateImputation` sin el catch-up de mora de los meses sin pagos y anunciaba ~$2M menos
+ * de lo que el cierre generaba (auditoría 2026-10-20).
+ *
+ * Las transacciones se ordenan por FECHA DE PAGO (después por carga): el ancla es el último
+ * pago por fecha aunque se haya cargado antes que otro (antes se tomaba el último cargado).
+ */
+const computeDebtDraft = async (monthlyRecord, contract) => {
+  monthlyRecord = {
+    ...monthlyRecord,
+    transactions: [...(monthlyRecord.transactions || [])].sort(
+      (x, y) => (new Date(x.paymentDate) - new Date(y.paymentDate)) || (new Date(x.createdAt || 0) - new Date(y.createdAt || 0)),
+    ),
+  };
   // CRITICAL: Calculate CURRENT accumulated punitorios at time of closing
   // The monthlyRecord.punitoryAmount is frozen from the last payment, but punitorios
   // continue to accumulate. We need to calculate the LIVE punitorios now.
@@ -232,6 +239,26 @@ const createDebtFromMonthlyRecord = async (monthlyRecord, contract) => {
   // (sin restar el crédito); acá descontamos el crédito del total adeudado.
   const appliedCredit = round2(Math.min(Math.max(monthlyRecord.previousBalance || 0, 0), totalUnpaid));
   const netUnpaid = round2(totalUnpaid - appliedCredit);
+
+  return {
+    monthlyRecord, unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, totalUnpaid,
+    appliedCredit, netUnpaid, anchorIsPayment,
+  };
+};
+
+const createDebtFromMonthlyRecord = async (rawRecord, contract) => {
+  // Verificar que no exista deuda para este record
+  const existing = await prisma.debt.findUnique({
+    where: { monthlyRecordId: rawRecord.id },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const {
+    monthlyRecord, unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, appliedCredit,
+    netUnpaid, anchorIsPayment,
+  } = await computeDebtDraft(rawRecord, contract);
 
   // Si no queda nada impago (ni alquiler ni punitorios), o queda menos de $1 por decimales, no crear deuda
   if (netUnpaid <= 1) {
@@ -805,12 +832,22 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
     const punitoryPortion = round2(Math.min(afterRent, Math.max(totalPunitoryOwed - creditOnPunitory, 0)));
     const overpay = round2(Math.max(afterRent - punitoryPortion, 0));
 
+    // Recibo numerado igual que un cobro de mes (EFECTIVO → número de la secuencia del grupo).
+    // Antes los pagos de deuda nunca llevaban número y el recibo usaba un número armado por
+    // posición que se repetía entre inquilinos (495 pagos compartían número; auditoría
+    // 2026-10-20). Lazy require: paymentTransactionService importa este módulo.
+    const { nextReceiptNumber } = require('./paymentTransactionService');
+    const receiptNumber = paymentMethod === 'EFECTIVO' ? await nextReceiptNumber(tx, debt.groupId) : null;
+
     const transaction = await tx.paymentTransaction.create({
       data: {
         groupId: debt.groupId,
         monthlyRecordId: debt.monthlyRecordId,
-        paymentDate: parseLocalDate(paymentDate),
+        // Mediodía, como `registerPayment`: a medianoche (00:00 UTC en producción) el
+        // Historial —que muestra en hora argentina— lo veía el día anterior.
+        paymentDate: (() => { const d = parseLocalDate(paymentDate); d.setHours(12, 0, 0, 0); return d; })(),
         amount: parsedAmount,
+        ...(receiptNumber ? { receiptGenerated: true, receiptNumber } : {}),
         paymentMethod,
         punitoryAmount: punitoryPortion,
         punitoryForgiven: forgivePunitorios,
@@ -1119,6 +1156,9 @@ const payDebtsBulk = async (
   let remaining = amount;
   const results = [];
   const paidMonthlyRecordIds = [];
+  // Para el recibo combinado: la transacción de ESTE cobro en cada mes. Con sólo el id del mes
+  // el recibo salía con el total del período, no con lo cobrado ahora.
+  const paidTransactions = [];
   for (let i = 0; i < debts.length; i++) {
     if (remaining <= 0) break;
     const debt = debts[i];
@@ -1130,7 +1170,7 @@ const payDebtsBulk = async (
     alloc = round2(alloc);
     if (alloc <= 0) continue;
 
-    const { debt: updatedDebt } = await payDebt(debt.id, alloc, paymentDate, paymentMethod, observations, forgivePunitorios);
+    const { debt: updatedDebt, transaction: debtTx } = await payDebt(debt.id, alloc, paymentDate, paymentMethod, observations, forgivePunitorios);
     results.push({
       debtId: debt.id,
       periodLabel: debt.periodLabel,
@@ -1138,6 +1178,7 @@ const payDebtsBulk = async (
       status: updatedDebt.status,
     });
     paidMonthlyRecordIds.push(debt.monthlyRecordId);
+    paidTransactions.push({ monthlyRecordId: debt.monthlyRecordId, transactionId: debtTx?.id || null });
     remaining = round2(remaining - alloc);
   }
 
@@ -1160,6 +1201,7 @@ const payDebtsBulk = async (
       transactionId: transaction?.id || null,
     };
     paidMonthlyRecordIds.push(currentRecord.id);
+    paidTransactions.push({ monthlyRecordId: currentRecord.id, transactionId: transaction?.id || null });
     remaining = 0;
   }
 
@@ -1167,6 +1209,7 @@ const payDebtsBulk = async (
     results,
     recordResult,
     paidMonthlyRecordIds,
+    paidTransactions,
     totalApplied: round2(amount - Math.max(remaining, 0)),
     remaining: Math.max(remaining, 0),
   };
@@ -1546,10 +1589,14 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     // El espejo es la PaymentTransaction posterior a la deuda con la misma fecha, monto y
     // medio; con dos iguales, la más nueva (LIFO). Antes tomaba la primera que coincidiera y
     // con dos pagos iguales el mismo día borraba la del otro pago.
+    // Mismo DÍA (el espejo se guarda a mediodía y el DebtPayment a medianoche).
+    const day = new Date(payment.paymentDate);
+    const dayStart = new Date(day.getTime() - 14 * 3600 * 1000);
+    const dayEnd = new Date(day.getTime() + 38 * 3600 * 1000);
     const transaction = await db.paymentTransaction.findFirst({
       where: {
         monthlyRecordId: debt.monthlyRecordId,
-        paymentDate: payment.paymentDate,
+        paymentDate: { gte: dayStart, lt: dayEnd },
         amount: payment.amount,
         paymentMethod: payment.paymentMethod,
         createdAt: { gte: debt.createdAt },
@@ -2342,6 +2389,7 @@ const reopenDebtIfCreditLost = async (debtId, currentPreviousBalance, tx = prism
 
 module.exports = {
   debtNetAtAnchor,
+  computeDebtDraft,
   reopenDebtIfCreditLost,
   isDebtSettledAtAnchor,
   createDebtFromMonthlyRecord,

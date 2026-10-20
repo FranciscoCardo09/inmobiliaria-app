@@ -53,6 +53,11 @@ function buildEnv() {
   const { calculateImputation } = require('../src/services/debtService');
   const debtServiceStub = {
     calculateImputation,
+    computeDebtDraft: async (record) => {
+      const imp = calculateImputation(record);
+      const appliedCredit = Math.min(Math.max(record.previousBalance || 0, 0), imp.totalUnpaid);
+      return { ...imp, appliedCredit, netUnpaid: Math.round((imp.totalUnpaid - appliedCredit) * 100) / 100 };
+    },
     // Mismo contrato que el real: si no queda nada impago (neto del crédito, con la
     // tolerancia de $1), no se crea deuda y devuelve null.
     createDebtFromMonthlyRecord: async (record) => {
