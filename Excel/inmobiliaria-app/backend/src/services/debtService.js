@@ -2205,11 +2205,25 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
   );
   // Tope del clamp: SÍ incluye punitorios en vivo (no solo el congelado), para
   // no perder crédito sobrante que en la realidad ya alcanza a cubrirlos.
+  //
+  // Con algún pago (`hasPayment`) el congelado entra BRUTO, no `unpaidAccumulatedPunitory`: ése
+  // ya viene neto del propio `appliedCredit` que este tope tiene que acotar, y el cálculo se
+  // vuelve circular — cuando el crédito cubría la mora, el tope la excluía y el crédito
+  // bajaba justo esa mora, que reaparecía como saldo a favor fantasma en el mes siguiente
+  // (caso Yocsina 1615, Julio 2026: $97.200 de mora pagados con crédito → $97.886 a favor en
+  // Agosto). Sin ningún pago el congelado está contenido en la mora en vivo (ver
+  // `isDebtSettledAtAnchor`) y se sigue sin sumar.
   const livePunitory = await calculateDebtPunitory(debt, getTodayLocalString(), preloaded, true);
-  const liveTotalCeiling = round2(
-    (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0)
-    + (livePunitory.unpaidAccumulatedPunitory || 0) + (livePunitory.amount || 0)
-  );
+  const debtHasPayment = (debt.amountPaid || 0) > 0 || (debt.previousRecordPayment || 0) > 0;
+  const liveTotalCeiling = debtHasPayment
+    ? round2(Math.max(
+      (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0) + (debt.accumulatedPunitory || 0)
+      + (livePunitory.amount || 0) - (debt.amountPaid || 0), 0,
+    ))
+    : round2(
+      (debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0)
+      + (livePunitory.unpaidAccumulatedPunitory || 0) + (livePunitory.amount || 0)
+    );
   const newAppliedCredit = round2(Math.min(Math.max(currentPreviousBalance || 0, 0), liveTotalCeiling));
 
   const newCurrentTotal = round2(

@@ -931,7 +931,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         if (openDebtForRefresh) {
           try {
             const livePun = await calculateDebtPunitory(openDebtForRefresh, getTodayLocalString(), debtPreloaded, true);
-            punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebtForRefresh, livePun);
+            punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebtForRefresh, livePun, record);
           } catch (e) {
             console.error(`[monthlyRecords] punitorio en vivo de la deuda ${openDebtForRefresh.id} falló: ${e.message}`);
             punitoryOutsideConcepts = openDebtForRefresh.accumulatedPunitory || 0;
@@ -1080,7 +1080,8 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         record.debt,
         record.debt.status !== 'PAID'
           ? { unpaidAccumulatedPunitory: debtInfo?.unpaidAccumulatedPunitory, amount: debtInfo?.liveAccumulatedPunitory }
-          : null
+          : null,
+        record
       )
       : undefined;
     const livePunResult = computeGrossRecordPunitory(record, contract, holidays, {
@@ -1308,7 +1309,35 @@ const _floatsDiffer = (a, b) => Math.abs((a || 0) - (b || 0)) >= 0.01;
  * @param {object} debt     Fila de Debt (unpaidRentAmount, unpaidServicesAmount, appliedCredit, accumulatedPunitory)
  * @param {object|null} livePun Resultado de `calculateDebtPunitory` (null si la deuda está PAID)
  */
-const _punitoryOutsideConcepts = (debt, livePun) => {
+/**
+ * Mora pagada en EFECTIVO antes del cierre que la Deuda cuenta igual como impaga.
+ *
+ * `createDebtFromMonthlyRecord` imputa el pago previo al cierre en el orden de
+ * `calculateImputation` (servicios → IVA → alquiler → punitorios), pero el recibo pudo haberlo
+ * imputado a PUNITORIOS (pasa cuando el saldo a favor ya cubrió servicios y alquiler). Esa plata
+ * queda entonces DOS veces en el bruto del mes: en los conceptos PUNITORIOS y dentro de
+ * `accumulatedPunitory`, que la Deuda nunca vio pagada.
+ *
+ * Bug real (2026-10-20, caso Yocsina 1615, Julio 2026): crédito $1.017.110,08 + $10.457 en
+ * efectivo etiquetados PUNITORIOS sobre mora de $97.200 → el mes daba $107.657 de mora bruta y
+ * quedaba debiendo $10.456,92 que ya estaban pagados.
+ */
+const _preClosePunitoryShift = (debt, record) => {
+  if (!record || !debt.createdAt || !(debt.previousRecordPayment > 0)) return 0;
+  const debtCreatedAt = new Date(debt.createdAt).getTime();
+  const preClosePun = (record.transactions || [])
+    .filter((t) => !t.punitoryForgiven && t.createdAt && new Date(t.createdAt).getTime() < debtCreatedAt)
+    .reduce((sum, t) => sum + (t.concepts || [])
+      .filter((c) => c.type === 'PUNITORIOS')
+      .reduce((a, c) => a + c.amount, 0), 0);
+  // Lo que la imputación SÍ dio por pagado a punitorios (plata que excedió los demás cargos):
+  // eso ya no está en `accumulatedPunitory` y no se duplica.
+  const nonPunitoryCharges = (record.rentAmount || 0) + (record.servicesTotal || 0) + (record.ivaAmount || 0);
+  const imputedToPunitory = Math.max((debt.previousRecordPayment || 0) - nonPunitoryCharges, 0);
+  return round2(Math.max(Math.min(preClosePun, debt.previousRecordPayment) - imputedToPunitory, 0));
+};
+
+const _punitoryOutsideConcepts = (debt, livePun, record = null) => {
   const base = round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
   // `creditOnPunitory` repone lo que `calculateDebtPunitory` DESCONTÓ del impago por haber
   // sido cubierto con saldo a favor. Ese descuento sólo existe cuando la deuda tuvo algún
@@ -1323,7 +1352,7 @@ const _punitoryOutsideConcepts = (debt, livePun) => {
   const liveUnpaid = livePun
     ? round2((livePun.unpaidAccumulatedPunitory || 0) + (livePun.amount || 0))
     : 0;
-  return round2(liveUnpaid + creditOnPunitory);
+  return round2(Math.max(liveUnpaid + creditOnPunitory - _preClosePunitoryShift(debt, record), 0));
 };
 
 /**
@@ -1571,11 +1600,11 @@ const _recalculateCore = async (recordIds, tx) => {
       // reponer el que se pagó con SALDO A FAVOR — no generó concepto PUNITORIOS y sin
       // esto se cae del bruto del mes (saldo a favor fantasma, ver el comentario de
       // `recordDebt` arriba).
-      punitoryOutsideConcepts = _punitoryOutsideConcepts(recordDebt, null);
+      punitoryOutsideConcepts = _punitoryOutsideConcepts(recordDebt, null, record);
     } else if (openDebt) {
       try {
         const livePun = await calculateDebtPunitory(openDebt, getTodayLocalString(), null, /* skipUpdate */ true);
-        punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun);
+        punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun, record);
       } catch (e) {
         // Sin el cálculo en vivo, el congelado de la Deuda es la mejor aproximación al
         // impago (es lo que usaba esta función antes del fix).
@@ -1599,7 +1628,12 @@ const _recalculateCore = async (recordIds, tx) => {
     // creación/refresh de getOrCreateMonthlyRecords ya clampean a >= 0).
     currentContractId = record.contractId;
     expectedNextMonthNumber = record.monthNumber + 1;
-    runningPreviousBalance = Math.max(effectiveBalance, 0);
+    // La condonación (`balanceForgiven`) sólo puede llevar el saldo a CERO, nunca generar
+    // crédito: es un monto fijo, y si después el balance sube (baja la mora, se borra un
+    // servicio, entra un pago) el excedente condonado se arrastraba como saldo a favor
+    // fantasma (caso Yocsina 1615, Julio 2026: $11.142,92 condonados sobre un mes que ya
+    // tenía +$0,08). Mismo criterio que `carryForwardCredit` del refresh, que mira `balance`.
+    runningPreviousBalance = Math.max(Math.min(effectiveBalance, balance), 0);
 
     const isPaid = status === 'COMPLETE';
     const fullPaymentDate = isPaid && !record.fullPaymentDate ? new Date() : (isPaid ? record.fullPaymentDate : null);
