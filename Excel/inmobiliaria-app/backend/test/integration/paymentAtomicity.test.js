@@ -79,9 +79,11 @@ test('C-03: dos registerPayment concurrentes sobre el MISMO mes no deben perder 
   });
 
   try {
+    // Montos distintos: dos pagos IDÉNTICOS (monto y fecha) en 2 minutos ahora se rechazan a
+    // propósito como doble envío (auditoría 2026-10-20) — se prueba aparte, abajo.
     await Promise.all([
       registerPayment(group.id, monthlyRecord.id, { paymentDate: '2026-01-10', amount: 40000, paymentMethod: 'EFECTIVO' }),
-      registerPayment(group.id, monthlyRecord.id, { paymentDate: '2026-01-10', amount: 40000, paymentMethod: 'EFECTIVO' }),
+      registerPayment(group.id, monthlyRecord.id, { paymentDate: '2026-01-10', amount: 35000, paymentMethod: 'EFECTIVO' }),
     ]);
     await flushRecalculation(prisma, group.id);
 
@@ -90,7 +92,13 @@ test('C-03: dos registerPayment concurrentes sobre el MISMO mes no deben perder 
     const updatedRecord = await prisma.monthlyRecord.findUnique({ where: { id: monthlyRecord.id } });
 
     assert.strictEqual(transactions.length, 2, 'ambas PaymentTransaction deben existir');
-    assert.strictEqual(sumTransactions, 80000, 'la suma de las transacciones debe ser 80000');
+    assert.strictEqual(sumTransactions, 75000, 'la suma de las transacciones debe ser 75000');
+
+    // Doble envío del mismo pago: se rechaza con aviso, no se graba dos veces.
+    await assert.rejects(
+      registerPayment(group.id, monthlyRecord.id, { paymentDate: '2026-01-10', amount: 35000, paymentMethod: 'EFECTIVO' }),
+      { code: 'PAYMENT_BLOCKED' },
+    );
     assert.strictEqual(
       updatedRecord.amountPaid,
       sumTransactions,
