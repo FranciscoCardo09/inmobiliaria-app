@@ -815,13 +815,19 @@ const deleteTransaction = async (groupId, id) => {
       // saltea cuando `cancelDebtPayment` ya se encargó de un DebtPayment real.
       let matchingDebtPayment = null;
       if (debt.payments.length > 0) {
-        matchingDebtPayment = debt.payments.find((p) => {
+        // Sólo una transacción POSTERIOR a la deuda puede ser el espejo de un pago de deuda
+        // (las previas al cierre son pagos del mes). Con dos pagos iguales el mismo día se
+        // toma el más nuevo (LIFO): antes se tomaba el primero, LIFO lo rechazaba y no se
+        // podía anular el último pago (auditoría 2026-10-20).
+        const isMirror = new Date(transaction.createdAt) >= new Date(debt.createdAt);
+        const candidates = isMirror ? debt.payments.filter((p) => {
           const txDate = new Date(transaction.paymentDate);
           const pDate = new Date(p.paymentDate);
           const sameDate = txDate.toDateString() === pDate.toDateString();
           const sameAmount = Math.abs(p.amount - transaction.amount) < 0.01;
           return sameDate && sameAmount;
-        });
+        }) : [];
+        matchingDebtPayment = candidates.length > 0 ? candidates[candidates.length - 1] : null;
 
         if (matchingDebtPayment) {
           // Si esto lanza, la excepción propaga y Prisma revierte toda la transacción:
@@ -833,25 +839,34 @@ const deleteTransaction = async (groupId, id) => {
         }
       }
       if (!matchingDebtPayment) {
+        // Pago PREVIO al cierre de una deuda que ya tiene pagos propios: `payDebt` devengó la
+        // mora de cada pago contando con esta plata, y no hay forma exacta de reconstruirla
+        // sin rehacer esos pagos (la prueba de la auditoría 2026-10-20 perdía ~$8.450 de mora;
+        // antes de eso la deuda directamente BAJABA ~$48.000). Mismo criterio LIFO que los
+        // pagos de deuda: primero se anulan los de la deuda, después éste.
+        if (debt.payments.length > 0) {
+          throw Object.assign(
+            new Error('Este pago es anterior al cierre del mes y la deuda ya tiene pagos. Anulá primero los pagos de la deuda (desde el más reciente) y después este.'),
+            { code: 'PAYMENT_BLOCKED' },
+          );
+        }
         needsDebtRecalculation = true;
       }
     }
 
     await tx.paymentTransaction.delete({ where: { id } });
-    await recalculateMultipleRecords([transaction.monthlyRecord.id], tx, true);
-  }, { timeout: 15000 });
 
-  // Camino preexistente y ya frágil (match heurístico por fecha+monto, sin FK explícita —
-  // ver nota pendiente sobre schema en el plan): se mantiene fuera del lock, con su propio
-  // try/catch, exactamente como antes. No forma parte del bug demostrado de C-05.
-  if (debtId && needsDebtRecalculation) {
-    const { recalculateDebtFromMonthlyRecord } = require('./debtService');
-    try {
-      await recalculateDebtFromMonthlyRecord(debtId, transaction.monthlyRecord.id);
-    } catch (error) {
-      // Debt recalculation failed, but transaction is already deleted
+    // Pago PREVIO al cierre borrado: la deuda se recalcula dentro del mismo lock y ANTES de
+    // recalcular el mes, para que el mes lea la deuda ya corregida. Antes corría afuera, después
+    // del commit, con un catch que se tragaba el error: si fallaba, la deuda quedaba con el pago
+    // borrado adentro y nadie se enteraba.
+    if (debtId && needsDebtRecalculation) {
+      const { recalculateDebtFromMonthlyRecord } = require('./debtService');
+      await recalculateDebtFromMonthlyRecord(debtId, transaction.monthlyRecord.id, tx);
     }
-  }
+
+    await recalculateMultipleRecords([transaction.monthlyRecord.id], tx, true);
+  }, { timeout: 30000 });
 
   return transaction;
 };

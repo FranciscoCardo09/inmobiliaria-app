@@ -3,6 +3,7 @@ const ApiResponse = require('../utils/apiResponse');
 const {
   getOrCreateMonthlyRecords,
   recalculateMonthlyRecord,
+  recalculateMultipleRecords,
   getMonthlyRecordById,
 } = require('../services/monthlyRecordService');
 const {
@@ -463,9 +464,19 @@ const forgiveBalance = async (req, res, next) => {
     }
 
     if (forgive) {
-      // Calcular saldo pendiente (balance es negativo cuando falta pagar)
-      const pending = Math.abs(record.balance);
-      if (pending <= 0) {
+      // Un mes que ya pasó a deuda se condona desde Deudas: condonarlo acá dejaba la Deuda
+      // abierta cobrando lo mismo.
+      const debt = await prisma.debt.findUnique({ where: { monthlyRecordId: recordId } });
+      if (debt && debt.status !== 'PAID') {
+        return ApiResponse.badRequest(res, 'Este mes ya pasó a deuda: condonalo desde Deudas.');
+      }
+      // Saldo FRESCO (el persistido puede estar viejo: mora de días sin recalcular) y sólo si
+      // de verdad debe. Antes usaba `Math.abs(record.balance)`: con saldo A FAVOR "condonaba"
+      // ese monto y el recálculo lo duplicaba como crédito (auditoría 2026-10-20).
+      await recalculateMultipleRecords([recordId], null, /* inline */ true);
+      const fresh = await prisma.monthlyRecord.findUnique({ where: { id: recordId }, select: { balance: true } });
+      const pending = Math.round(-(fresh?.balance || 0) * 100) / 100;
+      if (!(pending > 1)) {
         return ApiResponse.badRequest(res, 'No hay saldo pendiente para condonar');
       }
       await prisma.monthlyRecord.update({
@@ -479,6 +490,8 @@ const forgiveBalance = async (req, res, next) => {
       });
     }
 
+    // Inline: la respuesta tiene que traer el mes ya saldado, no el estado previo.
+    await recalculateMultipleRecords([recordId], null, true);
     const updated = await recalculateMonthlyRecord(recordId);
     return ApiResponse.success(res, updated, forgive ? 'Saldo condonado' : 'Condonación revertida');
   } catch (error) {

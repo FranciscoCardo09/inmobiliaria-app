@@ -334,6 +334,11 @@ const preloadDebtDependencies = async (debts) => {
  * A-25: el default es el día ART correcto (string, TZ-inmune), no `new Date()` crudo.
  */
 const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), preloaded = null, skipUpdate = false) => {
+  // `preloaded.db`: cliente de la transacción del llamador. Sin esto, dentro de una
+  // transacción (anular un pago, recálculo) se leía el MonthlyRecord con el cliente global y
+  // se veía el `amountPaid` VIEJO: el total del mes quedaba mal grabado hasta el próximo
+  // recálculo (auditoría 2026-10-20).
+  const db = preloaded?.db || prisma;
   let accumulatedPunitory = debt.accumulatedPunitory || 0;
 
   // Para deudas donde los montos impagos pueden estar mal calculados (legacy o corruptos),
@@ -347,7 +352,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
     }
     
     if (!mr) {
-      mr = await prisma.monthlyRecord.findUnique({
+      mr = await db.monthlyRecord.findUnique({
         where: { id: debt.monthlyRecordId },
         select: { servicesTotal: true, ivaAmount: true, rentAmount: true, amountPaid: true, punitoryAmount: true, previousBalance: true },
       });
@@ -432,7 +437,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
         // If everything is paid, we could close the debt, but we just set values.
         // The display will show $0.
         if (!skipUpdate) {
-          await prisma.debt.update({ where: { id: debt.id }, data: updateData });
+          await db.debt.update({ where: { id: debt.id }, data: updateData });
         }
       }
     }
@@ -475,7 +480,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
   if (debt.monthlyRecordId) {
     let mrForIva = preloaded?.monthlyRecordMap?.get(debt.monthlyRecordId);
     if (!mrForIva) {
-      mrForIva = await prisma.monthlyRecord.findUnique({
+      mrForIva = await db.monthlyRecord.findUnique({
         where: { id: debt.monthlyRecordId },
         select: { ivaAmount: true },
       });
@@ -491,7 +496,7 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
       const c = preloaded.contractMap.get(debt.contractId);
       if (c) return c;
     }
-    return prisma.contract.findUnique({
+    return db.contract.findUnique({
       where: { id: debt.contractId },
       select: { punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true },
     });
@@ -737,7 +742,7 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
     if (debt.status === 'PAID') throw new Error('Esta deuda ya está pagada');
 
     // Calcular punitorios al momento del pago (idéntico a antes, ahora sobre datos frescos)
-    const { amount: punitoryAmount, days, remainingDebt: remainingBase, unpaidAccumulatedPunitory, grossPunitoryToDate } = await calculateDebtPunitory(debt, paymentDate);
+    const { amount: punitoryAmount, days, remainingDebt: remainingBase, unpaidAccumulatedPunitory, grossPunitoryToDate } = await calculateDebtPunitory(debt, paymentDate, { db: tx });
 
     // Punitorio TOTAL adeudado al momento del pago = acumulado impago de pagos previos
     // (unpaidAccumulatedPunitory) + nuevo en vivo (punitoryAmount). Antes se usaba solo el
@@ -1106,7 +1111,7 @@ const payDebtsBulk = async (
   // (el saldo a favor prohibido que este feature justamente evita).
   const totals = [];
   for (const debt of debts) {
-    const { amount: punitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, date);
+    const { amount: punitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, date, null, true);
     const punitoryOwed = forgivePunitorios ? 0 : round2((unpaidAccumulatedPunitory || 0) + punitory);
     totals.push(round2(remainingDebt + punitoryOwed));
   }
@@ -1500,6 +1505,19 @@ const canPayCurrentMonth = async (groupId, contractId, targetPeriod = null) => {
  *   DESPUÉS de esta función: hay que ignorarla al reconstruir el ancla de punitorios.
  */
 const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = false, tx = null, excludeTransactionId = null) => {
+  // Camino standalone (pantalla de Deudas): corre en UNA transacción con el mismo lock por
+  // contrato que el cobro. Antes no tomaba lock ni transacción: anular a la vez que otro
+  // pago sobre la misma deuda dejaba `debt.amountPaid` pisado (auditoría 2026-10-20, 6 de 6
+  // intentos), y el recálculo del mes corría aparte y podía quedar a medias.
+  if (!tx) {
+    const pre = await prisma.debt.findUnique({ where: { id: debtId }, select: { contractId: true } });
+    if (!pre) throw new Error('Deuda no encontrada');
+    return prisma.$transaction(async (t) => {
+      await t.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('${pre.contractId}'))`);
+      return cancelDebtPayment(debtId, paymentId, skipTransactionDeletion, t, excludeTransactionId);
+    }, { timeout: 30000 });
+  }
+
   // Cuando deleteTransaction (C-05) llama con skipTransactionDeletion=true, pasa su propia
   // `tx` (transacción con advisory lock) para que revertir la Debt/DebtPayment y borrar la
   // PaymentTransaction ocurran atómicamente. El endpoint standalone de anular pago (sin
@@ -1525,12 +1543,18 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
 
   // Buscar y eliminar el PaymentTransaction vinculado (solo si no se skipea)
   if (!skipTransactionDeletion) {
+    // El espejo es la PaymentTransaction posterior a la deuda con la misma fecha, monto y
+    // medio; con dos iguales, la más nueva (LIFO). Antes tomaba la primera que coincidiera y
+    // con dos pagos iguales el mismo día borraba la del otro pago.
     const transaction = await db.paymentTransaction.findFirst({
       where: {
         monthlyRecordId: debt.monthlyRecordId,
         paymentDate: payment.paymentDate,
         amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        createdAt: { gte: debt.createdAt },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (transaction) {
@@ -1687,11 +1711,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     newAccumulatedPunitory = grossPunitoryToDate;
   }
 
-  // Calcular deuda restante (solo la parte de alquiler sin punitorios)
-  const remainingDebt = debt.unpaidRentAmount - newAmountPaid;
-
-  // Determinar nuevo estado y lastPaymentDate
-  let newStatus = 'OPEN';
+  // Determinar lastPaymentDate (el estado se decide más abajo, por el total en vivo)
   let newLastPaymentDate = null;
 
   // Si quedan pagos previos, tomar el último
@@ -1702,42 +1722,29 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
     newLastPaymentDate = null;
   }
 
-  // IMPORTANTE: Para determinar el status, necesitamos calcular punitorios después de anular
-  // No podemos marcar como PAID solo porque amountPaid >= unpaidRentAmount, porque pueden quedar punitorios impagos
-  const rentRemaining = Math.max(debt.unpaidRentAmount - newAmountPaid, 0);
-
-  // Si no queda renta por pagar, verificar punitorios
-  if (rentRemaining === 0) {
-    // Crear deuda temporal para calcular punitorios con el nuevo amountPaid
-    // IMPORTANTE: usar newAccumulatedPunitory (del pago previo) en vez del valor actual
-    const tempDebt = {
-      ...debt,
-      amountPaid: newAmountPaid,
-      accumulatedPunitory: newAccumulatedPunitory,
-      lastPaymentDate: newLastPaymentDate,
-    };
-
-    // Calcular punitorios impagos
-    // IMPORTANTE: calculateDebtPunitory ya resta internamente lo pagado a punitorios
-    // (amountPaidToPunitory = amountPaid - unpaidRentAmount), así que su retorno
-    // es directamente los punitorios IMPAGOS. NO restar de nuevo aquí.
-    // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
-    // skipUpdate=true (2026-07-16, mismo bug que el catch-up de arriba): el
-    // MonthlyRecord todavía no se recalculó en este punto (su amountPaid sigue
-    // contando el pago que se está anulando) — sin esto, si `tempDebt.amountPaid`
-    // queda en 0 (se anuló el único pago), el auto-heal leería ese amountPaid viejo
-    // y pisaría unpaidRentAmount/unpaidServicesAmount de la deuda real a 0.
-    const { amount: unpaidPunitory } = await calculateDebtPunitory(tempDebt, getTodayLocalString(), null, true);
-
-    if (unpaidPunitory <= 1) {
-      newStatus = 'PAID';
-    } else {
-      newStatus = 'PARTIAL';
-    }
-  } else if (newAmountPaid > 0) {
-    newStatus = 'PARTIAL';
+  // Estado después de anular: lo decide el TOTAL en vivo (alquiler + servicios + mora −
+  // crédito − pagos que quedan), con la tolerancia de $1 de todos los demás escritores.
+  // Antes miraba sólo `unpaidRentAmount − pagos` (ignoraba los servicios, que se imputan
+  // primero): si lo pagado cubría el alquiler, decidía por la mora viva desde el pago
+  // anterior — 0 si era del mismo día — y la deuda quedaba PAID debiendo plata
+  // (auditoría 2026-10-20: "Deuda revertida a PAID" con $67.000 impagos).
+  const tempDebt = {
+    ...debt,
+    amountPaid: newAmountPaid,
+    accumulatedPunitory: newAccumulatedPunitory,
+    lastPaymentDate: newLastPaymentDate,
+  };
+  let newStatus;
+  if (newAmountPaid <= 0) {
+    // Sin pagos propios: OPEN, salvo que el crédito ya la cubra al ancla. No se llama a
+    // `calculateDebtPunitory` con amountPaid 0: su auto-heal leería el `amountPaid` del mes
+    // todavía sin recalcular (ver el comentario del catch-up de arriba).
+    newStatus = isDebtSettledAtAnchor(tempDebt) ? 'PAID' : 'OPEN';
   } else {
-    newStatus = 'OPEN';
+    // skipUpdate=true y `db`: lectura dentro de la misma transacción, sin escribir.
+    const live = await calculateDebtPunitory(tempDebt, getTodayLocalString(), { db }, true);
+    const liveTotal = round2((live.remainingDebt || 0) + (live.unpaidAccumulatedPunitory || 0) + (live.amount || 0));
+    newStatus = liveTotal <= 1 ? 'PAID' : 'PARTIAL';
   }
 
   // IMPORTANTE: Eliminar el DebtPayment ANTES de la query final
@@ -1754,7 +1761,7 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
       currentTotal: Math.max(debt.unpaidRentAmount + (debt.unpaidServicesAmount || 0) + newAccumulatedPunitory - (debt.appliedCredit || 0) - newAmountPaid, 0),
       lastPaymentDate: newLastPaymentDate,
       status: newStatus,
-      closedAt: newStatus === 'PAID' ? debt.closedAt : null,
+      closedAt: newStatus === 'PAID' ? (debt.closedAt || new Date()) : null,
     },
     include: {
       contract: {
@@ -1770,14 +1777,10 @@ const cancelDebtPayment = async (debtId, paymentId, skipTransactionDeletion = fa
   // Recalcular MonthlyRecord si existe. Dentro de una `tx` (llamado desde deleteTransaction,
   // C-05) el recálculo corre INLINE en la misma transacción/lock, igual que C-03/C-04; sin
   // `tx` (endpoint standalone de anular pago) se preserva el comportamiento async de siempre.
+  // Siempre inline dentro de la transacción (el camino standalone ahora también abre una).
   if (debt.monthlyRecordId) {
-    if (tx) {
-      const { recalculateMultipleRecords } = require('./monthlyRecordService');
-      await recalculateMultipleRecords([debt.monthlyRecordId], tx, true);
-    } else {
-      const { recalculateMonthlyRecord } = require('./monthlyRecordService');
-      await recalculateMonthlyRecord(debt.monthlyRecordId);
-    }
+    const { recalculateMultipleRecords } = require('./monthlyRecordService');
+    await recalculateMultipleRecords([debt.monthlyRecordId], db, true);
   }
 
   return {
@@ -1832,7 +1835,24 @@ const forgiveDebt = async (debtId, observations = 'Deuda condonada') => {
       const { recalculateMultipleRecords } = require('./monthlyRecordService');
       await recalculateMultipleRecords([debt.monthlyRecordId], tx, true);
 
-      const updatedRecord = await tx.monthlyRecord.findUnique({ where: { id: debt.monthlyRecordId } });
+      // La condonación queda GRABADA en el mes (`balanceForgiven`), igual que "condonar saldo"
+      // del Control Mensual. Antes sólo se forzaba COMPLETE y el próximo recálculo lo
+      // revertía: 11 meses condonados en producción volvían a figurar debiendo (Barrios
+      // jun-2026: −$206.253; auditoría 2026-10-20). Con `balanceForgivenAt` la mora del mes
+      // se congela el día de la condonación (computeLiveRecordPunitory).
+      let updatedRecord = await tx.monthlyRecord.findUnique({ where: { id: debt.monthlyRecordId } });
+      const pending = round2(-(updatedRecord.balance || 0) - (updatedRecord.balanceForgiven || 0));
+      if (pending > 0.01) {
+        await tx.monthlyRecord.update({
+          where: { id: debt.monthlyRecordId },
+          data: {
+            balanceForgiven: round2((updatedRecord.balanceForgiven || 0) + pending),
+            balanceForgivenAt: new Date(),
+          },
+        });
+        await recalculateMultipleRecords([debt.monthlyRecordId], tx, true);
+        updatedRecord = await tx.monthlyRecord.findUnique({ where: { id: debt.monthlyRecordId } });
+      }
       if (updatedRecord.status !== 'COMPLETE') {
         await tx.monthlyRecord.update({
           where: { id: debt.monthlyRecordId },
@@ -1853,8 +1873,8 @@ const forgiveDebt = async (debtId, observations = 'Deuda condonada') => {
 /**
  * Recalcular una deuda cuando el MonthlyRecord cambia (ej: se anula un pago previo al cierre)
  */
-const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
-  const debt = await prisma.debt.findUnique({
+const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId, db = prisma) => {
+  const debt = await db.debt.findUnique({
     where: { id: debtId },
     include: { payments: true },
   });
@@ -1863,14 +1883,31 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
     return null;
   }
 
-  const monthlyRecord = await prisma.monthlyRecord.findUnique({
+  const rawRecord = await db.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
     include: { transactions: true },
   });
 
-  if (!monthlyRecord) {
+  if (!rawRecord) {
     return null;
   }
+
+  // Sólo cuentan los pagos PREVIOS al cierre (los que existían cuando nació la deuda). Las
+  // PaymentTransaction posteriores son el espejo de los pagos de la propia deuda (`payDebt`
+  // las crea para el Historial): contarlas acá descontaba esos pagos DOS veces — una en
+  // `unpaidRentAmount` y otra en `debt.amountPaid`. Bug real (auditoría 2026-10-20): anular
+  // el pago previo al cierre de una deuda con pagos propios BAJABA la deuda ~$48.000 en vez
+  // de subirla. Se ordenan por fecha de pago (no por `createdAt`, ni sin orden): el ancla es
+  // el último pago por fecha aunque se haya cargado antes.
+  const debtCreatedAt = debt.createdAt ? new Date(debt.createdAt).getTime() : Infinity;
+  const preCloseTxs = (rawRecord.transactions || [])
+    .filter((t) => !t.createdAt || new Date(t.createdAt).getTime() < debtCreatedAt)
+    .sort((x, y) => (new Date(x.paymentDate) - new Date(y.paymentDate)) || (new Date(x.createdAt) - new Date(y.createdAt)));
+  const monthlyRecord = {
+    ...rawRecord,
+    transactions: preCloseTxs,
+    amountPaid: round2(preCloseTxs.reduce((sum, t) => sum + (t.amount || 0), 0)),
+  };
 
   // Recalcular el "ancla" de punitorios (accumulatedPunitory + punitoryStartDate)
   // EXACTAMENTE igual que createDebtFromMonthlyRecord — no solo alquiler/servicios.
@@ -1892,7 +1929,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   let punitoryStartDate = debt.punitoryStartDate;
 
   if ((debt.amountPaid || 0) === 0) {
-    const contract = await prisma.contract.findUnique({ where: { id: debt.contractId } });
+    const contract = await db.contract.findUnique({ where: { id: debt.contractId } });
     let currentPunitoryAmount = monthlyRecord.punitoryAmount || 0;
 
     const anchorIsPayment = !!(monthlyRecord.transactions && monthlyRecord.transactions.length > 0);
@@ -1975,7 +2012,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   }
 
   // Actualizar la deuda
-  const updatedDebt = await prisma.debt.update({
+  const updatedDebt = await db.debt.update({
     where: { id: debtId },
     data: {
       originalAmount: totalOriginal,
@@ -2003,7 +2040,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId) => {
   // si la deuda quedó saldada, el mes tiene que quedar COMPLETE. Sin esto es como
   // reapareció el bug real de arriba.
   if (newStatus === 'PAID' && monthlyRecord.status !== 'COMPLETE') {
-    await prisma.monthlyRecord.update({
+    await db.monthlyRecord.update({
       where: { id: monthlyRecordId },
       data: {
         status: 'COMPLETE',
@@ -2217,7 +2254,7 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
   // (caso Yocsina 1615, Julio 2026: $97.200 de mora pagados con crédito → $97.886 a favor en
   // Agosto). Sin ningún pago el congelado está contenido en la mora en vivo (ver
   // `isDebtSettledAtAnchor`) y se sigue sin sumar.
-  const livePunitory = await calculateDebtPunitory(debt, getTodayLocalString(), preloaded, true);
+  const livePunitory = await calculateDebtPunitory(debt, getTodayLocalString(), { ...(preloaded || {}), db: tx }, true);
   const debtHasPayment = (debt.amountPaid || 0) > 0 || (debt.previousRecordPayment || 0) > 0;
   const liveTotalCeiling = debtHasPayment
     ? round2(Math.max(
@@ -2273,8 +2310,39 @@ const syncDebtAppliedCreditFromRecord = async (debtId, currentPreviousBalance, t
   });
 };
 
+/**
+ * Reabrir una deuda PAID que estaba saldada por el saldo a favor si ese saldo bajó.
+ *
+ * Sólo toca deudas que el crédito realmente saldaba (neto al ancla ≤ $1 con el crédito
+ * guardado): una deuda CONDONADA (`forgiveDebt`) queda PAID debiendo, y una baja de crédito no
+ * la reabre — la condonación la cubre. Devuelve la deuda actualizada o `null` si no cambió.
+ */
+const reopenDebtIfCreditLost = async (debtId, currentPreviousBalance, tx = prisma) => {
+  const debt = await tx.debt.findUnique({ where: { id: debtId } });
+  if (!debt || debt.status !== 'PAID') return null;
+  if (debtNetAtAnchor(debt) > 1) return null; // no la saldaba el crédito (p. ej. condonada)
+
+  const newAppliedCredit = round2(Math.min(Math.max(currentPreviousBalance || 0, 0), debt.appliedCredit || 0));
+  if (newAppliedCredit >= round2(debt.appliedCredit || 0)) return null;
+
+  const newNet = debtNetAtAnchor({ ...debt, appliedCredit: newAppliedCredit });
+  const stillCovered = newNet <= 1;
+  return tx.debt.update({
+    where: { id: debt.id },
+    data: {
+      appliedCredit: newAppliedCredit,
+      currentTotal: Math.max(newNet, 0),
+      ...(stillCovered ? {} : {
+        status: (debt.amountPaid || 0) > 0 ? 'PARTIAL' : 'OPEN',
+        closedAt: null,
+      }),
+    },
+  });
+};
+
 module.exports = {
   debtNetAtAnchor,
+  reopenDebtIfCreditLost,
   isDebtSettledAtAnchor,
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,

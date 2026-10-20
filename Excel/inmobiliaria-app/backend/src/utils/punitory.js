@@ -394,6 +394,19 @@ function computeLiveRecordPunitory(record, contract, holidays, {
     const { getTodayLocalString } = require('../utils/dateUtils');
     calculationDate = getTodayLocalString();
   }
+
+  // Mes con saldo CONDONADO: la mora se congela el día de la condonación. La condonación es
+  // el saldo de ESE día; si la mora siguiera corriendo, el mes volvía a deber (y el "Debe"
+  // del Control Mensual mostraba mora sobre plata condonada — Carloni, Semamart oct-2026,
+  // López abr-2026; auditoría 2026-10-20).
+  if ((record.balanceForgiven || 0) > 0 && record.balanceForgivenAt) {
+    const { getTodayLocalString } = require('../utils/dateUtils');
+    const forgivenDay = getTodayLocalString(new Date(record.balanceForgivenAt));
+    const calcDay = calculationDate instanceof Date
+      ? getTodayLocalString(calculationDate)
+      : String(calculationDate).slice(0, 10);
+    if (forgivenDay < calcDay) calculationDate = forgivenDay;
+  }
   const sumPunitoryConcepts = sumPunitoryConceptsFn || require('../utils/helpers').sumPunitoryConcepts;
 
   // Caso: mes ya completamente pagado → punitorio REAL = suma de conceptos PUNITORIOS

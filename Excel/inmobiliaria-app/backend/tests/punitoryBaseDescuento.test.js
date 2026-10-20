@@ -380,7 +380,7 @@ describe('D. debtService: descuento que deja el neto pagado no crea/mantiene deu
         id: 'mr-d2', periodMonth: PERIOD_MONTH, periodYear: PERIOD_YEAR, monthNumber: 2,
         rentAmount: RENT, servicesTotal: SERVICES_TOTAL_NET, ivaAmount: 0,
         punitoryAmount: 0, amountPaid: NET_TOTAL, status: 'PARTIAL', punitoryForgiven: false,
-        transactions: [{ paymentDate: new Date(PERIOD_YEAR, PERIOD_MONTH - 1, 9, 12, 0, 0) }],
+        transactions: [{ paymentDate: new Date(PERIOD_YEAR, PERIOD_MONTH - 1, 9, 12, 0, 0), amount: NET_TOTAL }],
       },
     });
     await prisma.contract.create({ data: CONTRACT });

@@ -931,7 +931,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
         if (openDebtForRefresh) {
           try {
             const livePun = await calculateDebtPunitory(openDebtForRefresh, getTodayLocalString(), debtPreloaded, true);
-            punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebtForRefresh, livePun, record);
+            punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebtForRefresh, livePun, recordForLivePunitory);
           } catch (e) {
             console.error(`[monthlyRecords] punitorio en vivo de la deuda ${openDebtForRefresh.id} falló: ${e.message}`);
             punitoryOutsideConcepts = openDebtForRefresh.accumulatedPunitory || 0;
@@ -1079,7 +1079,7 @@ const getOrCreateMonthlyRecords = async (groupId, periodMonth, periodYear) => {
       ? _punitoryOutsideConcepts(
         record.debt,
         record.debt.status !== 'PAID'
-          ? { unpaidAccumulatedPunitory: debtInfo?.unpaidAccumulatedPunitory, amount: debtInfo?.liveAccumulatedPunitory }
+          ? { remainingDebt: debtInfo?.remainingDebt, unpaidAccumulatedPunitory: debtInfo?.unpaidAccumulatedPunitory, amount: debtInfo?.liveAccumulatedPunitory }
           : null,
         record
       )
@@ -1338,6 +1338,27 @@ const _preClosePunitoryShift = (debt, record) => {
 };
 
 const _punitoryOutsideConcepts = (debt, livePun, record = null) => {
+  // Deuda ABIERTA con el mes a mano: el punitorio que falta en los conceptos es exactamente el
+  // que hace que el saldo del mes sea el total en vivo de la Deuda. Por construcción, Control
+  // Mensual y Deudas no pueden diferir. Antes se reconstruía sumando piezas (impago en vivo +
+  // mora cubierta por crédito − efectivo pre-cierre) y cada vez que la imputación de la Deuda y
+  // la de los recibos no coincidían —el crédito cambió después de un pago, un pago previo al
+  // cierre etiquetado PUNITORIOS— el mes contaba mora dos veces (auditoría 2026-10-20: el mes
+  // quedaba debiendo $27.600 más que la Deuda tras anular el sobrepago que la cubría).
+  if (livePun && record && typeof livePun.remainingDebt === 'number') {
+    const liveTotal = (livePun.remainingDebt || 0) + (livePun.unpaidAccumulatedPunitory || 0) + (livePun.amount || 0);
+    const iva = typeof record.ivaAmount === 'number'
+      ? record.ivaAmount
+      : (record.includeIva ? (record.rentAmount || 0) * 0.21 : 0);
+    const nonPunitoryCharges = (record.rentAmount || 0) + (record.servicesTotal || 0) + iva;
+    const conceptsPun = sumPunitoryConcepts(record.transactions || []);
+    return round2(Math.max(
+      liveTotal + (record.amountPaid || 0) + Math.max(record.previousBalance || 0, 0)
+      - nonPunitoryCharges - conceptsPun,
+      0,
+    ));
+  }
+
   const base = round2((debt.unpaidRentAmount || 0) + (debt.unpaidServicesAmount || 0));
   // `creditOnPunitory` repone lo que `calculateDebtPunitory` DESCONTÓ del impago por haber
   // sido cubierto con saldo a favor. Ese descuento sólo existe cuando la deuda tuvo algún
@@ -1489,6 +1510,18 @@ const _recalculateCore = async (recordIds, tx) => {
     // mes y reaparecía como saldo a favor fantasma para el mes siguiente. Caso real
     // 2026-09-28: al saldar junio se arrastraron $297.880,83 que no existían.
     const recordDebt = await tx.debt.findFirst({ where: { monthlyRecordId: record.id } });
+
+    // Deuda que se cerró con SALDO A FAVOR y el saldo ya no está (se anuló el pago que lo
+    // generó, bajó un sobrepago): se reabre por lo que el crédito dejó de cubrir. Antes
+    // `syncDebtAppliedCreditFromRecord` ignoraba las PAID y el mes quedaba debiendo sin deuda
+    // abierta: fuera de Deudas, fuera del orden cronológico y fuera del cierre (auditoría
+    // 2026-10-20: $50.000 y $119.800 que no se podían cobrar por ningún lado).
+    if (recordDebt && recordDebt.status === 'PAID'
+      && activePreviousBalance < (recordDebt.appliedCredit || 0) - 1) {
+      const { reopenDebtIfCreditLost } = require('./debtService');
+      const reopened = await reopenDebtIfCreditLost(recordDebt.id, activePreviousBalance, tx);
+      if (reopened) Object.assign(recordDebt, reopened);
+    }
     const openDebt = recordDebt && recordDebt.status !== 'PAID' ? recordDebt : null;
 
     // Sincronizar el saldo a favor (appliedCredit) de la deuda con el previousBalance
@@ -1603,8 +1636,8 @@ const _recalculateCore = async (recordIds, tx) => {
       punitoryOutsideConcepts = _punitoryOutsideConcepts(recordDebt, null, record);
     } else if (openDebt) {
       try {
-        const livePun = await calculateDebtPunitory(openDebt, getTodayLocalString(), null, /* skipUpdate */ true);
-        punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun, record);
+        const livePun = await calculateDebtPunitory(openDebt, getTodayLocalString(), { db: tx }, /* skipUpdate */ true);
+        punitoryOutsideConcepts = _punitoryOutsideConcepts(openDebt, livePun, { ...recordForLivePunitory, ivaAmount });
       } catch (e) {
         // Sin el cálculo en vivo, el congelado de la Deuda es la mejor aproximación al
         // impago (es lo que usaba esta función antes del fix).
