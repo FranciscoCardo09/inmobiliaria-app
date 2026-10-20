@@ -23,6 +23,13 @@ const errorHandler = (err, req, res, next) => {
     return ApiResponse.unauthorized(res, 'Token expirado');
   }
 
+  // Entrada de pago inválida o pago bloqueado por una regla de negocio (utils/paymentInput.js,
+  // paymentTransactionService/assertPaymentAllowed, guardas de cierre y deudas): son errores del
+  // usuario, no del servidor — el mensaje va tal cual.
+  if (err.code === 'PAYMENT_INPUT' || err.code === 'PAYMENT_BLOCKED') {
+    return ApiResponse.badRequest(res, err.message);
+  }
+
   // Zod validation errors
   if (err.name === 'ZodError') {
     const errors = err.errors.map((e) => ({

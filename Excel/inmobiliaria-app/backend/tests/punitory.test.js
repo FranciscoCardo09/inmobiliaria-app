@@ -629,3 +629,39 @@ describe('debtDelinquencyDays', () => {
     assert.equal(debtDelinquencyDays(debt), 1);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Auditoría 2026-10-20: días de mora en los bordes del día de inicio.
+// ---------------------------------------------------------------------------------------------
+describe('calculatePunitoryV2 — el tramo nunca arranca antes de que pueda haber mora', () => {
+  const { calculatePunitoryV2: calc } = require('../src/utils/punitory');
+
+  test('día de inicio posterior a la gracia (inicio 25, gracia 10): entre 11 y 24 no hay mora, nunca negativa', () => {
+    const r = calc('2026-10-20', 10, 2026, 311415, 25, 10, 0.006, [], null);
+    assert.equal(r.days, 0);
+    assert.equal(r.amount, 0);
+    const r2 = calc('2026-10-27', 10, 2026, 311415, 25, 10, 0.006, [], null);
+    assert.equal(r2.days, 3); // 25, 26, 27
+  });
+
+  test('pago ADELANTADO (mes anterior): el resto cuenta desde el día de inicio, no desde el adelanto (caso Vilchez)', () => {
+    // Noviembre, inicio 6, gracia 10. Adelanto el 20/10, resto el 20/11 → 15 días (6..20), no 32.
+    const r = calc('2026-11-20', 11, 2026, 288200, 6, 10, 0.006, [], new Date(2026, 9, 20));
+    assert.equal(r.days, 15);
+  });
+
+  test('pago ANTES del día de inicio: cuenta desde el día de inicio (caso Semamart, pagó el 5 con inicio 6)', () => {
+    const r = calc('2026-10-16', 10, 2026, 100000, 6, 10, 0.006, [], new Date(2026, 9, 5));
+    assert.equal(r.days, 11); // 6..16
+  });
+
+  test('pago dentro de la gracia pero DESPUÉS del inicio: sigue contando desde el pago (regla confirmada)', () => {
+    const r = calc('2026-10-16', 10, 2026, 100000, 6, 10, 0.006, [], new Date(2026, 9, 8));
+    assert.equal(r.days, 9); // 8..16
+  });
+
+  test('mes ya vencido con pago adelantado: cuenta desde el día 1 del período', () => {
+    const r = calc('2026-11-05', 10, 2026, 100000, 6, 10, 0.006, [], new Date(2026, 8, 25));
+    assert.equal(r.days, 36); // 1/10 .. 5/11
+  });
+});

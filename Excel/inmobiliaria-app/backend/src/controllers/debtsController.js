@@ -1,5 +1,6 @@
 // Debts Controller - Gestión de deudas y punitorios
 const ApiResponse = require('../utils/apiResponse');
+const { parsePaymentAmount, parsePaymentDate, parsePaymentMethod } = require('../utils/paymentInput');
 const {
   getOpenDebts,
   getDebts,
@@ -88,7 +89,8 @@ const getDebtById = async (req, res, next) => {
     // se reutiliza esa misma fórmula acá en vez de duplicarla mal.
     if (debt.status !== 'PAID') {
       const { amount, days, remainingDebt, unpaidAccumulatedPunitory, startDate, endDate, remainingServices, remainingRent, iva } =
-        await calculateDebtPunitory(debt, getTodayLocalString());
+        // skipUpdate: un GET no escribe (antes abrir una deuda podía reescribir su total).
+        await calculateDebtPunitory(debt, getTodayLocalString(), null, true);
       debt.liveAccumulatedPunitory = amount;
       debt.livePunitoryDays = days;
       debt.liveCurrentTotal = remainingDebt + (unpaidAccumulatedPunitory || 0) + amount;
@@ -116,9 +118,9 @@ const payDebtHandler = async (req, res, next) => {
     const { groupId, id } = req.params;
     const { amount, paymentDate, paymentMethod, observations, forgivePunitorios } = req.body;
 
-    if (!amount || parseFloat(amount) <= 0) {
-      return ApiResponse.badRequest(res, 'Monto inválido');
-    }
+    const parsedAmount = parsePaymentAmount(amount);
+    const parsedDate = parsePaymentDate(paymentDate);
+    const parsedMethod = parsePaymentMethod(paymentMethod);
 
     // Verificar que la deuda pertenece al grupo
     const debt = await prisma.debt.findUnique({ where: { id } });
@@ -128,16 +130,16 @@ const payDebtHandler = async (req, res, next) => {
 
     const result = await payDebt(
       id,
-      parseFloat(amount),
-      paymentDate || getTodayLocalString(),
-      paymentMethod || 'EFECTIVO',
+      parsedAmount,
+      parsedDate,
+      parsedMethod,
       observations,
       forgivePunitorios || false
     );
 
     return ApiResponse.success(res, result, 'Pago de deuda registrado');
   } catch (error) {
-    if (error.message === 'Esta deuda ya está pagada' || error.code === 'ORDER_BLOCK') {
+    if (error.message === 'Esta deuda ya está pagada' || error.code === 'ORDER_BLOCK' || error.code === 'PAYMENT_INPUT' || error.code === 'PAYMENT_BLOCKED') {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
@@ -154,10 +156,10 @@ const bulkDebtPreviewHandler = async (req, res, next) => {
       return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
     }
 
-    const preview = await previewBulkDebtPayment(groupId, debtIds, paymentDate, currentRecordId || null);
+    const preview = await previewBulkDebtPayment(groupId, debtIds, parsePaymentDate(paymentDate), currentRecordId || null);
     return ApiResponse.success(res, preview);
   } catch (error) {
-    if (error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('mes actual')) {
+    if (error.code === 'PAYMENT_INPUT' || error.code === 'PAYMENT_BLOCKED' || error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('mes actual')) {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
@@ -173,16 +175,12 @@ const payDebtsBulkHandler = async (req, res, next) => {
     if (!Array.isArray(debtIds) || debtIds.length === 0) {
       return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
     }
-    if (!amount || parseFloat(amount) <= 0) {
-      return ApiResponse.badRequest(res, 'Monto inválido');
-    }
-
     const result = await payDebtsBulk(
       groupId,
       debtIds,
-      parseFloat(amount),
-      paymentDate || getTodayLocalString(),
-      paymentMethod || 'EFECTIVO',
+      parsePaymentAmount(amount),
+      parsePaymentDate(paymentDate),
+      parsePaymentMethod(paymentMethod),
       observations,
       currentRecordId || null,
       !!forgivePunitorios
@@ -190,7 +188,7 @@ const payDebtsBulkHandler = async (req, res, next) => {
 
     return ApiResponse.success(res, result, 'Pago múltiple registrado');
   } catch (error) {
-    if (error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('contrato') || error.message?.includes('Monto') || error.message?.includes('mes actual')) {
+    if (error.code === 'PAYMENT_INPUT' || error.code === 'PAYMENT_BLOCKED' || error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('contrato') || error.message?.includes('Monto') || error.message?.includes('mes actual')) {
       return ApiResponse.badRequest(res, error.message);
     }
     next(error);
@@ -271,7 +269,7 @@ const getDebtPunitoryPreview = async (req, res, next) => {
       return ApiResponse.success(res, { days: 0, amount: 0, remainingDebt: 0, remainingServices: 0, remainingRent: 0, iva: 0, totalToPay: 0 });
     }
 
-    const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, accumulatedPunitory, newPunitoryAmount, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, new Date(paymentDate + 'T12:00:00'));
+    const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, accumulatedPunitory, newPunitoryAmount, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, parsePaymentDate(paymentDate), null, true);
     // Punitorios TOTALES impagos = acumulado impago (congelado de pagos previos) + nuevo en vivo.
     // BUG previo: se omitía unpaidAccumulatedPunitory, por lo que el modal mostraba menos plata
     // que el Control Mensual (que sí suma el acumulado en liveCurrentTotal).

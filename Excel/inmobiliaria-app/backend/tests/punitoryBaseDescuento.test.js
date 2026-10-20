@@ -72,10 +72,16 @@ describe('A. computePunitoryBase — descuento/bonificación que deja el neto pa
   });
 
   test('A7: pago exacto MENOS un margen → base > 0 (la tolerancia de redondeo no debe tapar un pendiente real)', () => {
-    // neto=70000, pagó 69999 (1 peso de menos, bien afuera de la tolerancia de $0,01).
-    const base = computePunitoryBase({ rentAmount: 100000, servicesTotal: -30000, ivaAmount: 0, amountPaid: 69999 });
-    assert.ok(base > 0, `esperaba base > 0 (todavía pendiente $1), dio ${base}`);
-    assert.equal(base, 30001); // 100000 (clampeado) - 69999
+    // neto=70000, pagó 69998 ($2 de menos, afuera de la tolerancia de $1 — la misma que usa el
+    // estado del mes; con $1 o menos el mes ya figura pagado y no puede seguir devengando).
+    const base = computePunitoryBase({ rentAmount: 100000, servicesTotal: -30000, ivaAmount: 0, amountPaid: 69998 });
+    assert.ok(base > 0, `esperaba base > 0 (todavía pendiente $2), dio ${base}`);
+    assert.equal(base, 30002); // 100000 (clampeado) - 69998
+  });
+
+  test('A7b: pago con $0,41 de menos (dentro de la tolerancia de $1) → base = 0 (caso Semamart)', () => {
+    const base = computePunitoryBase({ rentAmount: 100000, servicesTotal: -30000, ivaAmount: 0, amountPaid: 69999.59 });
+    assert.equal(base, 0);
   });
 
   test('A8: pago exacto MÁS un centavo → base = 0 (la tolerancia de $0,01 sí cubre diferencias de redondeo)', () => {

@@ -137,6 +137,67 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
  * Corre SIEMPRE dentro de la transacción/lock de registerPayment; extraído solo para
  * mantener legible el wrapper de arriba, no para reutilizarse fuera de esa transacción.
  */
+const blocked = (message) => Object.assign(new Error(message), { code: 'PAYMENT_BLOCKED' });
+const fmtDate = (d) => {
+  const x = new Date(d);
+  return `${String(x.getUTCDate()).padStart(2, '0')}/${String(x.getUTCMonth() + 1).padStart(2, '0')}/${x.getUTCFullYear()}`;
+};
+
+/**
+ * Guardas del cobro de un mes (auditoría 2026-10-20). Corren dentro del lock del contrato.
+ *
+ * 1. Mes con Deuda abierta: se cobra desde Deudas (`payDebt`). Grabarlo acá como ALQUILER no
+ *    creaba DebtPayment y el mes y la Deuda quedaban con saldos distintos ($30.000 de
+ *    diferencia en la prueba). Sólo lo evitaba la pantalla.
+ * 2. Fecha anterior a un pago ya cargado del mismo mes (regla confirmada 2026-10-20: se
+ *    bloquea): la mora se calcula desde el último pago, y un pago "del pasado" quedaba con el
+ *    tramo mal contado sin aviso.
+ * 3. Doble envío: el mismo monto, fecha y mes en los últimos 2 minutos. Dos clicks o dos
+ *    operadores grababan los dos pagos y el segundo quedaba como saldo a favor.
+ */
+const assertPaymentAllowed = async (tx, monthlyRecordId, paymentDateStr, amount) => {
+  const openDebt = await tx.debt.findFirst({
+    where: { monthlyRecordId, status: { in: ['OPEN', 'PARTIAL'] } },
+    select: { periodLabel: true },
+  });
+  if (openDebt) {
+    throw blocked(`${openDebt.periodLabel} ya pasó a deuda: registrá el pago desde Deudas.`);
+  }
+
+  const [y, m, d] = String(paymentDateStr).split(/[-T]/).map(Number);
+  const newDayUtc = Date.UTC(y, m - 1, d);
+  const lastTx = await tx.paymentTransaction.findFirst({
+    where: { monthlyRecordId },
+    orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
+    select: { paymentDate: true },
+  });
+  if (lastTx) {
+    const last = new Date(lastTx.paymentDate);
+    const lastDayUtc = Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate());
+    if (newDayUtc < lastDayUtc) {
+      throw blocked(
+        `La fecha es anterior al último pago de este mes (${fmtDate(last)}). `
+        + 'Anulá ese pago y cargalos en orden de fecha.'
+      );
+    }
+  }
+
+  const duplicate = await tx.paymentTransaction.findFirst({
+    where: {
+      monthlyRecordId,
+      amount,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+    select: { paymentDate: true },
+  });
+  if (duplicate) {
+    const dup = new Date(duplicate.paymentDate);
+    if (Date.UTC(dup.getUTCFullYear(), dup.getUTCMonth(), dup.getUTCDate()) === newDayUtc) {
+      throw blocked('Este pago ya se registró hace un momento (mismo monto y fecha). Revisá el historial antes de cargarlo de nuevo.');
+    }
+  }
+};
+
 const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contract, data }) => {
   const {
     paymentDate,
@@ -146,6 +207,8 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
     generateReceipt = false,
     observations,
   } = data;
+
+  await assertPaymentAllowed(tx, monthlyRecordId, paymentDate, parseFloat(amount));
 
   // Calculate punitorios for this payment date
   // Payments cover services first, then rent. Punitorios only apply to unpaid rent.
@@ -492,11 +555,11 @@ const registerPaymentCore = async (tx, { groupId, monthlyRecordId, record, contr
 /**
  * Calculate punitory preview for a given date (for the form)
  */
-const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
+const calculatePunitoryPreview = async (monthlyRecordId, paymentDate, groupId = null) => {
   const record = await prisma.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
     select: {
-      id: true, periodMonth: true, periodYear: true, rentAmount: true,
+      id: true, groupId: true, periodMonth: true, periodYear: true, rentAmount: true,
       servicesTotal: true, previousBalance: true, amountPaid: true,
       punitoryAmount: true, punitoryDays: true, status: true, includeIva: true,
       isPostExpiry: true,
@@ -505,9 +568,11 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
           punitoryStartDay: true, punitoryGraceDay: true, punitoryPercent: true,
         },
       },
+      // TODAS las transacciones (antes `take: 1`): `creditPaidFrozenPunitory` necesita saber
+      // cuántos pagos tiene el mes — con una sola a la vista creía siempre que era el primero
+      // y el preview anticipaba menos mora que el cobro real.
       transactions: {
-        orderBy: { paymentDate: 'desc' },
-        take: 1,
+        orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
         select: {
           paymentDate: true,
           amount: true,
@@ -519,6 +584,7 @@ const calculatePunitoryPreview = async (monthlyRecordId, paymentDate) => {
   });
 
   if (!record) throw new Error('Registro no encontrado');
+  if (groupId && record.groupId !== groupId) return null;
 
   const holidays = await getHolidaysForYear(record.periodYear);
 

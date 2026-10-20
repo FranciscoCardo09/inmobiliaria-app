@@ -422,8 +422,12 @@ const calculateDebtPunitory = async (debt, paymentDate = getTodayLocalString(), 
       }
 
       if (Object.keys(updateData).length > 0) {
-        // Enforce setting currentTotal correctly
-        updateData.currentTotal = correctUnpaidRent + correctUnpaidServices + accumulatedPunitory;
+        // Enforce setting currentTotal correctly (neto del crédito y de los pagos, como todos los
+        // demás escritores — antes lo ignoraba y un pago podía dejar grabado un total inflado).
+        updateData.currentTotal = round2(Math.max(
+          correctUnpaidRent + correctUnpaidServices + accumulatedPunitory
+          - (debt.appliedCredit || 0) - (debt.amountPaid || 0), 0,
+        ));
 
         // If everything is paid, we could close the debt, but we just set values.
         // The display will show $0.
@@ -1003,7 +1007,7 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
     // remainingServices/iva ya vienen desglosados de calculateDebtPunitory (el IVA se
     // deriva ahí una sola vez desde el ivaAmount original del MonthlyRecord).
     const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, unpaidAccumulatedPunitory } =
-      await calculateDebtPunitory(debt, date);
+      await calculateDebtPunitory(debt, date, null, true); // preview: sólo lectura
     // Punitorios totales impagos = acumulado impago (de pagos previos) + nuevo en vivo.
     // Sin sumar el acumulado el total quedaba por debajo del real (mismo bug que el preview individual).
     const totalPunitory = round2((unpaidAccumulatedPunitory || 0) + amount);

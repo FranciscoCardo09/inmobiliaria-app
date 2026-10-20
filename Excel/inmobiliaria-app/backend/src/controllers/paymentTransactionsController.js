@@ -1,5 +1,6 @@
 // Payment Transactions Controller - Phase 5
 const ApiResponse = require('../utils/apiResponse');
+const { parsePaymentAmount, parsePaymentDate, parsePaymentMethod } = require('../utils/paymentInput');
 const {
   registerPayment,
   calculatePunitoryPreview,
@@ -22,21 +23,17 @@ const createTransaction = async (req, res, next) => {
       observations,
     } = req.body;
 
-    if (!monthlyRecordId || !paymentDate || !amount) {
+    if (!monthlyRecordId || !paymentDate || amount === undefined || amount === null || amount === '') {
       return ApiResponse.badRequest(
         res,
         'monthlyRecordId, paymentDate y amount son requeridos'
       );
     }
 
-    if (parseFloat(amount) <= 0) {
-      return ApiResponse.badRequest(res, 'El monto debe ser mayor a 0');
-    }
-
     const result = await registerPayment(groupId, monthlyRecordId, {
-      paymentDate,
-      amount,
-      paymentMethod,
+      paymentDate: parsePaymentDate(paymentDate),
+      amount: parsePaymentAmount(amount),
+      paymentMethod: parsePaymentMethod(paymentMethod),
       forgivePunitorios,
       generateReceipt,
       observations,
@@ -47,6 +44,9 @@ const createTransaction = async (req, res, next) => {
     if (error.message === 'Registro mensual no encontrado') {
       return ApiResponse.notFound(res, error.message);
     }
+    if (error.code === 'PAYMENT_INPUT' || error.code === 'PAYMENT_BLOCKED') {
+      return ApiResponse.badRequest(res, error.message);
+    }
     next(error);
   }
 };
@@ -54,6 +54,7 @@ const createTransaction = async (req, res, next) => {
 // GET /api/groups/:groupId/payment-transactions/calculate-punitorios
 const getPunitoryPreview = async (req, res, next) => {
   try {
+    const { groupId } = req.params;
     const { monthlyRecordId, paymentDate } = req.query;
 
     if (!monthlyRecordId || !paymentDate) {
@@ -63,7 +64,9 @@ const getPunitoryPreview = async (req, res, next) => {
       );
     }
 
-    const result = await calculatePunitoryPreview(monthlyRecordId, paymentDate);
+    // `groupId`: el preview devolvía alquiler, mora y estado de un registro de OTRO grupo.
+    const result = await calculatePunitoryPreview(monthlyRecordId, parsePaymentDate(paymentDate), groupId);
+    if (!result) return ApiResponse.notFound(res, 'Registro mensual no encontrado');
 
     return ApiResponse.success(res, {
       amount: result.amount,
@@ -86,6 +89,9 @@ const getPunitoryPreview = async (req, res, next) => {
   } catch (error) {
     if (error.message === 'Registro no encontrado') {
       return ApiResponse.notFound(res, error.message);
+    }
+    if (error.code === 'PAYMENT_INPUT') {
+      return ApiResponse.badRequest(res, error.message);
     }
     next(error);
   }

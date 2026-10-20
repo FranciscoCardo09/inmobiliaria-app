@@ -142,6 +142,12 @@ function calculatePunitoryV2(
     return { amount: 0, days: 0, graceDate, fromDate: null, toDate: null };
   }
 
+  // Primer día en que puede haber mora en este período: el día 1 si el mes ya pasó, el día de
+  // inicio (`punitoryStartDay`) si es el mes en curso.
+  const moraStart = isPastPeriod
+    ? new Date(periodYear, periodMonth - 1, 1)
+    : new Date(periodYear, periodMonth - 1, punitoryStartDay);
+
   // If there was a previous partial payment, punitorios count from that date
   if (lastPaymentDate) {
     const lastPayNorm = toLocalDate(lastPaymentDate);
@@ -152,10 +158,20 @@ function calculatePunitoryV2(
     // REGLA CONFIRMADA POR EL USUARIO (2026-07): el tramo cuenta desde la fecha del
     // último pago hasta la fecha de este pago, AMBAS INCLUSIVE (por eso el +1).
     // No cambiar a exclusivo aunque parezca "doble conteo" del día del pago anterior.
-    const diasPunitorios = diffCalendarDays(payDateNorm, lastPayNorm) + 1;
+    //
+    // Pero el tramo nunca arranca antes de que pudiera haber mora (regla confirmada
+    // 2026-10-20): un pago ADELANTADO (del mes anterior) o hecho antes del día de inicio
+    // contaba como mora los días en que no la había. Caso Vilchez: $300.000 adelantados el
+    // 20/10 y el resto el 20/11 cobraban 32 días desde el 20/10 en vez de 15 desde el 6/11.
+    // Un pago dentro de la gracia pero DESPUÉS del día de inicio sigue contando desde el pago.
+    const fromDate = lastPayNorm < moraStart ? moraStart : lastPayNorm;
+    const diasPunitorios = diffCalendarDays(payDateNorm, fromDate) + 1;
+    if (diasPunitorios <= 0) {
+      return { amount: 0, days: 0, graceDate, fromDate: null, toDate: null };
+    }
     const dailyRate = baseRent * punitoryPercent;
     const amount = Math.round(dailyRate * diasPunitorios * 100) / 100;
-    return { amount, days: diasPunitorios, graceDate, fromDate: lastPayNorm, toDate: payDateNorm };
+    return { amount, days: diasPunitorios, graceDate, fromDate, toDate: payDateNorm };
   }
 
   if (isPastPeriod) {
@@ -169,8 +185,14 @@ function calculatePunitoryV2(
   }
 
   // Current month, after grace, no previous payment: count from punitoryStartDay to paymentDate (inclusive)
-  const fromDate = new Date(periodYear, periodMonth - 1, punitoryStartDay);
+  const fromDate = moraStart;
   const diasPunitorios = diffCalendarDays(payDateNorm, fromDate) + 1;
+  // Día de inicio POSTERIOR a la gracia (contrato Gimenez: inicio 25, gracia 10): entre la
+  // gracia y el día de inicio todavía no corre mora. Antes daba días NEGATIVOS → mora negativa
+  // que descontaba del alquiler y dejaba el mes debiendo lo que la pantalla no pedía.
+  if (diasPunitorios <= 0) {
+    return { amount: 0, days: 0, graceDate, fromDate: null, toDate: null };
+  }
   const dailyRate = baseRent * punitoryPercent;
   const amount = Math.round(dailyRate * diasPunitorios * 100) / 100;
 
@@ -312,7 +334,10 @@ function computePunitoryBase({ rentAmount = 0, servicesTotal = 0, ivaAmount = 0,
 
   // Mes saldado: efectivo + crédito cubren el neto → no queda base.
   const netTotalOwed = (rentAmount || 0) + (servicesTotal || 0) + (ivaAmount || 0);
-  if (totalCredits >= netTotalOwed - 0.01) return 0;
+  // Misma tolerancia ($1) que usa el estado del mes para darlo por pagado (`computeTotals`).
+  // Con $0,01 un mes pagado con $0,41 de menos quedaba COMPLETE pero seguía devengando mora
+  // sobre toda la base ampliada (caso Semamart jul/ago 2026: +$20.607 de mora fantasma).
+  if (totalCredits >= netTotalOwed - 1) return 0;
 
   // Sin efectivo real, el crédito descuenta pero NO activa la base AMPLIADA: los
   // servicios impagos siguen sin generar mora mientras el inquilino no haya
