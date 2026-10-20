@@ -95,7 +95,7 @@ const previewCloseMonth = async (groupId, month, year) => {
           conceptType: { select: { name: true, label: true, category: true } },
         },
       },
-      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }] },
+      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }], include: { concepts: { select: { type: true, amount: true } } } },
       debt: true, // Verificar si ya tiene deuda
     },
   });
@@ -187,7 +187,7 @@ const closeMonth = async (groupId, month, year) => {
           conceptType: { select: { category: true } },
         },
       },
-      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }] },
+      transactions: { orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }], include: { concepts: { select: { type: true, amount: true } } } },
       debt: true,
     },
   });

@@ -1716,6 +1716,34 @@ const _recalculateCore = async (recordIds, tx) => {
       numUpdated++;
     }
   }
+
+  // Renovaciones: el saldo a favor final del contrato viejo es el "A favor ant." del primer mes
+  // del nuevo. Se fijaba UNA vez, al crear ese mes, y la cascada se cortaba en el contrato:
+  // pagar o anular algo del contrato viejo después de renovar dejaba el crédito del nuevo
+  // viejo — perdido o fantasma (auditoría 2026-10-20: un sobrepago de $128.400 nunca llegó al
+  // contrato nuevo, y anular el pago dejaba $50.000 de crédito que ya no existía).
+  const processed = Array.from(minMonthsByContract.keys());
+  const renewals = await tx.contract.findMany({
+    where: { renewedFromContractId: { in: processed } },
+    select: { id: true, renewedFromContractId: true },
+  });
+  for (const renewal of renewals) {
+    const oldLast = await tx.monthlyRecord.findFirst({
+      where: { contractId: renewal.renewedFromContractId },
+      orderBy: { monthNumber: 'desc' },
+      select: { balance: true, previousBalance: true, debt: { select: { status: true, appliedCredit: true } } },
+    });
+    const newFirst = await tx.monthlyRecord.findFirst({
+      where: { contractId: renewal.id },
+      orderBy: { monthNumber: 'asc' },
+      select: { id: true, previousBalance: true },
+    });
+    if (!oldLast || !newFirst) continue;
+    const credit = round2(carryForwardCredit(oldLast));
+    if (!_floatsDiffer(newFirst.previousBalance || 0, credit)) continue;
+    await tx.monthlyRecord.update({ where: { id: newFirst.id }, data: { previousBalance: credit } });
+    numUpdated += await _recalculateCore([newFirst.id], tx);
+  }
   return numUpdated;
 };
 

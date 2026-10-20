@@ -1,6 +1,7 @@
 // Debt Service - Gestión de deudas con punitorios acumulados
 const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase } = require('../utils/punitory');
 const { MONTH_NAMES } = require('../utils/constants');
+const { sumPunitoryConcepts } = require('../utils/helpers');
 // A-25: "hoy" del negocio en ART, TZ-inmune (ver dateUtils.js). El servidor
 // corre sin TZ configurada (= UTC); usar `new Date()` crudo como "hoy" en un
 // cálculo de punitorios cuenta un día de más entre las 21:00 y las 23:59 ART.
@@ -138,11 +139,21 @@ const isDebtSettledAtAnchor = (debt) => {
  * pago por fecha aunque se haya cargado antes que otro (antes se tomaba el último cargado).
  */
 const computeDebtDraft = async (monthlyRecord, contract) => {
+  const sortedTxs = [...(monthlyRecord.transactions || [])].sort(
+    (x, y) => (new Date(x.paymentDate) - new Date(y.paymentDate)) || (new Date(x.createdAt || 0) - new Date(y.createdAt || 0)),
+  );
+  // `punitoryAmount` del mes es la mora ADEUDADA al momento del ÚLTIMO pago (ya neta de lo que
+  // pagaron los anteriores), pero `calculateImputation` descuenta TODA la plata cobrada. Con dos
+  // o más pagos, la mora que pagaron los anteriores se descontaba dos veces y la deuda nacía con
+  // menos mora (auditoría 2026-10-20: $10.000 perdidos en la prueba). Se reconstruye el bruto:
+  // adeudado al último pago + lo que los pagos anteriores imputaron a PUNITORIOS.
+  const earlierPunitoryPaid = sortedTxs.length > 1
+    ? sumPunitoryConcepts(sortedTxs.slice(0, -1))
+    : 0;
   monthlyRecord = {
     ...monthlyRecord,
-    transactions: [...(monthlyRecord.transactions || [])].sort(
-      (x, y) => (new Date(x.paymentDate) - new Date(y.paymentDate)) || (new Date(x.createdAt || 0) - new Date(y.createdAt || 0)),
-    ),
+    transactions: sortedTxs,
+    punitoryAmount: round2((monthlyRecord.punitoryAmount || 0) + earlierPunitoryPaid),
   };
   // CRITICAL: Calculate CURRENT accumulated punitorios at time of closing
   // The monthlyRecord.punitoryAmount is frozen from the last payment, but punitorios
@@ -1292,10 +1303,12 @@ const getOpenDebts = async (groupId, contractId = null) => {
     orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
   });
 
-  // Batch-load contracts and holidays for all debts (avoids N+1)
-  const preloaded = debts.length > 0 ? await preloadDebtDependencies(debts) : null;
+  const inRange = await dropOutOfRangeDebts(debts);
 
-  return Promise.all(debts.map(async (debt) => {
+  // Batch-load contracts and holidays for all debts (avoids N+1)
+  const preloaded = inRange.length > 0 ? await preloadDebtDependencies(inRange) : null;
+
+  return Promise.all(inRange.map(async (debt) => {
     return computeLiveDebtTotal(debt, getTodayLocalString(), preloaded);
   }));
 };
@@ -1326,11 +1339,13 @@ const getDebts = async (groupId, filters = {}) => {
     orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
   });
 
+  const inRange = await dropOutOfRangeDebts(debts);
+
   // Batch-load dependencies for non-PAID debts (avoids N+1)
-  const openDebts = debts.filter(d => d.status !== 'PAID');
+  const openDebts = inRange.filter(d => d.status !== 'PAID');
   const preloaded = openDebts.length > 0 ? await preloadDebtDependencies(openDebts) : null;
 
-  return Promise.all(debts.map(async (debt) => {
+  return Promise.all(inRange.map(async (debt) => {
     return computeLiveDebtTotal(debt, getTodayLocalString(), preloaded);
   }));
 };
@@ -1374,6 +1389,53 @@ const getDebtsSummary = async (groupId) => {
  *
  * Devuelve: [{ type: 'DEBT'|'RECORD', id, monthlyRecordId, periodMonth, periodYear, periodLabel }]
  */
+/**
+ * ¿El mes (monthNumber / período) cae dentro del rango real del contrato?
+ * Replica isContractInRangeForMonth de monthlyRecordService (require circular).
+ */
+const periodInContractRange = (c, record) => {
+  if (!c) return false;
+  if (record.monthNumber == null) return true; // sin dato → no descartar
+  const endMonth = c.startMonth + c.durationMonths - 1;
+  if (record.monthNumber < c.startMonth || record.monthNumber > endMonth) return false;
+  if (c.rescindedAt) {
+    const r = new Date(c.rescindedAt);
+    // mes calendario del record vs mes de rescisión
+    const recKey = record.periodYear * 12 + record.periodMonth;
+    const rescKey = r.getFullYear() * 12 + (r.getMonth() + 1);
+    if (recKey > rescKey) return false;
+  }
+  return true;
+};
+
+/**
+ * Deudas abiertas de meses POSTERIORES a la rescisión (o fuera del rango del contrato): las
+ * creó un cierre viejo, antes de la guarda A-10, sobre meses que el contrato no tenía. No se
+ * muestran ni se cobran (decisión 2026-10-20; `scripts/repair-deudas-post-rescision.js` las
+ * borra). Sumaban $4,98M en el dashboard sin aparecer en el Control Mensual.
+ */
+const dropOutOfRangeDebts = async (debts) => {
+  if (debts.length === 0) return debts;
+  const records = await prisma.monthlyRecord.findMany({
+    where: { id: { in: debts.map((d) => d.monthlyRecordId) } },
+    select: { id: true, contractId: true, monthNumber: true, periodMonth: true, periodYear: true },
+  });
+  const contracts = await prisma.contract.findMany({
+    where: { id: { in: [...new Set(records.map((r) => r.contractId))] } },
+    select: { id: true, startMonth: true, durationMonths: true, rescindedAt: true },
+  });
+  const recordById = new Map(records.map((r) => [r.id, r]));
+  const contractById = new Map(contracts.map((c) => [c.id, c]));
+  return debts.filter((d) => {
+    if (d.status === 'PAID') return true;
+    const r = recordById.get(d.monthlyRecordId);
+    const c = r && contractById.get(r.contractId);
+    // Sin datos para decidir, no se descarta (nunca esconder una deuda por falta de info).
+    if (!r || !c || c.startMonth == null || c.durationMonths == null) return true;
+    return periodInContractRange(c, r);
+  });
+};
+
 const getUnpaidPeriods = async (groupId, contractId) => {
   const chain = await expandToChain(contractId);
 
@@ -1393,6 +1455,8 @@ const getUnpaidPeriods = async (groupId, contractId) => {
     orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
   });
 
+  const openDebtsInRange = await dropOutOfRangeDebts(openDebts);
+
   // monthlyRecordIds que ya tienen una deuda (cualquier estado) → excluir de records
   const allDebts = await prisma.debt.findMany({
     where: { groupId, contractId: { in: chain } },
@@ -1407,23 +1471,7 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   });
   const contractMap = new Map(chainContracts.map((c) => [c.id, c]));
 
-  // ¿el monthNumber de un record cae dentro del rango real del contrato?
-  // (replica isContractInRangeForMonth de monthlyRecordService para evitar require circular)
-  const recordInRange = (record) => {
-    const c = contractMap.get(record.contractId);
-    if (!c) return false;
-    if (record.monthNumber == null) return true; // sin dato → no descartar
-    const endMonth = c.startMonth + c.durationMonths - 1;
-    if (record.monthNumber < c.startMonth || record.monthNumber > endMonth) return false;
-    if (c.rescindedAt) {
-      const r = new Date(c.rescindedAt);
-      // mes calendario del record vs mes de rescisión
-      const recKey = record.periodYear * 12 + record.periodMonth;
-      const rescKey = r.getFullYear() * 12 + (r.getMonth() + 1);
-      if (recKey > rescKey) return false;
-    }
-    return true;
-  };
+  const recordInRange = (record) => periodInContractRange(contractMap.get(record.contractId), record);
 
   // SOLO meses con pago parcial iniciado (obligación real en curso), no cerrados.
   const unpaidRecords = await prisma.monthlyRecord.findMany({
@@ -1440,7 +1488,7 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   });
 
   const periods = [];
-  for (const d of openDebts) {
+  for (const d of openDebtsInRange) {
     // Saldada al ancla (ver `isDebtSettledAtAnchor`): aunque algún escritor la haya dejado en
     // OPEN, no es una obligación y no puede bloquear el cobro de los meses siguientes.
     if (isDebtSettledAtAnchor(d)) continue;
@@ -1932,7 +1980,7 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId, db = pr
 
   const rawRecord = await db.monthlyRecord.findUnique({
     where: { id: monthlyRecordId },
-    include: { transactions: true },
+    include: { transactions: { include: { concepts: { select: { type: true, amount: true } } } } },
   });
 
   if (!rawRecord) {
@@ -1977,7 +2025,10 @@ const recalculateDebtFromMonthlyRecord = async (debtId, monthlyRecordId, db = pr
 
   if ((debt.amountPaid || 0) === 0) {
     const contract = await db.contract.findUnique({ where: { id: debt.contractId } });
-    let currentPunitoryAmount = monthlyRecord.punitoryAmount || 0;
+    // Mismo bruto que `computeDebtDraft`: adeudado al último pago + mora que pagaron los
+    // pagos previos (si no, con 2+ pagos pre-cierre se descuenta dos veces).
+    let currentPunitoryAmount = round2((monthlyRecord.punitoryAmount || 0)
+      + (preCloseTxs.length > 1 ? sumPunitoryConcepts(preCloseTxs.slice(0, -1)) : 0));
 
     const anchorIsPayment = !!(monthlyRecord.transactions && monthlyRecord.transactions.length > 0);
 

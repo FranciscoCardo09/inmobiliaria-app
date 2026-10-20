@@ -37,3 +37,24 @@ test('el ancla de la deuda es el último pago por FECHA, aunque se haya cargado 
   const anchor = draft.monthlyRecord.transactions[draft.monthlyRecord.transactions.length - 1];
   assert.equal(new Date(anchor.paymentDate).toISOString().slice(0, 10), '2026-10-20');
 });
+
+test('2 pagos antes del cierre: la deuda nace con la mora que realmente falta (caso Marquez Gomez)', async () => {
+  const prisma = makeFakePrisma();
+  const { computeDebtDraft } = proxyquire('../src/services/debtService', {
+    '../lib/prisma': prisma,
+    '../utils/punitory': { ...realPunitory, getHolidaysForYear: async () => [] },
+  });
+  const contract = { id: 'c1', groupId: 'g1', punitoryStartDay: 6, punitoryGraceDay: 10, punitoryPercent: 0.006 };
+  // Alquiler 787.763. 15/10 paga 797.763 (mora 47.265,78; cubre 10.000). 20/10 paga 1.000
+  // (mora adeudada antes de ese pago 38.607,35 → punitoryAmount del mes).
+  const record = {
+    id: 'mr', periodMonth: 10, periodYear: 2026, rentAmount: 787763, servicesTotal: 0, ivaAmount: 0,
+    punitoryAmount: 38607.35, amountPaid: 798763, previousBalance: 0, status: 'PARTIAL',
+    transactions: [
+      { paymentDate: new Date('2026-10-15T12:00:00Z'), createdAt: new Date('2026-10-15T13:00:00Z'), amount: 797763, concepts: [{ type: 'ALQUILER', amount: 787763 }, { type: 'PUNITORIOS', amount: 10000 }] },
+      { paymentDate: new Date('2026-10-20T12:00:00Z'), createdAt: new Date('2026-10-20T13:00:00Z'), amount: 1000, concepts: [{ type: 'PUNITORIOS', amount: 1000 }] },
+    ],
+  };
+  const draft = await computeDebtDraft(record, contract);
+  assert.equal(draft.unpaidPunitory, 37607.35); // antes 27.607,35: se perdían los $10.000 del primer pago
+});

@@ -208,6 +208,7 @@ function calculatePunitoryV2(
  * paymentTransactionService) y era un cuello de botella real con pocos datos.
  */
 const holidayCache = new Map();
+const warnedNoHolidays = new Set();
 
 /**
  * Get holidays from database for a specific year (memoizado por proceso).
@@ -221,7 +222,14 @@ async function getHolidaysForYear(year) {
     select: { date: true },
   });
   const dates = holidays.map((h) => new Date(h.date));
-  holidayCache.set(year, dates);
+  // Un año SIN feriados cargados no se cachea: si se cargan después (script de feriados), el
+  // proceso los ve en el próximo cálculo sin reiniciar. Producción tenía la tabla vacía y la
+  // gracia nunca se corría por feriados (13/07 y 13/10/2026: mora cobrada que no correspondía).
+  if (dates.length > 0) holidayCache.set(year, dates);
+  else if (!warnedNoHolidays.has(year)) {
+    warnedNoHolidays.add(year);
+    console.warn(`[punitorios] No hay feriados cargados para ${year}: la gracia no se corre por feriados.`);
+  }
   return dates;
 }
 
