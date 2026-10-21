@@ -146,17 +146,30 @@ const payDebtHandler = async (req, res, next) => {
   }
 };
 
+/**
+ * Selección de "Pagar varios": `debtIds` (Deudas) y `pendingRecordIds` (meses terminados sin
+ * Deuda, ver services/unclosedMonths.js). Hace falta al menos un período entre los dos.
+ */
+const isIdList = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
+const parseBulkSelection = (body) => {
+  const debtIds = body.debtIds ?? [];
+  const pendingRecordIds = body.pendingRecordIds ?? [];
+  if (!isIdList(debtIds) || !isIdList(pendingRecordIds)) return { error: 'Selección inválida' };
+  if (debtIds.length + pendingRecordIds.length === 0) return { error: 'Debe seleccionar al menos una deuda' };
+  return { debtIds, pendingRecordIds };
+};
+
 // POST /api/groups/:groupId/debts/pay-bulk/preview
 const bulkDebtPreviewHandler = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { debtIds, paymentDate, currentRecordId } = req.body;
+    const { paymentDate, currentRecordId } = req.body;
+    const ids = parseBulkSelection(req.body);
+    if (ids.error) return ApiResponse.badRequest(res, ids.error);
 
-    if (!Array.isArray(debtIds) || debtIds.length === 0) {
-      return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
-    }
-
-    const preview = await previewBulkDebtPayment(groupId, debtIds, parsePaymentDate(paymentDate), currentRecordId || null);
+    const preview = await previewBulkDebtPayment(
+      groupId, ids.debtIds, parsePaymentDate(paymentDate), currentRecordId || null, ids.pendingRecordIds,
+    );
     return ApiResponse.success(res, preview);
   } catch (error) {
     if (error.code === 'PAYMENT_INPUT' || error.code === 'PAYMENT_BLOCKED' || error.code === 'ORDER_BLOCK' || error.code === 'DEBT_BLOCK' || error.message?.includes('deuda') || error.message?.includes('mes actual')) {
@@ -170,20 +183,20 @@ const bulkDebtPreviewHandler = async (req, res, next) => {
 const payDebtsBulkHandler = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { debtIds, amount, paymentDate, paymentMethod, observations, currentRecordId, forgivePunitorios } = req.body;
+    const { amount, paymentDate, paymentMethod, observations, currentRecordId, forgivePunitorios } = req.body;
+    const ids = parseBulkSelection(req.body);
+    if (ids.error) return ApiResponse.badRequest(res, ids.error);
 
-    if (!Array.isArray(debtIds) || debtIds.length === 0) {
-      return ApiResponse.badRequest(res, 'Debe seleccionar al menos una deuda');
-    }
     const result = await payDebtsBulk(
       groupId,
-      debtIds,
+      ids.debtIds,
       parsePaymentAmount(amount),
       parsePaymentDate(paymentDate),
       parsePaymentMethod(paymentMethod),
       observations,
       currentRecordId || null,
-      !!forgivePunitorios
+      !!forgivePunitorios,
+      ids.pendingRecordIds,
     );
 
     return ApiResponse.success(res, result, 'Pago múltiple registrado');
@@ -353,6 +366,7 @@ module.exports = {
   payDebtHandler,
   bulkDebtPreviewHandler,
   payDebtsBulkHandler,
+  parseBulkSelection,
   cancelDebtPaymentHandler,
   forgiveDebtHandler,
   checkCanPayCurrentMonth,

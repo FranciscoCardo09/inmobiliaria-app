@@ -22,7 +22,7 @@ function makeService(prisma) {
       recalculateMonthlyRecord: async () => ({ status: 'PARTIAL' }),
       recalculateMultipleRecords: async () => 0,
     },
-    './debtService': { canPayCurrentMonth: async () => ({ canPay: true }) },
+    './debtService': { canPayCurrentMonth: async () => ({ canPay: true }), ensureDebtsForContractChain: async () => [] },
   });
 }
 

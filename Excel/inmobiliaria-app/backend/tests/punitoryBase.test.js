@@ -57,6 +57,7 @@ test('A-03 (cobro): con pago parcial, la base incluye servicios+IVA impagos (sal
     },
     './debtService': {
       canPayCurrentMonth: async () => ({ canPay: true }),
+      ensureDebtsForContractChain: async () => [],
     },
   });
 
@@ -110,6 +111,7 @@ test('2026-07-14: cobro con alquiler ya cubierto pero punitorio pendiente compon
     },
     './debtService': {
       canPayCurrentMonth: async () => ({ canPay: true }),
+      ensureDebtsForContractChain: async () => [],
     },
   });
 

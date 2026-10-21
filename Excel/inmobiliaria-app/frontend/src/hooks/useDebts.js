@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { invalidateMoneyQueries } from '../utils/invalidateMoneyQueries'
 
 export const useDebts = (groupId, filters = {}) => {
   const queryClient = useQueryClient()
@@ -71,10 +72,17 @@ export const useDebts = (groupId, filters = {}) => {
       return { result: response.data.data, debtIds }
     },
     onSuccess: async (data, variables) => {
-      await Promise.all((variables.debtIds || []).map((id) => invalidateDebtRelated(id)))
+      // Todo lo que muestra plata: los meses sin cerrar que se cobraron acá nacieron como Deudas
+      // nuevas (no tienen debtId en `variables`) y la lista de Deudas/dashboard tiene que verlas.
+      await Promise.all([
+        ...(variables.debtIds || []).map((id) => invalidateDebtRelated(id)),
+        invalidateMoneyQueries(queryClient, groupId),
+      ])
       toast.success('Pago múltiple registrado')
     },
     onError: (error) => {
+      // Un rechazo puede llegar después de pasar a Deuda un mes sin cerrar: refrescar igual.
+      invalidateMoneyQueries(queryClient, groupId)
       toast.error(error.response?.data?.message || 'Error al registrar el pago múltiple')
     },
   })
@@ -171,20 +179,23 @@ export const useDebtPunitoryPreview = (groupId, debtId, paymentDate) => {
   })
 }
 
-export const useBulkDebtPreview = (groupId, debtIds, paymentDate, currentRecordId = null) => {
+// `pendingRecordIds`: meses terminados sin Deuda (ver utils/bulkDebtAllocation.splitBulkSelection).
+export const useBulkDebtPreview = (groupId, debtIds, paymentDate, currentRecordId = null, pendingRecordIds = []) => {
   // Sorted+joined key so the query is stable regardless of selection order
   const idsKey = [...(debtIds || [])].sort().join(',')
+  const pendingKey = [...(pendingRecordIds || [])].sort().join(',')
   return useQuery({
-    queryKey: ['bulkDebtPreview', groupId, idsKey, paymentDate, currentRecordId],
+    queryKey: ['bulkDebtPreview', groupId, idsKey, pendingKey, paymentDate, currentRecordId],
     queryFn: async () => {
       const response = await api.post(`/groups/${groupId}/debts/pay-bulk/preview`, {
         debtIds,
+        pendingRecordIds: pendingRecordIds?.length ? pendingRecordIds : undefined,
         paymentDate,
         currentRecordId: currentRecordId || undefined,
       })
       return response.data.data
     },
-    enabled: !!groupId && (debtIds?.length || 0) > 0 && !!paymentDate,
+    enabled: !!groupId && ((debtIds?.length || 0) + (pendingRecordIds?.length || 0)) > 0 && !!paymentDate,
     staleTime: 30 * 1000,
   })
 }

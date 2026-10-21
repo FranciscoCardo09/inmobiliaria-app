@@ -13,6 +13,7 @@ import Modal from './ui/Modal'
 import Button from './ui/Button'
 import DateInput, { getLocalToday } from './ui/DateInput'
 import BulkDebtPaymentModal from './BulkDebtPaymentModal'
+import { selectBulkForRecord, bulkItemKey } from '../utils/bulkDebtAllocation'
 import {
   CurrencyDollarIcon,
   ExclamationTriangleIcon,
@@ -87,6 +88,13 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
     { periodMonth: record?.periodMonth, periodYear: record?.periodYear }
   )
   const isBlocked = debtCheck && !debtCheck.canPay
+
+  // "Pagar varias" (ver utils/bulkDebtAllocation.selectBulkForRecord): bloqueado → períodos
+  // anteriores (Deudas y meses sin cerrar) + este mes como cola; este mes terminado sin Deuda
+  // que debe → se cobra solo él, como Deuda (el registro común lo rechaza).
+  const bulk = selectBulkForRecord({ debts: debtCheck?.debts, record, isBlocked })
+  const selfPending = bulk.mode === 'SELF_PENDING'
+  const canUseForm = !isBlocked && !selfPending
 
   // Get punitory preview when date changes
   const { data: punitoryPreview } = usePunitoryPreview(
@@ -194,9 +202,10 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
   if (showBulkModal) {
     return (
       <BulkDebtPaymentModal
-        debts={debtCheck?.debts || []}
+        debts={bulk.debts}
         groupId={groupId}
-        currentRecord={record}
+        currentRecord={bulk.mode === 'WITH_CURRENT' ? record : null}
+        contextRecord={record}
         onPay={payDebtsBulk}
         isPaying={isPayingBulk}
         onClose={() => {
@@ -343,8 +352,11 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
             {debtCheck.debts?.length > 0 && (
               <div className="space-y-2 mb-4">
                 {debtCheck.debts.map((d) => (
-                  <div key={d.id} className="flex justify-between bg-base-100 p-2 rounded text-sm">
-                    <span className="font-medium">{d.periodLabel}</span>
+                  <div key={bulkItemKey(d)} className="flex justify-between bg-base-100 p-2 rounded text-sm">
+                    <span className="font-medium">
+                      {d.periodLabel}
+                      {d.pendingClose && <span className="ml-1 text-[10px] text-warning font-normal">(sin cerrar)</span>}
+                    </span>
                     <span className="font-mono text-error">{formatCurrency(d.total)}</span>
                   </div>
                 ))}
@@ -366,7 +378,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
               <ExclamationTriangleIcon className="w-4 h-4" />
               Ir a pagar {blocker?.periodLabel || 'el período anterior'}
             </Button>
-            {debtCheck.debts?.length > 0 && (
+            {bulk.mode === 'WITH_CURRENT' && (
               <Button
                 variant="outline"
                 size="sm"
@@ -381,8 +393,26 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
           )
         })()}
 
+        {selfPending && (
+          <div className="bg-warning/10 border-2 border-warning/30 rounded-lg p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <ExclamationTriangleIcon className="w-6 h-6 text-warning" />
+              <span className="font-bold">Mes terminado sin pasar a deuda</span>
+            </div>
+            <p className="text-sm">
+              {record?.periodLabel || bulk.debts[0].periodLabel} quedó debiendo{' '}
+              <span className="font-mono font-semibold">{formatCurrency(bulk.debts[0].total)}</span> y no se había
+              pasado a deuda al cerrar. Se cobra como deuda (mora sobre el alquiler completo, igual que un mes cerrado).
+            </p>
+            <Button variant="primary" size="sm" className="w-full" onClick={() => setShowBulkModal(true)}>
+              <CurrencyDollarIcon className="w-4 h-4" />
+              Cobrar como deuda
+            </Button>
+          </div>
+        )}
+
         {/* Breakdown + Form (hidden if blocked) */}
-        {!isBlocked && <>
+        {canUseForm && <>
         <div className="bg-base-100 border border-base-300 rounded-lg p-4">
           <h3 className="font-semibold text-sm mb-3">Desglose</h3>
 
@@ -633,7 +663,7 @@ export default function PaymentRegistrationModal({ record: recordProp, groupId, 
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancelar
           </Button>
-          {!isBlocked && (
+          {canUseForm && (
             <Button
               variant="primary"
               size="sm"

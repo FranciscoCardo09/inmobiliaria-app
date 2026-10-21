@@ -7,6 +7,9 @@ import {
   allocateBulkPayment,
   summarizeAllocation,
   selectBulkDebts,
+  splitBulkSelection,
+  bulkItemKey,
+  selectBulkForRecord,
 } from './bulkDebtAllocation.js'
 
 // Deuda sin crédito: las líneas suman exacto el total (como las devuelve el preview).
@@ -242,4 +245,66 @@ test('la deuda abierta no está en la lista (ya pagada / datos viejos): no se of
 test('sin deuda o sin lista todavía (cargando): no se ofrece', () => {
   assert.deepEqual(selectBulkDebts({ openDebts: OPEN, debt: null, isBlocked: false }), [])
   assert.deepEqual(selectBulkDebts({ openDebts: undefined, debt: OPEN[0], isBlocked: false }), [])
+})
+
+// ─── Meses terminados sin Deuda (caso Gutiérrez, agosto 2026) ───────────────
+// canPayCurrentMonth los devuelve en `debts` como PENDING_DEBT, sin id de Deuda y con su
+// MonthlyRecord. Antes "Pagar varios" mandaba `d.id` de todo: el mes sin cerrar quedaba afuera y
+// se cobraban Septiembre + Octubre sin Agosto.
+
+const AUG_PENDING = { type: 'PENDING_DEBT', id: null, pendingClose: true, monthlyRecordId: 'rec-aug', periodLabel: 'Agosto 2026', periodMonth: 8, periodYear: 2026, total: 560000 }
+const SEP_DEBT = { type: 'DEBT', id: 'debt-sep', pendingClose: false, monthlyRecordId: 'rec-sep', periodLabel: 'Septiembre 2026', periodMonth: 9, periodYear: 2026, total: 1100000 }
+const OCT = { id: 'rec-oct', periodMonth: 10, periodYear: 2026 }
+
+test('splitBulkSelection: Deudas por id, meses sin cerrar por su MonthlyRecord', () => {
+  assert.deepEqual(splitBulkSelection([AUG_PENDING, SEP_DEBT]), { debtIds: ['debt-sep'], pendingRecordIds: ['rec-aug'] })
+  assert.deepEqual(splitBulkSelection([SEP_DEBT]), { debtIds: ['debt-sep'], pendingRecordIds: [] })
+  assert.deepEqual(splitBulkSelection(), { debtIds: [], pendingRecordIds: [] })
+  // Ítems sin la marca (shape viejo de getOpenDebts) cuentan como Deudas.
+  assert.deepEqual(splitBulkSelection([{ id: 'x' }]), { debtIds: ['x'], pendingRecordIds: [] })
+})
+
+test('bulkItemKey: id de Deuda o, si no tiene, su MonthlyRecord (claves únicas)', () => {
+  assert.equal(bulkItemKey(SEP_DEBT), 'debt-sep')
+  assert.equal(bulkItemKey(AUG_PENDING), 'record:rec-aug')
+})
+
+test('selectBulkDebts: un mes sin cerrar que bloquea entra en el pago múltiple', () => {
+  const sel = selectBulkDebts({ openDebts: [AUG_PENDING, SEP_DEBT], debt: SEP_DEBT, isBlocked: true, blocker: { type: 'PENDING_DEBT' } })
+  assert.deepEqual(sel.map(bulkItemKey), ['record:rec-aug', 'debt-sep'])
+})
+
+test('selectBulkForRecord: Octubre bloqueado → Agosto (sin cerrar) + Septiembre, con Octubre de cola', () => {
+  const sel = selectBulkForRecord({ debts: [AUG_PENDING, SEP_DEBT], record: OCT, isBlocked: true })
+  assert.equal(sel.mode, 'WITH_CURRENT')
+  assert.deepEqual(sel.debts.map(bulkItemKey), ['record:rec-aug', 'debt-sep'])
+  assert.deepEqual(splitBulkSelection(sel.debts), { debtIds: ['debt-sep'], pendingRecordIds: ['rec-aug'] })
+})
+
+test('selectBulkForRecord: períodos posteriores al mes o de tipos no pagables no entran', () => {
+  const later = { ...SEP_DEBT, id: 'debt-nov', periodMonth: 11 }
+  const openRecord = { type: 'RECORD', id: 'rec-x', periodMonth: 7, periodYear: 2026 }
+  const sel = selectBulkForRecord({ debts: [openRecord, AUG_PENDING, SEP_DEBT, later], record: OCT, isBlocked: true })
+  assert.deepEqual(sel.debts.map(bulkItemKey), ['record:rec-aug', 'debt-sep'])
+  // Shape sin `type` (viejo) = Deuda.
+  const legacy = selectBulkForRecord({ debts: [{ id: 'd', periodMonth: 9, periodYear: 2026 }], record: OCT, isBlocked: true })
+  assert.deepEqual(legacy.debts.map((d) => d.id), ['d'])
+})
+
+test('selectBulkForRecord: bloqueado sin nada pagable antes, o no bloqueado → NONE', () => {
+  assert.deepEqual(selectBulkForRecord({ debts: [], record: OCT, isBlocked: true }), { mode: 'NONE', debts: [] })
+  assert.deepEqual(selectBulkForRecord({ debts: [SEP_DEBT], record: OCT, isBlocked: false }), { mode: 'NONE', debts: [] })
+  assert.deepEqual(selectBulkForRecord({ debts: [SEP_DEBT], record: null, isBlocked: true }), { mode: 'NONE', debts: [] })
+  assert.deepEqual(selectBulkForRecord({ record: OCT, isBlocked: true }), { mode: 'NONE', debts: [] })
+})
+
+test('selectBulkForRecord: abrir el propio mes sin cerrar → se cobra solo él, como Deuda', () => {
+  const sel = selectBulkForRecord({ debts: [AUG_PENDING, SEP_DEBT], record: { id: 'rec-aug', periodMonth: 8, periodYear: 2026 }, isBlocked: false })
+  assert.equal(sel.mode, 'SELF_PENDING')
+  assert.deepEqual(sel.debts, [AUG_PENDING])
+})
+
+test('effectiveTotal: un ítem sin total (preview todavía cargando) vale 0, con o sin condonar', () => {
+  assert.equal(effectiveTotal({}), 0)
+  assert.equal(effectiveTotal({ punitory: 500 }, true), 0)
 })

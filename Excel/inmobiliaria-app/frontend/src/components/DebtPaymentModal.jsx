@@ -206,6 +206,7 @@ export default function DebtPaymentModal({ debt: debtProp, groupId, onPay, isPay
       <BulkDebtPaymentModal
         debts={bulkDebts}
         groupId={groupId}
+        contextRecord={{ contract: debt?.contract }}
         onPay={payDebtsBulk}
         isPaying={isPayingBulk}
         onClose={() => {

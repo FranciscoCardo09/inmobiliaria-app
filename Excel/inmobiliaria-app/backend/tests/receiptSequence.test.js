@@ -29,6 +29,7 @@ function makeService(prisma) {
     },
     './debtService': {
       canPayCurrentMonth: async () => ({ canPay: true }),
+      ensureDebtsForContractChain: async () => [],
     },
   });
 }

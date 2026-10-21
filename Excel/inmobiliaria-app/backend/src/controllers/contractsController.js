@@ -7,7 +7,8 @@ const { calculateNextAdjustmentMonth, isAdjustmentMonth, computeCurrentMonth, fi
 const prisma = require('../lib/prisma');
 
 const asyncHandler = require('../utils/asyncHandler');
-const { parseLocalDate } = require('../utils/dateUtils');
+const { parseLocalDate, getTodayLocalString } = require('../utils/dateUtils');
+const { ensureDebtsAfterMutation } = require('../services/unclosedMonths');
 const contractService = require('../services/contractService');
 const enrichContract = contractService.enrichContract;
 const { validateRenewalStartDate } = contractService;
@@ -620,6 +621,12 @@ const updateContract = async (req, res, next) => {
       return { updatedContract, repair };
     });
     const { updatedContract: updated, repair } = result;
+
+    // El cronograma nuevo puede meter en rango un mes ya terminado que el cierre había salteado
+    // por estar afuera: si debe, pasa a Deuda (ver services/unclosedMonths.js).
+    if (scheduleChanged) {
+      await ensureDebtsAfterMutation({ groupId, contractId: updated.id, today: getTodayLocalString() });
+    }
 
     let repairWarning = null;
     if (repair.paidOrphans.length > 0) {

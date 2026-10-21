@@ -2,6 +2,7 @@
 const { recalculateMultipleRecords } = require('./monthlyRecordService');
 
 const prisma = require('../lib/prisma');
+const { getTodayLocalString } = require('../utils/dateUtils');
 
 // Campos de la deuda que una mutación de servicios puede mover. Se comparan antes/después
 // del sync para saber si hace falta la segunda pasada de recálculo (ver settleRecordsWithDebt).
@@ -52,6 +53,11 @@ const settleRecordsWithDebt = async (recordIds) => {
   }
 
   if (needSecondPass.length > 0) await recalculateMultipleRecords(needSecondPass, null, true);
+
+  // Un servicio agregado/subido en un mes ya cerrado y saldado lo deja debiendo SIN Deuda (el
+  // cierre ya pasó): se pasa a Deuda ahora (ver `unclosedMonths.js`).
+  const { ensureDebtsAfterRecordMutation } = require('./unclosedMonths');
+  await ensureDebtsAfterRecordMutation(ids, getTodayLocalString());
 };
 
 /**

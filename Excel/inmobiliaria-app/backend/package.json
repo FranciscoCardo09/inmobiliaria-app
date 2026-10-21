@@ -15,6 +15,7 @@
     "test": "node --test",
     "test:unit": "node --test tests/*.test.js",
     "test:integration": "bash test/integration/run.sh",
+    "test:huerfanos": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='src/services/unclosedMonths.js' tests/unclosedMonths.test.js tests/bulkSelection.test.js",
     "test:consorcio": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='src/services/consorcio/**' --test-coverage-include='src/controllers/consorcioController.js' --test-coverage-include='src/validators/consorcioValidators.js' --test-coverage-include='src/routes/consorcios.routes.js' tests/consorcio/*.test.js"
   },
   "dependencies": {

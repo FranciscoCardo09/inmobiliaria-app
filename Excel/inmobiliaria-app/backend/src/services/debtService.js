@@ -8,6 +8,9 @@ const { sumPunitoryConcepts } = require('../utils/helpers');
 const { getTodayLocalString, getTodayLocalDate } = require('../utils/dateUtils');
 
 const prisma = require('../lib/prisma');
+const {
+  findUnclosedOwingRecords, toVirtualDebt, ensureDebtsForUnclosedMonths,
+} = require('./unclosedMonths');
 
 /**
  * Expand a contractId to its full renewal chain (current + all renewedFrom ancestors).
@@ -257,19 +260,19 @@ const computeDebtDraft = async (monthlyRecord, contract) => {
   };
 };
 
-const createDebtFromMonthlyRecord = async (rawRecord, contract) => {
-  // Verificar que no exista deuda para este record
-  const existing = await prisma.debt.findUnique({
-    where: { monthlyRecordId: rawRecord.id },
-  });
-  if (existing) {
-    return existing;
-  }
-
+/**
+ * Datos de la Deuda que genera el cierre de un mes, a partir de su borrador (`computeDebtDraft`).
+ * Puro: lo usan `createDebtFromMonthlyRecord` (que lo persiste) y la Deuda VIRTUAL de los meses
+ * terminados sin cerrar (`unclosedMonths.js`), que se muestra antes de cobrar sin escribir nada.
+ * Una sola fuente → el número que se ve antes de cobrar es el de la Deuda que se crea al cobrar.
+ *
+ * @returns {object|null} null si no queda nada impago (≤ $1 por decimales)
+ */
+const buildDebtData = (draft, contract) => {
   const {
     monthlyRecord, unpaidRent, unpaidPunitory, unpaidServices, totalOriginal, appliedCredit,
     netUnpaid, anchorIsPayment,
-  } = await computeDebtDraft(rawRecord, contract);
+  } = draft;
 
   // Si no queda nada impago (ni alquiler ni punitorios), o queda menos de $1 por decimales, no crear deuda
   if (netUnpaid <= 1) {
@@ -304,36 +307,59 @@ const createDebtFromMonthlyRecord = async (rawRecord, contract) => {
 
   const periodLabel = `${MONTH_NAMES[monthlyRecord.periodMonth]} ${monthlyRecord.periodYear}`;
 
-  const debt = await prisma.debt.create({
-    data: {
-      groupId: contract.groupId,
-      contractId: contract.id,
-      monthlyRecordId: monthlyRecord.id,
-      periodLabel,
-      periodMonth: monthlyRecord.periodMonth,
-      periodYear: monthlyRecord.periodYear,
-      originalAmount: totalOriginal,
-      unpaidRentAmount: unpaidRent,
-      unpaidServicesAmount: unpaidServices, // Servicios + IVA impagos
-      previousRecordPayment, // Cuánto pagó antes de cerrar (para mostrar al usuario)
-      appliedCredit, // Saldo a favor del mes anterior (se resta del total, no de la base de punitorios)
-      accumulatedPunitory: unpaidPunitory, // Punitorios impagos del MonthlyRecord
-      currentTotal: round2(unpaidRent + unpaidServices + unpaidPunitory - appliedCredit), // Total impago neto del crédito
-      amountPaid: initialDebtPaid, // Siempre 0 al crear (pagos de la deuda)
-      punitoryPercent: contract.punitoryPercent,
-      punitoryStartDate,
-      lastPaymentDate: null, // No hay pagos aún en la deuda
-      status: initialStatus, // Siempre OPEN al crear
-    },
-    include: {
-      contract: {
-        include: {
-          tenant: { select: { id: true, name: true, dni: true } },
-          property: { select: { id: true, address: true } },
+  return {
+    groupId: contract.groupId,
+    contractId: contract.id,
+    monthlyRecordId: monthlyRecord.id,
+    periodLabel,
+    periodMonth: monthlyRecord.periodMonth,
+    periodYear: monthlyRecord.periodYear,
+    originalAmount: totalOriginal,
+    unpaidRentAmount: unpaidRent,
+    unpaidServicesAmount: unpaidServices, // Servicios + IVA impagos
+    previousRecordPayment, // Cuánto pagó antes de cerrar (para mostrar al usuario)
+    appliedCredit, // Saldo a favor del mes anterior (se resta del total, no de la base de punitorios)
+    accumulatedPunitory: unpaidPunitory, // Punitorios impagos del MonthlyRecord
+    currentTotal: round2(unpaidRent + unpaidServices + unpaidPunitory - appliedCredit), // Total impago neto del crédito
+    amountPaid: initialDebtPaid, // Siempre 0 al crear (pagos de la deuda)
+    punitoryPercent: contract.punitoryPercent,
+    punitoryStartDate,
+    lastPaymentDate: null, // No hay pagos aún en la deuda
+    status: initialStatus, // Siempre OPEN al crear
+  };
+};
+
+const createDebtFromMonthlyRecord = async (rawRecord, contract) => {
+  // Verificar que no exista deuda para este record
+  const existing = await prisma.debt.findUnique({
+    where: { monthlyRecordId: rawRecord.id },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const data = buildDebtData(await computeDebtDraft(rawRecord, contract), contract);
+  if (!data) return null;
+
+  let debt;
+  try {
+    debt = await prisma.debt.create({
+      data,
+      include: {
+        contract: {
+          include: {
+            tenant: { select: { id: true, name: true, dni: true } },
+            property: { select: { id: true, address: true } },
+          },
         },
       },
-    },
-  });
+    });
+  } catch (error) {
+    // Dos escritores a la vez sobre el mismo mes (un cobro y el cierre, dos cobros): la
+    // restricción única de `monthlyRecordId` deja pasar uno solo; el otro devuelve esa deuda.
+    if (error.code !== 'P2002') throw error;
+    return prisma.debt.findUnique({ where: { monthlyRecordId: rawRecord.id } });
+  }
 
   return debt;
 };
@@ -740,12 +766,16 @@ const payDebt = async (debtId, amount, paymentDate, paymentMethod = 'EFECTIVO', 
   if (!debtPre) throw new Error('Deuda no encontrada');
   if (debtPre.status === 'PAID') throw new Error('Esta deuda ya está pagada');
 
+  // Un mes anterior terminado sin Deuda que debe (ver `unclosedMonths.js`) se pasa a Deuda
+  // ANTES del chequeo de orden: así bloquea como cualquier otra deuda.
+  await ensureDebtsForContractChain(debtPre.groupId, debtPre.contractId);
+
   // ORDEN CRONOLÓGICO: solo se puede pagar el período impago más antiguo de la cadena
   // (mirando deudas abiertas + meses pendientes sin cerrar). Si esta deuda no es la
   // más antigua, bloquear y señalar qué debe pagarse primero.
   const unpaidPeriods = await getUnpaidPeriods(debtPre.groupId, debtPre.contractId);
   if (unpaidPeriods.length > 0) {
-    const oldest = unpaidPeriods[0];
+    const oldest = stripVirtual(unpaidPeriods[0]);
     const thisKey = debtPre.periodYear * 12 + debtPre.periodMonth;
     const oldestKey = oldest.periodYear * 12 + oldest.periodMonth;
     if (thisKey > oldestKey) {
@@ -975,17 +1005,28 @@ const toPaymentDate = (paymentDate) => {
  * ninguna pagada, y deben formar un prefijo contiguo de los períodos impagos
  * (empezar en el más antiguo, sin saltear meses) para no romper el orden cronológico.
  *
- * @returns {{ debts: object[], contractId: string }} deudas ordenadas más viejo→más nuevo
+ * `pendingRecordIds`: meses terminados sin Deuda que deben (ver `unclosedMonths.js`). En el
+ * preview (`materialize = false`) vuelven como Deudas VIRTUALES (`virtualDebts`, sin escribir);
+ * en el cobro (`materialize = true`) se crean de verdad y se suman a `debts`.
+ *
+ * @returns {{ debts: object[], virtualDebts: object[], contractId: string, currentRecord }}
+ *   deudas ordenadas más viejo→más nuevo
  */
-const loadAndValidateBulkDebts = async (groupId, debtIds, currentRecordId = null) => {
-  if (!Array.isArray(debtIds) || debtIds.length === 0) {
+const loadAndValidateBulkDebts = async (
+  groupId, debtIds, currentRecordId = null, pendingRecordIds = [], { materialize = false } = {},
+) => {
+  debtIds = Array.isArray(debtIds) ? debtIds : [];
+  pendingRecordIds = Array.isArray(pendingRecordIds) ? pendingRecordIds : [];
+  if (debtIds.length === 0 && pendingRecordIds.length === 0) {
     throw new Error('Debe seleccionar al menos una deuda');
   }
 
-  const debts = await prisma.debt.findMany({
-    where: { id: { in: debtIds } },
-    include: { payments: true },
-  });
+  const debts = debtIds.length > 0
+    ? await prisma.debt.findMany({
+      where: { id: { in: debtIds } },
+      include: { payments: true },
+    })
+    : [];
 
   if (debts.length !== debtIds.length) {
     throw new Error('Alguna de las deudas seleccionadas no existe');
@@ -997,24 +1038,44 @@ const loadAndValidateBulkDebts = async (groupId, debtIds, currentRecordId = null
     throw new Error('Alguna de las deudas seleccionadas ya está pagada');
   }
 
-  // Mismo contrato (admitiendo la cadena de renovación)
-  const chain = await expandToChain(debts[0].contractId);
-  const chainSet = new Set(chain);
-  if (debts.some((d) => !chainSet.has(d.contractId))) {
-    throw new Error('El pago múltiple solo admite deudas de un mismo inquilino/contrato');
+  const pendingRecords = pendingRecordIds.length > 0
+    ? await prisma.monthlyRecord.findMany({
+      where: { id: { in: pendingRecordIds } },
+      select: { id: true, groupId: true, contractId: true, periodMonth: true, periodYear: true },
+    })
+    : [];
+  if (pendingRecords.length !== pendingRecordIds.length) {
+    throw Object.assign(new Error('Alguno de los meses seleccionados no existe'), { code: 'PAYMENT_INPUT' });
+  }
+  if (pendingRecords.some((r) => r.groupId !== groupId)) {
+    throw Object.assign(new Error('Algún mes no pertenece a este grupo'), { code: 'PAYMENT_INPUT' });
   }
 
-  // Ordenar más viejo → más nuevo
-  debts.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
-
-  // Mes actual opcional (cola del waterfall): un MonthlyRecord todavía sin deuda,
-  // que se paga con registerPayment en vez de payDebt. Solo él puede quedar con
-  // saldo a favor (nunca una Debt).
+  // Mismo contrato (admitiendo la cadena de renovación). La cadena se toma desde el período más
+  // nuevo que se conoce (el mes actual si viene), porque `expandToChain` sólo sube a ancestros.
   let currentRecord = null;
   if (currentRecordId) {
     currentRecord = await prisma.monthlyRecord.findUnique({ where: { id: currentRecordId } });
     if (!currentRecord) throw new Error('El mes actual seleccionado no existe');
     if (currentRecord.groupId !== groupId) throw new Error('El mes actual no pertenece a este grupo');
+  }
+  // Antes se tomaba `debts[0]` en el orden que devolvía la base: si salía primero una deuda del
+  // contrato VIEJO de una renovación, la del contrato nuevo quedaba "fuera de la cadena" y el
+  // pago se rechazaba.
+  const newest = [currentRecord, ...debts, ...pendingRecords]
+    .filter(Boolean)
+    .reduce((a, b) => (periodKey(b) > periodKey(a) ? b : a));
+  const anchorContractId = newest.contractId;
+  const chain = await expandToChain(anchorContractId);
+  const chainSet = new Set(chain);
+  if (debts.some((d) => !chainSet.has(d.contractId)) || pendingRecords.some((r) => !chainSet.has(r.contractId))) {
+    throw new Error('El pago múltiple solo admite deudas de un mismo inquilino/contrato');
+  }
+
+  // Mes actual opcional (cola del waterfall): un MonthlyRecord todavía sin deuda,
+  // que se paga con registerPayment en vez de payDebt. Solo él puede quedar con
+  // saldo a favor (nunca una Debt).
+  if (currentRecord) {
     if (!chainSet.has(currentRecord.contractId)) {
       throw new Error('El mes actual no pertenece al mismo inquilino/contrato que las deudas seleccionadas');
     }
@@ -1023,14 +1084,44 @@ const loadAndValidateBulkDebts = async (groupId, debtIds, currentRecordId = null
     }
   }
 
+  // Meses sin cerrar: cada uno tiene que seguir siéndolo (o haber pasado ya a Deuda por otro
+  // camino entre el preview y el cobro: en ese caso se usa esa Deuda).
+  let virtualDebts = [];
+  if (pendingRecordIds.length > 0) {
+    const today = getTodayLocalString();
+    if (materialize) {
+      await ensureDebtsForUnclosedMonths({ groupId, contractIds: chain, today });
+    }
+    const unclosed = materialize ? [] : await findUnclosedOwingRecords({ groupId, contractIds: chain, today });
+    const byRecord = new Map(unclosed.map((u) => [u.record.id, u]));
+    const notVirtual = pendingRecordIds.filter((id) => !byRecord.has(id));
+    const nowDebts = notVirtual.length > 0
+      ? await prisma.debt.findMany({ where: { monthlyRecordId: { in: notVirtual } }, include: { payments: true } })
+      : [];
+    const debtByRecord = new Map(nowDebts.map((d) => [d.monthlyRecordId, d]));
+    for (const id of pendingRecordIds) {
+      if (byRecord.has(id)) { virtualDebts.push(toVirtualDebt(byRecord.get(id))); continue; }
+      const d = debtByRecord.get(id);
+      if (!d || d.status === 'PAID') {
+        throw Object.assign(new Error('Alguno de los meses seleccionados ya no adeuda nada; actualizá la pantalla'), { code: 'PAYMENT_INPUT' });
+      }
+      if (!debts.some((x) => x.id === d.id)) debts.push(d);
+    }
+  }
+
+  // Ordenar más viejo → más nuevo
+  debts.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+  virtualDebts.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+
   // Validar contigüidad: todo período impago hasta el último período incluido en el
   // pago (la deuda más nueva seleccionada, o el mes actual si se incluyó) debe estar
   // cubierto por la selección (si no, payDebt/registerPayment bloquearían por orden).
-  const unpaidPeriods = await getUnpaidPeriods(groupId, debts[0].contractId);
-  const selectedKeys = new Set(debts.map((d) => periodKey(d)));
+  const unpaidPeriods = await getUnpaidPeriods(groupId, anchorContractId);
+  const selected = [...debts, ...virtualDebts];
+  const selectedKeys = new Set(selected.map((d) => periodKey(d)));
   const cutoffKey = currentRecord
     ? periodKey({ periodMonth: currentRecord.periodMonth, periodYear: currentRecord.periodYear })
-    : Math.max(...debts.map((d) => periodKey(d)));
+    : Math.max(...selected.map((d) => periodKey(d)));
   const missing = unpaidPeriods.find(
     (p) => periodKey(p) <= cutoffKey
       && !selectedKeys.has(periodKey(p))
@@ -1039,11 +1130,11 @@ const loadAndValidateBulkDebts = async (groupId, debtIds, currentRecordId = null
   if (missing) {
     const error = new Error(`Debe incluir ${missing.periodLabel} en la selección (es un período impago anterior).`);
     error.code = 'ORDER_BLOCK';
-    error.blockingPeriod = missing;
+    error.blockingPeriod = stripVirtual(missing);
     throw error;
   }
 
-  return { debts, contractId: debts[0].contractId, currentRecord };
+  return { debts, virtualDebts, contractId: anchorContractId, currentRecord };
 };
 
 /**
@@ -1051,12 +1142,16 @@ const loadAndValidateBulkDebts = async (groupId, debtIds, currentRecordId = null
  * actual como último ítem) a la fecha elegida. El frontend usa estos totales para
  * repartir el monto en vivo (waterfall) y mostrar el desglose por mes.
  */
-const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentRecordId = null) => {
-  const { debts, currentRecord } = await loadAndValidateBulkDebts(groupId, debtIds, currentRecordId);
+const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentRecordId = null, pendingRecordIds = []) => {
+  const { debts, virtualDebts, currentRecord } = await loadAndValidateBulkDebts(groupId, debtIds, currentRecordId, pendingRecordIds);
   const date = toPaymentDate(paymentDate);
 
+  // Deudas reales y meses sin cerrar (Deuda virtual: mismo cálculo que tendrá al crearse al cobrar).
+  const allDebts = [...debts, ...virtualDebts]
+    .sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+
   const items = [];
-  for (const debt of debts) {
+  for (const debt of allDebts) {
     // remainingServices/iva ya vienen desglosados de calculateDebtPunitory (el IVA se
     // deriva ahí una sola vez desde el ivaAmount original del MonthlyRecord).
     const { amount, days, remainingDebt, remainingServices, remainingRent, iva, startDate, endDate, unpaidAccumulatedPunitory } =
@@ -1067,6 +1162,8 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
     items.push({
       type: 'DEBT',
       id: debt.id,
+      pendingClose: !!debt.pendingClose,
+      monthlyRecordId: debt.monthlyRecordId,
       periodLabel: debt.periodLabel,
       periodMonth: debt.periodMonth,
       periodYear: debt.periodYear,
@@ -1142,12 +1239,15 @@ const previewBulkDebtPayment = async (groupId, debtIds, paymentDate, currentReco
  */
 const payDebtsBulk = async (
   groupId, debtIds, totalAmount, paymentDate, paymentMethod = 'EFECTIVO',
-  observations = null, currentRecordId = null, forgivePunitorios = false
+  observations = null, currentRecordId = null, forgivePunitorios = false, pendingRecordIds = []
 ) => {
   const amount = parseFloat(totalAmount);
   if (!amount || amount <= 0) throw new Error('Monto inválido');
 
-  const { debts, currentRecord } = await loadAndValidateBulkDebts(groupId, debtIds, currentRecordId);
+  // `materialize`: los meses sin cerrar se pasan a Deuda acá y se cobran como cualquier deuda.
+  const { debts, currentRecord } = await loadAndValidateBulkDebts(
+    groupId, debtIds, currentRecordId, pendingRecordIds, { materialize: true },
+  );
   const date = toPaymentDate(paymentDate);
 
   // Total a pagar de cada deuda a la fecha elegida (mismo cálculo que hará payDebt).
@@ -1487,7 +1587,23 @@ const getUnpaidPeriods = async (groupId, contractId) => {
     },
   });
 
+  // Meses terminados sin Deuda que deben (ver `unclosedMonths.js`): se ven como la Deuda que
+  // van a ser (virtual, sin escribir). Antes eran invisibles si no tenían pagos propios.
+  const unclosed = await findUnclosedOwingRecords({ groupId, contractIds: chain, today: getTodayLocalString() });
+  const unclosedIds = new Set(unclosed.map((u) => u.record.id));
+
   const periods = [];
+  for (const u of unclosed) {
+    periods.push({
+      type: 'PENDING_DEBT',
+      id: null,
+      monthlyRecordId: u.record.id,
+      periodMonth: u.record.periodMonth,
+      periodYear: u.record.periodYear,
+      periodLabel: u.data.periodLabel,
+      virtualDebt: toVirtualDebt(u),
+    });
+  }
   for (const d of openDebtsInRange) {
     // Saldada al ancla (ver `isDebtSettledAtAnchor`): aunque algún escritor la haya dejado en
     // OPEN, no es una obligación y no puede bloquear el cobro de los meses siguientes.
@@ -1503,6 +1619,7 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   }
   for (const r of unpaidRecords) {
     if (recordIdsWithDebt.has(r.id)) continue; // representado por su deuda
+    if (unclosedIds.has(r.id)) continue; // representado por su deuda virtual
     if (!recordInRange(r)) continue; // fuera de rango / corrupto → ignorar
     periods.push({
       type: 'RECORD',
@@ -1518,8 +1635,19 @@ const getUnpaidPeriods = async (groupId, contractId) => {
   return periods;
 };
 
+/**
+ * Pasa a Deuda los meses terminados sin Deuda que deben de la cadena de un contrato (ver
+ * `unclosedMonths.js`). Punto de entrada para los cobros y los ganchos de mutación.
+ */
+const ensureDebtsForContractChain = async (groupId, contractId) => ensureDebtsForUnclosedMonths({
+  groupId, contractIds: await expandToChain(contractId), today: getTodayLocalString(),
+});
+
 // Clave numérica comparable de un período (año*12 + mes)
 const periodKey = (p) => (p.periodYear * 12 + p.periodMonth);
+
+// Un período tal como sale por la API: sin la Deuda virtual interna.
+const stripVirtual = ({ virtualDebt, ...period }) => period;
 
 /**
  * Verificar si un período puede pagarse respetando el orden cronológico.
@@ -1538,28 +1666,35 @@ const canPayCurrentMonth = async (groupId, contractId, targetPeriod = null) => {
     return { canPay: true, debts: [], blockingPeriod: null, oldestUnpaid: null };
   }
 
-  const oldest = periods[0];
+  const oldest = stripVirtual(periods[0]);
   const openDebtPeriods = periods.filter((p) => p.type === 'DEBT');
+  const pendingPeriods = periods.filter((p) => p.type === 'PENDING_DEBT');
 
   // Enriquecer las deudas abiertas con punitorios en vivo (para la UI). Compatible
   // con el shape previo: { id, periodLabel, periodMonth, periodYear, total, ... }
+  // Los meses sin cerrar (PENDING_DEBT) van en la misma lista, con los totales de la Deuda que
+  // van a ser: el modal de cobro y "Pagar varios" los muestran y los incluyen.
   let debtsWithPunitory = [];
-  if (openDebtPeriods.length > 0) {
-    const openDebts = await prisma.debt.findMany({
-      where: { id: { in: openDebtPeriods.map((p) => p.id) } },
-    });
-    const preloaded = await preloadDebtDependencies(openDebts);
-    debtsWithPunitory = await Promise.all(openDebts.map(async (debt) => {
+  if (openDebtPeriods.length > 0 || pendingPeriods.length > 0) {
+    const openDebts = openDebtPeriods.length > 0
+      ? await prisma.debt.findMany({ where: { id: { in: openDebtPeriods.map((p) => p.id) } } })
+      : [];
+    const all = [...openDebts, ...pendingPeriods.map((p) => p.virtualDebt)];
+    const preloaded = await preloadDebtDependencies(all);
+    debtsWithPunitory = await Promise.all(all.map(async (debt) => {
       // A-25: día ART correcto (string, TZ-inmune), no `new Date()` crudo del proceso.
       const { amount: currentPunitory, remainingDebt, unpaidAccumulatedPunitory } = await calculateDebtPunitory(debt, getTodayLocalString(), preloaded, true);
       return {
         id: debt.id,
+        type: debt.pendingClose ? 'PENDING_DEBT' : 'DEBT',
+        pendingClose: !!debt.pendingClose,
+        monthlyRecordId: debt.monthlyRecordId,
         periodLabel: debt.periodLabel,
         periodMonth: debt.periodMonth,
         periodYear: debt.periodYear,
         remainingDebt,
         punitory: currentPunitory,
-        total: remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory,
+        total: round2(remainingDebt + (unpaidAccumulatedPunitory || 0) + currentPunitory),
       };
     }));
     // Mismo orden cronológico que las deudas
@@ -1570,8 +1705,8 @@ const canPayCurrentMonth = async (groupId, contractId, targetPeriod = null) => {
   if (targetPeriod && targetPeriod.periodMonth != null && targetPeriod.periodYear != null) {
     canPay = periodKey(targetPeriod) <= periodKey(oldest);
   } else {
-    // Legacy: a nivel contrato, bloquear si hay alguna deuda abierta
-    canPay = openDebtPeriods.length === 0;
+    // Legacy: a nivel contrato, bloquear si hay alguna deuda abierta (o un mes sin cerrar)
+    canPay = openDebtPeriods.length === 0 && pendingPeriods.length === 0;
   }
 
   if (canPay) {
@@ -2443,6 +2578,7 @@ module.exports = {
   computeDebtDraft,
   reopenDebtIfCreditLost,
   isDebtSettledAtAnchor,
+  buildDebtData,
   createDebtFromMonthlyRecord,
   calculateDebtPunitory,
   getDebtSyncSnapshot,
@@ -2462,4 +2598,6 @@ module.exports = {
   getDebtsSummary,
   canPayCurrentMonth,
   getUnpaidPeriods,
+  expandToChain,
+  ensureDebtsForContractChain,
 };

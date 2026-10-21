@@ -3,7 +3,7 @@ const { calculatePunitoryV2, getHolidaysForYear, round2, computePunitoryBase, co
 const { formatServiceLabel } = require('../utils/serviceLabel');
 const { sumPunitoryConcepts } = require('../utils/helpers');
 const { recalculateMonthlyRecord, recalculateMultipleRecords } = require('./monthlyRecordService');
-const { canPayCurrentMonth } = require('./debtService');
+const { canPayCurrentMonth, ensureDebtsForContractChain } = require('./debtService');
 
 const prisma = require('../lib/prisma');
 
@@ -69,6 +69,11 @@ const registerPayment = async (groupId, monthlyRecordId, data) => {
   if (!recordPre || recordPre.groupId !== groupId) {
     throw new Error('Registro mensual no encontrado');
   }
+
+  // Un mes anterior terminado sin Deuda que debe (ver `unclosedMonths.js`) se pasa a Deuda
+  // ANTES del chequeo de orden: así bloquea como cualquier deuda y, si ESTE mes es uno de
+  // ésos, el cobro va por la deuda (`assertPaymentAllowed` → "mes en deuda").
+  await ensureDebtsForContractChain(groupId, recordPre.contractId);
 
   // BLOQUEO: Verificar orden cronológico. Solo se puede pagar el período impago
   // más antiguo de la cadena (deudas + meses pendientes). Pasamos el período de
@@ -887,6 +892,16 @@ const deleteTransaction = async (groupId, id) => {
 
     await recalculateMultipleRecords([transaction.monthlyRecord.id], tx, true);
   }, { timeout: 30000 });
+
+  // Anular el pago de un mes que estaba saldado cuando se cerró lo deja debiendo SIN Deuda
+  // (el cierre ya pasó): se pasa a Deuda ahora (ver `unclosedMonths.js`).
+  // La anulación ya se confirmó: un error acá no puede volverla un 500. Si falla, el mes igual
+  // aparece en el cobro (lectura) y lo pasa a Deuda el próximo cobro o cierre.
+  try {
+    await ensureDebtsForContractChain(groupId, contractId);
+  } catch (error) {
+    console.error('[deleteTransaction] no se pudo pasar a deuda un mes sin cerrar:', error);
+  }
 
   return transaction;
 };

@@ -5,6 +5,34 @@ const { isContractInRangeForMonth, processDirtyRecords } = require('./monthlyRec
 
 const prisma = require('../lib/prisma');
 
+// Lazy: unclosedMonths requiere este módulo (isMonthClosable) adentro de sus funciones.
+const findUnclosedOwingRecords = (...args) => require('./unclosedMonths').findUnclosedOwingRecords(...args);
+const ensureDebtsForUnclosedMonths = (...args) => require('./unclosedMonths').ensureDebtsForUnclosedMonths(...args);
+
+/**
+ * Para el preview del cierre: quién y cuánto debe de cada mes anterior sin cerrar.
+ */
+const describeUnclosed = async (found) => {
+  if (found.length === 0) return [];
+  const contracts = await prisma.contract.findMany({
+    where: { id: { in: [...new Set(found.map((f) => f.record.contractId))] } },
+    select: {
+      id: true,
+      tenant: { select: { name: true } },
+      property: { select: { address: true } },
+    },
+  });
+  const byId = new Map(contracts.map((c) => [c.id, c]));
+  return found.map(({ record, data }) => ({
+    monthlyRecordId: record.id,
+    contractId: record.contractId,
+    periodLabel: data.periodLabel,
+    tenantName: byId.get(record.contractId)?.tenant?.name || null,
+    address: byId.get(record.contractId)?.property?.address || null,
+    netUnpaid: data.currentTotal,
+  }));
+};
+
 /**
  * ¿Este registro es candidato a generar deuda?
  *
@@ -20,7 +48,10 @@ const prisma = require('../lib/prisma');
  * ≤ $1. Un mes cancelado da 0 y no genera nada, sin depender del string.
  *
  * Exclusiones estructurales:
- *  - `isPostExpiry`: el mes extra post-vencimiento nunca genera deuda ni punitorios.
+ *  - el mes extra post-vencimiento nunca genera deuda ni punitorios. Se decide por el RANGO
+ *    (es `endMonth + 1`, fuera de rango), no por el flag `isPostExpiry` persistido: un flag
+ *    rancio sobre un mes que el cronograma ya cubre dejaba el mes sin Deuda para siempre
+ *    (caso Gutiérrez agosto 2026, ver `unclosedMonths.js`).
  *  - ya tiene deuda: idempotencia del cierre.
  *  - fuera del rango activo del contrato (A-10): p.ej. posterior a la rescisión.
  *  - `balanceForgiven > 0`: saldo condonado a mano. `calculateImputation` no conoce
@@ -28,7 +59,6 @@ const prisma = require('../lib/prisma');
  *    perdonado volvería a generar deuda por el monto condonado.
  */
 const isCloseCandidate = (record) => {
-  if (record.isPostExpiry) return false;
   if (record.debt) return false;
   if ((record.balanceForgiven || 0) > 0) return false;
   return isContractInRangeForMonth(record.contract, record.monthNumber);
@@ -39,13 +69,17 @@ const isCloseCandidate = (record) => {
  * Diciembre en Octubre generó 104 deudas en la prueba de la auditoría 2026-10-20, con mora
  * corriendo sobre meses que todavía no vencían.
  */
-const assertMonthCanClose = (periodMonth, periodYear, today = getTodayLocalString()) => {
+const isMonthClosable = (periodMonth, periodYear, today = getTodayLocalString()) => {
   const [ty, tm, td] = today.split('-').map(Number);
   const lastDay = new Date(periodYear, periodMonth, 0).getDate();
   const periodKey = periodYear * 12 + periodMonth;
   const todayKey = ty * 12 + tm;
-  if (periodKey < todayKey) return;
-  if (periodKey === todayKey && td >= lastDay) return;
+  return periodKey < todayKey || (periodKey === todayKey && td >= lastDay);
+};
+
+const assertMonthCanClose = (periodMonth, periodYear, today = getTodayLocalString()) => {
+  if (isMonthClosable(periodMonth, periodYear, today)) return;
+  const lastDay = new Date(periodYear, periodMonth, 0).getDate();
   throw Object.assign(
     new Error(`Todavía no se puede cerrar ${monthNames[periodMonth]} ${periodYear}: se cierra a partir del ${lastDay}/${periodMonth}/${periodYear}.`),
     { code: 'PAYMENT_BLOCKED' },
@@ -74,8 +108,7 @@ const previewCloseMonth = async (groupId, month, year) => {
       groupId,
       periodMonth,
       periodYear,
-      // El mes extra post-vencimiento (solo servicios) nunca genera deuda ni punitorios.
-      isPostExpiry: false,
+      // El mes extra post-vencimiento lo excluye `isCloseCandidate` por rango (no por el flag).
     },
     include: {
       contract: {
@@ -146,6 +179,12 @@ const previewCloseMonth = async (groupId, month, year) => {
     };
   }));
 
+  // Meses ANTERIORES que quedaron sin cerrar y deben (ver `unclosedMonths.js`): el cierre los
+  // pasa a Deuda junto con este mes. Se muestran aparte para que no se confundan con el mes.
+  const previousUnclosed = await describeUnclosed(
+    await findUnclosedOwingRecords({ groupId, beforeKey: periodYear * 12 + periodMonth, today: getTodayLocalString() }),
+  );
+
   const summary = {
     totalRecords: unpaidRecords.length,
     alreadyHaveDebt: unpaidRecords.filter((r) => !!r.debt).length,
@@ -154,9 +193,10 @@ const previewCloseMonth = async (groupId, month, year) => {
     // Neto del crédito y sólo de las que efectivamente se van a crear: es la plata que
     // realmente va a quedar como deuda.
     totalDebtAmount: Math.round(debtsPreview.reduce((sum, d) => sum + (d.willGenerateDebt ? d.netUnpaid : 0), 0) * 100) / 100,
+    previousUnclosed: previousUnclosed.length,
   };
 
-  return { debtsPreview, summary };
+  return { debtsPreview, previousUnclosed, summary };
 };
 
 /**
@@ -177,8 +217,7 @@ const closeMonth = async (groupId, month, year) => {
       groupId,
       periodMonth,
       periodYear,
-      // El mes extra post-vencimiento (solo servicios) nunca genera deuda ni punitorios.
-      isPostExpiry: false,
+      // El mes extra post-vencimiento lo excluye `isCloseCandidate` por rango (no por el flag).
     },
     include: {
       contract: true,
@@ -215,9 +254,17 @@ const closeMonth = async (groupId, month, year) => {
     }
   }
 
+  // Red de seguridad: los meses anteriores que quedaron sin Deuda debiendo (el cierre de su
+  // mes los salteó, o algo los hizo deber después) se pasan a Deuda ahora. Con este mes ya
+  // cerrado, `lastClosedKey` lo incluye; `beforeKey` deja afuera a este mes.
+  const previousMonthsClosed = await ensureDebtsForUnclosedMonths({
+    groupId, beforeKey: periodYear * 12 + periodMonth, today: getTodayLocalString(),
+  });
+
   return {
     periodLabel: `${monthNames[periodMonth]} ${periodYear}`,
     debtsCreated: debtsCreated.length,
+    previousMonthsClosed: previousMonthsClosed.map((d) => d.periodLabel),
     errors: errors.length > 0 ? errors : undefined,
     summary: {
       // Registros que el cierre evaluó (ya no es "impagos": el filtro por status se quitó,
@@ -230,6 +277,8 @@ const closeMonth = async (groupId, month, year) => {
 };
 
 module.exports = {
+  isMonthClosable,
+  isCloseCandidate,
   assertMonthCanClose,
   previewCloseMonth,
   closeMonth,

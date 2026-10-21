@@ -20,6 +20,8 @@ const {
 const prisma = require('../lib/prisma');
 const { bulkLoadServicesSchema } = require('../validators/monthlyRecordsValidators');
 const { MONTH_NAMES } = require('../utils/constants');
+const { getTodayLocalString } = require('../utils/dateUtils');
+const { ensureDebtsAfterRecordMutation } = require('../services/unclosedMonths');
 
 const formatSkippedMonths = (skippedMonths, year) =>
   (skippedMonths || []).map((m) => `${MONTH_NAMES[m]} ${year}`).join(', ');
@@ -492,6 +494,9 @@ const forgiveBalance = async (req, res, next) => {
 
     // Inline: la respuesta tiene que traer el mes ya saldado, no el estado previo.
     await recalculateMultipleRecords([recordId], null, true);
+    // Revertir la condonación de un mes ya cerrado lo deja debiendo SIN Deuda: pasa a Deuda
+    // ahora (ver services/unclosedMonths.js).
+    if (!forgive) await ensureDebtsAfterRecordMutation([recordId], getTodayLocalString());
     const updated = await recalculateMonthlyRecord(recordId);
     return ApiResponse.success(res, updated, forgive ? 'Saldo condonado' : 'Condonación revertida');
   } catch (error) {

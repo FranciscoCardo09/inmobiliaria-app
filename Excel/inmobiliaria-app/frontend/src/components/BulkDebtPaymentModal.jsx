@@ -13,7 +13,7 @@ import {
 import DateInput, { getLocalToday } from './ui/DateInput'
 import { useBulkDebtPreview } from '../hooks/useDebts'
 import api from '../services/api'
-import { allocateBulkPayment, summarizeAllocation, effectiveTotal as effTotal } from '../utils/bulkDebtAllocation'
+import { allocateBulkPayment, summarizeAllocation, effectiveTotal as effTotal, splitBulkSelection, bulkItemKey } from '../utils/bulkDebtAllocation'
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
@@ -40,7 +40,9 @@ function ConceptRow({ label, value, className = '', hideIfZero = false }) {
   )
 }
 
-export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = null, onPay, isPaying, onClose }) {
+// `contextRecord`: el mes desde el que se abrió (sólo para mostrar inquilino/propiedad cuando no
+// hay mes actual de cola, p. ej. al cobrar como deuda un mes terminado sin cerrar).
+export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = null, contextRecord = null, onPay, isPaying, onClose }) {
   const today = getLocalToday()
 
   const [paymentDate, setPaymentDate] = useState(today)
@@ -51,19 +53,22 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
   const [observations, setObservations] = useState('')
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false)
 
-  const debtIds = useMemo(() => debts.map((d) => d.id), [debts])
+  // Deudas por id y meses sin cerrar (pasan a Deuda al cobrar) por su MonthlyRecord.
+  const { debtIds, pendingRecordIds } = useMemo(() => splitBulkSelection(debts), [debts])
   const currentRecordId = currentRecord?.id || null
 
   // Datos comunes (mismo inquilino/contrato)
-  const tenantName = debts[0]?.contract?.tenant?.name || currentRecord?.contract?.tenant?.name
-  const propertyAddress = debts[0]?.contract?.property?.address || currentRecord?.contract?.property?.address
+  const party = currentRecord || contextRecord
+  const tenantName = debts[0]?.contract?.tenant?.name || party?.contract?.tenant?.name || party?.tenant?.name
+  const propertyAddress = debts[0]?.contract?.property?.address || party?.contract?.property?.address || party?.property?.address
 
   // Preview por mes recalculado a la fecha de pago elegida (incluye el mes actual si se pasó)
   const { data: preview, isLoading: isPreviewLoading, error: previewError } = useBulkDebtPreview(
     groupId,
     debtIds,
     paymentDate,
-    currentRecordId
+    currentRecordId,
+    pendingRecordIds
   )
 
   // Items ordenados más viejo → más nuevo, con desglose por concepto, recalculados a la
@@ -79,6 +84,8 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
       .map((d) => ({
         type: 'DEBT',
         id: d.id,
+        pendingClose: !!d.pendingClose,
+        monthlyRecordId: d.monthlyRecordId,
         periodLabel: d.periodLabel,
         totalToPay: d.liveCurrentTotal ?? d.total ?? 0,
         remainingRent: d.unpaidRentAmount ?? d.remainingDebt ?? 0,
@@ -139,6 +146,7 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
     try {
       const result = await onPay({
         debtIds, // el backend reordena, pero los enviamos igual
+        pendingRecordIds: pendingRecordIds.length > 0 ? pendingRecordIds : undefined,
         amount: parsedAmount,
         paymentDate,
         paymentMethod,
@@ -220,11 +228,16 @@ export default function BulkDebtPaymentModal({ debts, groupId, currentRecord = n
           </div>
           <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
             {allocation.rows.map((row) => (
-              <div key={row.id} className={`border rounded-lg p-3 ${row.type === 'RECORD' ? 'border-info/40 bg-info/5' : 'border-base-300'}`}>
+              <div key={bulkItemKey(row)} className={`border rounded-lg p-3 ${row.type === 'RECORD' ? 'border-info/40 bg-info/5' : 'border-base-300'}`}>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-medium text-sm">
                     {row.periodLabel}
                     {row.type === 'RECORD' && <span className="ml-1 text-[10px] text-info font-normal">(mes actual)</span>}
+                    {row.pendingClose && (
+                      <span className="ml-1 text-[10px] text-warning font-normal" title="Este mes terminó debiendo y no se había pasado a deuda: se pasa al cobrar.">
+                        (sin cerrar · pasa a deuda al cobrar)
+                      </span>
+                    )}
                   </span>
                   {row.status === 'FULL' && (
                     <span className="badge badge-success badge-sm gap-1">
